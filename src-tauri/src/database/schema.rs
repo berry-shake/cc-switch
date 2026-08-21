@@ -527,7 +527,7 @@ impl Database {
                         Self::set_user_version(conn, 15)?;
                     }
                     15 => {
-                        log::info!("迁移数据库从 v15 到 v16（重建 Codex 会话用量）");
+                        log::info!("迁移数据库从 v15 到 v16（保留 Codex 历史用量）");
                         Self::migrate_v15_to_v16(conn)?;
                         Self::set_user_version(conn, 16)?;
                     }
@@ -1540,12 +1540,14 @@ impl Database {
         Ok(())
     }
 
-    /// v15 -> v16: remove Codex session rows and cursors so startup sync can
-    /// rebuild them with fork-history alignment. Must stay connection-level:
-    /// schema migration already owns the Database connection mutex.
-    fn migrate_v15_to_v16(conn: &Connection) -> Result<(), AppError> {
-        let codex_dir = crate::codex_config::get_codex_config_dir();
-        crate::services::session_usage_codex::reset_codex_usage_on_conn(conn, &codex_dir)
+    /// v15 -> v16: preserve all historical Codex usage.
+    ///
+    /// Some session JSONL files may already have been archived or deleted, so a
+    /// schema migration must not erase details, rollups, or cursors in the hope
+    /// that startup sync can recreate them. Explicit maintenance uses the safe
+    /// staged rebuild path instead.
+    fn migrate_v15_to_v16(_conn: &Connection) -> Result<(), AppError> {
+        Ok(())
     }
 
     /// v16 -> v17: preserve session request identities after detail rollup.
@@ -3352,7 +3354,7 @@ mod tests {
     }
 
     #[test]
-    fn migrate_v15_to_v16_resets_only_codex_session_usage() -> Result<(), AppError> {
+    fn migrate_v15_to_v16_preserves_all_usage_and_cursors() -> Result<(), AppError> {
         let conn = Connection::open_in_memory()?;
         Database::create_tables_on_conn(&conn)?;
         conn.execute_batch(
@@ -3379,16 +3381,29 @@ mod tests {
 
         assert_eq!(Database::get_user_version(&conn)?, SCHEMA_VERSION);
         assert!(Database::table_exists(&conn, "session_usage_dedup")?);
-        let counts: (i64, i64, i64, i64) = conn.query_row(
+        let counts: (i64, i64, i64, i64, i64, i64) = conn.query_row(
             "SELECT
                 (SELECT COUNT(*) FROM proxy_request_logs WHERE data_source = 'codex_session'),
                 (SELECT COUNT(*) FROM proxy_request_logs WHERE data_source = 'gemini_session'),
                 (SELECT COUNT(*) FROM usage_daily_rollups WHERE provider_id = '_codex_session'),
-                (SELECT COUNT(*) FROM session_log_sync)",
+                (SELECT COUNT(*) FROM usage_daily_rollups WHERE provider_id = '_gemini_session'),
+                (SELECT COUNT(*) FROM session_log_sync
+                 WHERE file_path = '/old/sessions/rollout-old-00000000-0000-4000-8000-000000000001.jsonl'),
+                (SELECT COUNT(*) FROM session_log_sync
+                 WHERE file_path = '/gemini/tmp/session-123.json')",
             [],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                ))
+            },
         )?;
-        assert_eq!(counts, (0, 1, 0, 1));
+        assert_eq!(counts, (1, 1, 1, 1, 1, 1));
         Ok(())
     }
 
