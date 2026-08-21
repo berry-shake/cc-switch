@@ -6,7 +6,8 @@ use crate::database::{lock_conn, Database};
 use crate::error::AppError;
 use crate::proxy::usage::calculator::ModelPricing;
 use crate::services::sql_helpers::{
-    fresh_input_sql, INPUT_TOKEN_SEMANTICS_FRESH, INPUT_TOKEN_SEMANTICS_TOTAL,
+    fresh_input_sql, INPUT_TOKEN_SEMANTICS_FRESH, INPUT_TOKEN_SEMANTICS_LEGACY,
+    INPUT_TOKEN_SEMANTICS_TOTAL,
 };
 use chrono::{Local, NaiveDate, TimeZone, Timelike};
 use rusqlite::{params, Connection, OptionalExtension};
@@ -138,8 +139,8 @@ pub struct RequestLogDetail {
     pub output_tokens: u32,
     pub cache_read_tokens: u32,
     pub cache_creation_tokens: u32,
-    /// Internal storage semantics; omitted from the UI/API payload.
-    #[serde(skip)]
+    /// Stored input-token semantics, exposed so the UI can subtract cache
+    /// reads and cache writes consistently with backend aggregations.
     pub input_token_semantics: i64,
     pub input_cost_usd: String,
     pub output_cost_usd: String,
@@ -325,7 +326,13 @@ pub(crate) fn effective_usage_log_filter(log_alias: &str) -> String {
                       proxy_dedup.cache_creation_tokens = {log_alias}.cache_creation_tokens
                       OR (
                           {log_alias}.cache_creation_tokens = 0
-                          AND {data_source} IN ('codex_session', 'gemini_session', 'opencode_session')
+                          AND (
+                              (
+                                  {data_source} = 'codex_session'
+                                  AND {log_alias}.input_token_semantics = {INPUT_TOKEN_SEMANTICS_LEGACY}
+                              )
+                              OR {data_source} IN ('gemini_session', 'opencode_session')
+                          )
                       )
                   )
                   AND proxy_dedup.created_at BETWEEN
@@ -343,8 +350,8 @@ pub(crate) fn effective_usage_log_filter(log_alias: &str) -> String {
 
 /// 跨源去重指纹键。
 ///
-/// `cache_creation_tokens`：Codex/Gemini session 日志不暴露该字段，调用方传 0
-/// 表示"未知"，匹配器会放行 proxy 侧任意 cache_creation_tokens 值。
+/// `cache_creation_known` 显式区分“字段缺失”和“字段明确上报为 0”。只有
+/// 缺失时才允许匹配 proxy 侧任意 cache_creation_tokens 值。
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct DedupKey<'a> {
     pub app_type: &'a str,
@@ -353,6 +360,7 @@ pub(crate) struct DedupKey<'a> {
     pub output_tokens: u32,
     pub cache_read_tokens: u32,
     pub cache_creation_tokens: u32,
+    pub cache_creation_known: bool,
     pub created_at: i64,
 }
 
@@ -408,8 +416,9 @@ pub(crate) fn has_matching_proxy_usage_log(
     conn: &Connection,
     key: &DedupKey,
 ) -> Result<bool, AppError> {
-    let allow_missing_cache_creation =
-        matches!(key.app_type, "codex" | "gemini" | "opencode") && key.cache_creation_tokens == 0;
+    let allow_missing_cache_creation = matches!(key.app_type, "codex" | "gemini" | "opencode")
+        && key.cache_creation_tokens == 0
+        && !key.cache_creation_known;
 
     conn.prepare_cached(&MATCHING_PROXY_USAGE_LOG_SQL)
         .and_then(|mut stmt| {
@@ -478,7 +487,8 @@ static SUSPECTED_CODEX_DUPLICATE_SQL: LazyLock<String> = LazyLock::new(|| {
               AND l.input_tokens = ?3
               AND l.output_tokens = ?4
               AND l.cache_read_tokens = ?5
-              AND l.created_at BETWEEN ?6 - ?7 AND ?6 + ?7
+              AND (l.cache_creation_tokens = ?6 OR ?9 = 1)
+              AND l.created_at BETWEEN ?7 - ?8 AND ?7 + ?8
         )"
     )
 });
@@ -497,8 +507,10 @@ pub(crate) fn has_suspected_codex_session_duplicate(
                     key.input_tokens as i64,
                     key.output_tokens as i64,
                     key.cache_read_tokens as i64,
+                    key.cache_creation_tokens as i64,
                     key.created_at,
                     SESSION_PROXY_DEDUP_WINDOW_SECONDS,
+                    (!key.cache_creation_known && key.cache_creation_tokens == 0) as i64,
                 ],
                 |row| row.get::<_, bool>(0),
             )
@@ -2427,12 +2439,49 @@ mod tests {
                 output_tokens INTEGER NOT NULL,
                 cache_read_tokens INTEGER NOT NULL,
                 cache_creation_tokens INTEGER NOT NULL,
+                input_token_semantics INTEGER NOT NULL DEFAULT 0,
                 status_code INTEGER NOT NULL,
                 created_at INTEGER NOT NULL,
                 data_source TEXT
             )",
             [],
         )?;
+        Ok(())
+    }
+
+    #[test]
+    fn request_log_api_exposes_input_token_semantics() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        {
+            let conn = lock_conn!(db.conn);
+            insert_usage_log(
+                &conn,
+                "codex-total-semantics",
+                "codex",
+                "_codex_session",
+                "gpt-5.6-sol",
+                "codex_session",
+                1_700_000_000,
+                100,
+                5,
+                20,
+                10,
+                200,
+                "0.1",
+            )?;
+            conn.execute(
+                "UPDATE proxy_request_logs SET input_token_semantics = ?1
+                 WHERE request_id = 'codex-total-semantics'",
+                [INPUT_TOKEN_SEMANTICS_TOTAL],
+            )?;
+        }
+
+        let logs = db.get_request_logs(&LogFilters::default(), 0, 10)?;
+        let value = serde_json::to_value(&logs.data[0]).expect("request log should serialize");
+        assert_eq!(
+            value.get("inputTokenSemantics"),
+            Some(&serde_json::json!(INPUT_TOKEN_SEMANTICS_TOTAL))
+        );
         Ok(())
     }
 
@@ -2475,10 +2524,87 @@ mod tests {
             output_tokens: 2,
             cache_read_tokens: 1,
             cache_creation_tokens: 0,
+            cache_creation_known: false,
             created_at: 1000,
         };
         assert!(has_matching_proxy_usage_log(&conn, &key)?);
 
+        Ok(())
+    }
+
+    #[test]
+    fn test_matching_proxy_log_distinguishes_unknown_and_known_zero_cache_write(
+    ) -> Result<(), AppError> {
+        let conn = Connection::open_in_memory()?;
+        create_legacy_nullable_logs_table(&conn)?;
+        conn.execute_batch(
+            "INSERT INTO proxy_request_logs (
+                request_id, app_type, model, input_tokens, output_tokens,
+                cache_read_tokens, cache_creation_tokens, status_code, created_at, data_source
+            ) VALUES
+                ('proxy-write', 'codex', 'gpt-5.6-sol', 100, 5, 20, 7, 200, 1000, 'proxy'),
+                ('proxy-zero', 'codex', 'gpt-5.6-sol', 200, 10, 40, 0, 200, 1000, 'proxy');",
+        )?;
+
+        let unknown_zero = DedupKey {
+            app_type: "codex",
+            model: "gpt-5.6-sol",
+            input_tokens: 100,
+            output_tokens: 5,
+            cache_read_tokens: 20,
+            cache_creation_tokens: 0,
+            cache_creation_known: false,
+            created_at: 1000,
+        };
+        assert!(has_matching_proxy_usage_log(&conn, &unknown_zero)?);
+
+        let known_zero = DedupKey {
+            cache_creation_known: true,
+            ..unknown_zero
+        };
+        assert!(!has_matching_proxy_usage_log(&conn, &known_zero)?);
+
+        let known_matching_zero = DedupKey {
+            input_tokens: 200,
+            output_tokens: 10,
+            cache_read_tokens: 40,
+            cache_creation_known: true,
+            ..unknown_zero
+        };
+        assert!(has_matching_proxy_usage_log(&conn, &known_matching_zero)?);
+        Ok(())
+    }
+
+    #[test]
+    fn test_effective_filter_uses_codex_semantics_for_cache_write_wildcard() -> Result<(), AppError>
+    {
+        let conn = Connection::open_in_memory()?;
+        create_legacy_nullable_logs_table(&conn)?;
+        conn.execute_batch(
+            "INSERT INTO proxy_request_logs (
+                request_id, app_type, model, input_tokens, output_tokens,
+                cache_read_tokens, cache_creation_tokens, input_token_semantics,
+                status_code, created_at, data_source
+            ) VALUES
+                ('proxy-write', 'codex', 'gpt-5.6-sol', 100, 5, 20, 7, 1, 200, 1000, 'proxy'),
+                ('legacy-unknown', 'codex', 'gpt-5.6-sol', 100, 5, 20, 0, 0, 200, 1000, 'codex_session'),
+                ('known-zero-different', 'codex', 'gpt-5.6-sol', 100, 5, 20, 0, 1, 200, 1000, 'codex_session'),
+                ('proxy-zero', 'codex', 'gpt-5.6-sol', 200, 10, 40, 0, 1, 200, 1000, 'proxy'),
+                ('known-zero-match', 'codex', 'gpt-5.6-sol', 200, 10, 40, 0, 1, 200, 1000, 'codex_session');",
+        )?;
+
+        let filter = effective_usage_log_filter("l");
+        let sql = format!(
+            "SELECT request_id FROM proxy_request_logs l WHERE {filter} ORDER BY request_id"
+        );
+        let request_ids = conn
+            .prepare(&sql)?
+            .query_map([], |row| row.get::<_, String>(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        assert_eq!(
+            request_ids,
+            vec!["known-zero-different", "proxy-write", "proxy-zero"]
+        );
         Ok(())
     }
 
@@ -2501,6 +2627,7 @@ mod tests {
             output_tokens: 20,
             cache_read_tokens: 10,
             cache_creation_tokens: 5,
+            cache_creation_known: true,
             created_at: 1060,
         };
         assert!(has_matching_proxy_usage_log(&conn, &key)?);

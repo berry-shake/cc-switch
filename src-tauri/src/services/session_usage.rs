@@ -523,6 +523,7 @@ fn insert_session_log_entry(
         output_tokens: msg.output_tokens,
         cache_read_tokens: msg.cache_read_tokens,
         cache_creation_tokens: msg.cache_creation_tokens,
+        cache_creation_known: true,
         created_at,
     };
     if should_skip_session_insert(&conn, request_id, &dedup_key)? {

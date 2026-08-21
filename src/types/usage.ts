@@ -21,6 +21,8 @@ export interface RequestLog {
   outputTokens: number;
   cacheReadTokens: number;
   cacheCreationTokens: number;
+  /** 0 = legacy, 1 = input includes cache read/write, 2 = fresh input. */
+  inputTokenSemantics?: number;
   inputCostUsd: string;
   outputCostUsd: string;
   cacheReadCostUsd: string;
@@ -209,14 +211,9 @@ export const KNOWN_APP_TYPES: ReadonlyArray<AppType> = [
 ];
 
 /**
- * App types whose proxy uses an OpenAI-style protocol. Two consequences:
- *
- * 1. `inputTokens` already includes the cached portion (must subtract
- *    `cacheReadTokens` to get fresh-input semantics — see
- *    [getFreshInputTokens]).
- * 2. The protocol does not report cache _creation_ separately, only cache
- *    _reads_. So `cacheCreationTokens` is always 0 for these app types and
- *    the UI should label it as N/A rather than 0.
+ * App types whose stored `inputTokens` may include cached tokens. The exact
+ * normalization for each row is selected by `inputTokenSemantics`; see
+ * [getFreshInputTokens].
  *
  * Mirror of the Rust `CACHE_INCLUSIVE_APP_TYPES` whitelist.
  */
@@ -226,10 +223,18 @@ export const CACHE_INCLUSIVE_APP_TYPES: ReadonlySet<string> = new Set([
   "grokbuild",
 ]);
 
-// Pi sessions can mix Anthropic and OpenAI APIs, but the dashboard aggregates
-// only by app type. Treat cache-write coverage as partial without changing
-// Pi's fresh-input token semantics.
-const PARTIAL_CACHE_WRITE_APP_TYPES: ReadonlySet<string> = new Set(["pi"]);
+// Gemini and Grok Build do not expose cache writes. Codex can expose them in
+// TOTAL-semantics session rows, but legacy/proxy rows may not, so an app-level
+// aggregate remains partial when row semantics are unavailable. Pi sessions
+// can likewise mix protocols with different cache-write coverage.
+const CACHE_WRITE_UNAVAILABLE_APP_TYPES: ReadonlySet<string> = new Set([
+  "gemini",
+  "grokbuild",
+]);
+const PARTIAL_CACHE_WRITE_APP_TYPES: ReadonlySet<string> = new Set([
+  "codex",
+  "pi",
+]);
 
 export type CacheWriteAvailability = "ok" | "partial" | "na";
 
@@ -238,7 +243,7 @@ export function getCacheWriteAvailability(
 ): CacheWriteAvailability {
   if (appTypes.length === 0) return "ok";
   const unavailable = appTypes.filter((appType) =>
-    CACHE_INCLUSIVE_APP_TYPES.has(appType),
+    CACHE_WRITE_UNAVAILABLE_APP_TYPES.has(appType),
   ).length;
   if (unavailable === appTypes.length) return "na";
   const partial = appTypes.some((appType) =>
@@ -252,21 +257,33 @@ export interface CacheNormalizableLog {
   appType: string;
   inputTokens: number;
   cacheReadTokens: number;
+  cacheCreationTokens?: number;
+  inputTokenSemantics?: number;
 }
 
+export const INPUT_TOKEN_SEMANTICS_LEGACY = 0;
+export const INPUT_TOKEN_SEMANTICS_TOTAL = 1;
+export const INPUT_TOKEN_SEMANTICS_FRESH = 2;
+
 /**
- * For a single request log, return the input token count with cache reads
- * removed. Anthropic-style providers already report `inputTokens` without
- * cache, so they pass through unchanged.
+ * For a single request log, return its cache-normalized fresh input count.
+ * TOTAL rows remove cache reads and writes, while legacy rows retain the old
+ * read-only deduction. FRESH and non-cache-inclusive rows pass through.
  */
 export function getFreshInputTokens(log: CacheNormalizableLog): number {
-  if (
-    CACHE_INCLUSIVE_APP_TYPES.has(log.appType) &&
-    log.inputTokens >= log.cacheReadTokens
-  ) {
-    return log.inputTokens - log.cacheReadTokens;
-  }
-  return log.inputTokens;
+  if (!CACHE_INCLUSIVE_APP_TYPES.has(log.appType)) return log.inputTokens;
+
+  const semantics = log.inputTokenSemantics ?? INPUT_TOKEN_SEMANTICS_LEGACY;
+  const cachedTokens =
+    semantics === INPUT_TOKEN_SEMANTICS_TOTAL
+      ? log.cacheReadTokens + (log.cacheCreationTokens ?? 0)
+      : semantics === INPUT_TOKEN_SEMANTICS_LEGACY
+        ? log.cacheReadTokens
+        : 0;
+
+  return log.inputTokens >= cachedTokens
+    ? log.inputTokens - cachedTokens
+    : log.inputTokens;
 }
 
 export const NON_NEGATIVE_DECIMAL_REGEX = /^\d+(?:\.\d+)?$/;

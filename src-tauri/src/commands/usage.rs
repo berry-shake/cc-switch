@@ -262,17 +262,18 @@ pub async fn sync_session_usage(
     .map_err(|error| AppError::Message(format!("会话用量同步任务失败: {error}")))
 }
 
-/// Codex reset 成功后，无论重导是否导入新行或返回错误，都必须通知前端刷新。
-/// 调用方应只在 reset 成功后调用，避免把未发生的数据变更误报为重建完成。
+/// 只在 Codex 安全重建成功提交后通知前端刷新。
+/// 失败会在服务层回滚，不应把未发生的数据变更误报为重建完成。
 fn finish_codex_rebuild(
     result: Result<crate::services::session_usage::SessionSyncResult, AppError>,
 ) -> Result<crate::services::session_usage::SessionSyncResult, AppError> {
+    let result = result?;
     crate::usage_events::notify_log_recorded();
-    result
+    Ok(result)
 }
 
-/// 备份数据库后，仅重建 Codex session 用量。锁覆盖 backup → reset → import
-/// 整个序列，避免后台同步在清理和重导之间插入数据。
+/// 备份数据库后，仅安全重建当前 JSONL 可还原的 Codex session 用量。
+/// 锁覆盖 backup → stage → atomic apply 整个序列，避免后台同步穿插。
 #[tauri::command]
 pub async fn rebuild_codex_usage(
     state: State<'_, AppState>,
@@ -283,8 +284,8 @@ pub async fn rebuild_codex_usage(
         .await;
     tauri::async_runtime::spawn_blocking(move || {
         db.backup_database_file()?;
-        db.reset_codex_usage()?;
-        let result = crate::services::session_usage_codex::sync_codex_usage(&db);
+        let result =
+            crate::services::session_usage_codex::rebuild_codex_usage_preserving_history(&db);
         finish_codex_rebuild(result)
     })
     .await
@@ -304,7 +305,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn codex_rebuild_notifies_when_reimport_is_empty() {
+    fn codex_rebuild_notifies_after_successful_empty_rebuild() {
         crate::usage_events::take_test_notify_count();
 
         let result = finish_codex_rebuild(Ok(
@@ -317,7 +318,7 @@ mod tests {
     }
 
     #[test]
-    fn codex_rebuild_notifies_when_reimport_fails_after_reset() {
+    fn codex_rebuild_does_not_notify_when_rebuild_fails() {
         crate::usage_events::take_test_notify_count();
 
         let result = finish_codex_rebuild(Err(AppError::Message(
@@ -325,6 +326,6 @@ mod tests {
         )));
 
         assert!(result.is_err());
-        assert_eq!(crate::usage_events::take_test_notify_count(), 1);
+        assert_eq!(crate::usage_events::take_test_notify_count(), 0);
     }
 }

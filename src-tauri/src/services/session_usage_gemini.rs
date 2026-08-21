@@ -260,6 +260,7 @@ fn insert_gemini_session_entry(
         output_tokens,
         cache_read_tokens: tokens.cached,
         cache_creation_tokens: 0,
+        cache_creation_known: false,
         created_at,
     };
     if should_skip_session_insert(&conn, request_id, &dedup_key)? {
