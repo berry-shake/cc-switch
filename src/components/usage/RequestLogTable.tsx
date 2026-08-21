@@ -20,6 +20,7 @@ import {
 import { useRequestLogs } from "@/lib/query/usage";
 import {
   getFreshInputTokens,
+  hasKnownCacheCreationTokens,
   isUnpricedUsage,
   type LogFilters,
   type UsageRangeSelection,
@@ -42,6 +43,8 @@ interface RequestLogTableProps {
   refreshIntervalMs: number;
   onRangeChange?: (range: UsageRangeSelection) => void;
 }
+
+const REQUEST_LOG_COLUMN_COUNT = 11;
 
 export function RequestLogTable({
   range,
@@ -151,7 +154,7 @@ export function RequestLogTable({
       ) : (
         <>
           <div className="rounded-lg border border-border/50 bg-card/40 backdrop-blur-sm overflow-x-auto">
-            <Table>
+            <Table className="min-w-[1100px]">
               <TableHeader>
                 <TableRow>
                   <TableHead className="text-center whitespace-nowrap">
@@ -164,7 +167,13 @@ export function RequestLogTable({
                     {t("usage.billingModel")}
                   </TableHead>
                   <TableHead className="text-center whitespace-nowrap">
-                    {t("usage.inputTokens")}
+                    {t("usage.freshInput")}
+                  </TableHead>
+                  <TableHead className="text-center whitespace-nowrap">
+                    {t("usage.cacheReadTokens")}
+                  </TableHead>
+                  <TableHead className="text-center whitespace-nowrap">
+                    {t("usage.cacheCreationTokens")}
                   </TableHead>
                   <TableHead className="text-center whitespace-nowrap">
                     {t("usage.outputTokens")}
@@ -187,7 +196,7 @@ export function RequestLogTable({
                 {logs.length === 0 ? (
                   <TableRow>
                     <TableCell
-                      colSpan={9}
+                      colSpan={REQUEST_LOG_COLUMN_COUNT}
                       className="text-center text-muted-foreground"
                     >
                       {t("usage.noData")}
@@ -196,6 +205,7 @@ export function RequestLogTable({
                 ) : (
                   logs.map((log) => {
                     const unpriced = isUnpricedUsage(log);
+                    const cacheCreationKnown = hasKnownCacheCreationTokens(log);
                     return (
                       <TableRow key={log.requestId}>
                         <TableCell className="text-center whitespace-nowrap text-xs px-1.5">
@@ -253,18 +263,20 @@ export function RequestLogTable({
                               </div>
                             );
                           })()}
-                          {(log.cacheReadTokens > 0 ||
-                            log.cacheCreationTokens > 0) && (
-                            <div className="text-[10px] text-muted-foreground whitespace-nowrap">
-                              {[
-                                log.cacheReadTokens > 0 &&
-                                  `R${fmtInt(log.cacheReadTokens, locale)}`,
-                                log.cacheCreationTokens > 0 &&
-                                  `W${fmtInt(log.cacheCreationTokens, locale)}`,
-                              ]
-                                .filter(Boolean)
-                                .join("·")}
-                            </div>
+                        </TableCell>
+                        <TableCell className="text-center px-1.5 whitespace-nowrap tabular-nums">
+                          {fmtInt(log.cacheReadTokens, locale)}
+                        </TableCell>
+                        <TableCell className="text-center px-1.5 whitespace-nowrap tabular-nums">
+                          {cacheCreationKnown ? (
+                            fmtInt(log.cacheCreationTokens, locale)
+                          ) : (
+                            <span
+                              className="text-muted-foreground"
+                              title={t("common.unknown")}
+                            >
+                              —
+                            </span>
                           )}
                         </TableCell>
                         <TableCell className="text-center">

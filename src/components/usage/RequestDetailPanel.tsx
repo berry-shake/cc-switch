@@ -6,7 +6,11 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useRequestDetail } from "@/lib/query/usage";
-import { getFreshInputTokens, isUnpricedUsage } from "@/types/usage";
+import {
+  getFreshInputTokens,
+  hasKnownCacheCreationTokens,
+  isUnpricedUsage,
+} from "@/types/usage";
 
 interface RequestDetailPanelProps {
   requestId: string;
@@ -55,6 +59,7 @@ export function RequestDetailPanel({
 
   const freshInput = getFreshInputTokens(request);
   const isCacheInclusive = request.inputTokens !== freshInput;
+  const cacheCreationKnown = hasKnownCacheCreationTokens(request);
   const unpriced = isUnpricedUsage(request);
 
   return (
@@ -194,7 +199,16 @@ export function RequestDetailPanel({
                   {t("usage.cacheCreationTokens", "缓存写入")}
                 </dt>
                 <dd className="font-mono">
-                  {request.cacheCreationTokens.toLocaleString()}
+                  {cacheCreationKnown ? (
+                    request.cacheCreationTokens.toLocaleString()
+                  ) : (
+                    <span
+                      className="text-muted-foreground"
+                      title={t("common.unknown")}
+                    >
+                      —
+                    </span>
+                  )}
                 </dd>
               </div>
               <div className="col-span-2">
@@ -255,7 +269,16 @@ export function RequestDetailPanel({
                   </span>
                 </dt>
                 <dd className="font-mono">
-                  ${parseFloat(request.cacheCreationCostUsd).toFixed(6)}
+                  {cacheCreationKnown ? (
+                    `$${parseFloat(request.cacheCreationCostUsd).toFixed(6)}`
+                  ) : (
+                    <span
+                      className="text-muted-foreground"
+                      title={t("common.unknown")}
+                    >
+                      —
+                    </span>
+                  )}
                 </dd>
               </div>
               {/* 显示成本倍率（如果不等于1） */}

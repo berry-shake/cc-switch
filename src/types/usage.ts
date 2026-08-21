@@ -261,9 +261,29 @@ export interface CacheNormalizableLog {
   inputTokenSemantics?: number;
 }
 
+export interface CacheCreationReportableLog {
+  appType: string;
+  cacheCreationTokens?: number;
+  inputTokenSemantics?: number;
+}
+
 export const INPUT_TOKEN_SEMANTICS_LEGACY = 0;
 export const INPUT_TOKEN_SEMANTICS_TOTAL = 1;
 export const INPUT_TOKEN_SEMANTICS_FRESH = 2;
+
+/**
+ * Codex rows stored before cache-write tracking use a zero for a value the
+ * source never reported. New TOTAL-semantics rows distinguish that legacy
+ * unknown from an explicitly reported zero. Other apps keep their existing
+ * numeric display semantics.
+ */
+export function hasKnownCacheCreationTokens(
+  log: CacheCreationReportableLog,
+): boolean {
+  if ((log.cacheCreationTokens ?? 0) > 0) return true;
+  if (log.appType !== "codex") return true;
+  return log.inputTokenSemantics === INPUT_TOKEN_SEMANTICS_TOTAL;
+}
 
 /**
  * For a single request log, return its cache-normalized fresh input count.
