@@ -1,9 +1,13 @@
-import { useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 import { subscriptionApi } from "@/lib/api/subscription";
 import { usageApi } from "@/lib/api/usage";
 import { resolveCodexQuotaCycle } from "@/lib/codexCycleCapacity";
+import {
+  readCodexCycleCapacityMode,
+  type CodexCycleCapacityCalculationMode,
+} from "@/lib/codexCycleCapacityMode";
 import { loadCodexQuotaSamples } from "@/lib/codexQuotaSamples";
 import { subscriptionKeys } from "@/lib/query/subscription";
 import { usageKeys } from "@/lib/query/usage";
@@ -11,7 +15,7 @@ import { usageKeys } from "@/lib/query/usage";
 import { CodexCycleCapacityCard } from "./CodexCycleCapacityCard";
 
 const QUOTA_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
-const ANALYTICS_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
+const OFFICIAL_REFRESH_INTERVAL_MS = 60 * 60 * 1000;
 const DEFAULT_USAGE_REFRESH_INTERVAL_MS = 30 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -39,15 +43,25 @@ export function CodexCycleCapacitySection({
   refreshIntervalMs = DEFAULT_USAGE_REFRESH_INTERVAL_MS,
 }: CodexCycleCapacitySectionProps) {
   const autoRefresh = refreshIntervalMs > 0;
+  const [calculationMode, setCalculationMode] = useState(
+    readCodexCycleCapacityMode,
+  );
+  const analyticsAutoRefresh = autoRefresh && calculationMode === "analytics";
+  const quotaRefreshInterval = autoRefresh
+    ? calculationMode === "analytics"
+      ? OFFICIAL_REFRESH_INTERVAL_MS
+      : QUOTA_REFRESH_INTERVAL_MS
+    : false;
   const quotaQuery = useQuery({
     queryKey: subscriptionKeys.quota("codex"),
     queryFn: () => subscriptionApi.getQuota("codex"),
     enabled,
     retry: 1,
-    staleTime: 60_000,
-    refetchInterval: autoRefresh ? QUOTA_REFRESH_INTERVAL_MS : false,
+    staleTime:
+      calculationMode === "analytics" ? OFFICIAL_REFRESH_INTERVAL_MS : 60_000,
+    refetchInterval: quotaRefreshInterval,
     refetchIntervalInBackground: false,
-    refetchOnWindowFocus: autoRefresh,
+    refetchOnWindowFocus: autoRefresh && calculationMode === "local",
   });
 
   // react-query 会在后台重取失败时保留旧 data；必须同时要求 isSuccess，
@@ -112,11 +126,29 @@ export function CodexCycleCapacitySection({
       analyticsStartDate != null &&
       analyticsEndDate != null,
     retry: 1,
-    staleTime: 60_000,
-    refetchInterval: autoRefresh ? ANALYTICS_REFRESH_INTERVAL_MS : false,
+    staleTime: OFFICIAL_REFRESH_INTERVAL_MS,
+    refetchInterval: analyticsAutoRefresh
+      ? OFFICIAL_REFRESH_INTERVAL_MS
+      : false,
     refetchIntervalInBackground: false,
-    refetchOnWindowFocus: autoRefresh,
+    refetchOnWindowFocus: false,
   });
+
+  const refreshAnalytics = useCallback(async () => {
+    await Promise.all([
+      quotaQuery.refetch(),
+      analyticsQuery.refetch(),
+      pricingQuery.refetch(),
+    ]);
+  }, [analyticsQuery, pricingQuery, quotaQuery]);
+
+  const handleCalculationModeChange = useCallback(
+    (mode: CodexCycleCapacityCalculationMode) => {
+      setCalculationMode(mode);
+      if (mode === "analytics") void refreshAnalytics();
+    },
+    [refreshAnalytics],
+  );
 
   const hasLocalUsage = usageQuery.isSuccess;
   const hasAnalyticsUsage = analyticsQuery.isSuccess && pricingQuery.isSuccess;
@@ -129,6 +161,14 @@ export function CodexCycleCapacitySection({
       analyticsUsage={analyticsQuery.isSuccess ? analyticsQuery.data : null}
       modelPricing={pricingQuery.isSuccess ? pricingQuery.data : null}
       quotaSamples={quotaSamples}
+      calculationMode={calculationMode}
+      onCalculationModeChange={handleCalculationModeChange}
+      onRefreshAnalytics={refreshAnalytics}
+      isRefreshingAnalytics={Boolean(
+        quotaQuery.isFetching ||
+          analyticsQuery.isFetching ||
+          pricingQuery.isFetching,
+      )}
     />
   );
 }

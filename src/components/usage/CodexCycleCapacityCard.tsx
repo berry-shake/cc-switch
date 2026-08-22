@@ -6,6 +6,7 @@ import {
   CircleDollarSign,
   Gauge,
   Info,
+  RefreshCw,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -24,6 +25,13 @@ import {
   type CodexAnalyticsCycleCapacityEstimate,
 } from "@/lib/codexAnalyticsCapacity";
 import { forecastCodexCycle } from "@/lib/codexCycleForecast";
+import {
+  CODEX_CYCLE_CAPACITY_EXPANDED_STORAGE_KEY,
+  CODEX_CYCLE_CAPACITY_MODE_STORAGE_KEY,
+  persistCodexCycleCapacityMode,
+  readCodexCycleCapacityMode,
+  type CodexCycleCapacityCalculationMode,
+} from "@/lib/codexCycleCapacityMode";
 import {
   getCodexQuotaSamplesForCycle,
   type CodexQuotaSample,
@@ -53,17 +61,22 @@ export interface CodexCycleCapacityCardProps {
   modelPricing?: readonly ModelPricing[] | null;
   /** 当前本机保存的官方额度采样；仅同一周期的数据会参与近期预测。 */
   quotaSamples?: readonly CodexQuotaSample[];
+  /** 受控估算模式；未传入时卡片自行读取并保存本地偏好。 */
+  calculationMode?: CodexCycleCapacityCalculationMode;
+  onCalculationModeChange?: (mode: CodexCycleCapacityCalculationMode) => void;
+  /** 仅在官方接口模式显示的手动刷新操作。 */
+  onRefreshAnalytics?: () => void | Promise<void>;
+  isRefreshingAnalytics?: boolean;
   className?: string;
   /** 仅用于可重复测试；生产环境使用当前时间。 */
   nowMs?: number;
 }
 
-export const CODEX_CYCLE_CAPACITY_EXPANDED_STORAGE_KEY =
-  "cc-switch.usage.codexCycleCapacity.expanded";
-export const CODEX_CYCLE_CAPACITY_MODE_STORAGE_KEY =
-  "cc-switch.usage.codexCycleCapacity.calculationMode";
-
-export type CodexCycleCapacityCalculationMode = "local" | "analytics";
+export {
+  CODEX_CYCLE_CAPACITY_EXPANDED_STORAGE_KEY,
+  CODEX_CYCLE_CAPACITY_MODE_STORAGE_KEY,
+};
+export type { CodexCycleCapacityCalculationMode };
 
 function readInitialExpandedState(): boolean {
   if (typeof window === "undefined") return true;
@@ -91,31 +104,6 @@ function persistExpandedState(expanded: boolean): void {
     );
   } catch {
     // The panel remains usable even when the preference cannot be persisted.
-  }
-}
-
-function readInitialCalculationMode(): CodexCycleCapacityCalculationMode {
-  if (typeof window === "undefined") return "local";
-
-  try {
-    const stored = window.localStorage.getItem(
-      CODEX_CYCLE_CAPACITY_MODE_STORAGE_KEY,
-    );
-    if (stored === "analytics") return "analytics";
-  } catch {
-    // localStorage may be unavailable in restricted webviews; keep the default.
-  }
-
-  return "local";
-}
-
-function persistCalculationMode(mode: CodexCycleCapacityCalculationMode): void {
-  if (typeof window === "undefined") return;
-
-  try {
-    window.localStorage.setItem(CODEX_CYCLE_CAPACITY_MODE_STORAGE_KEY, mode);
-  } catch {
-    // The switch remains usable even when the preference cannot be persisted.
   }
 }
 
@@ -255,6 +243,10 @@ export function CodexCycleCapacityCard({
   analyticsUsage,
   modelPricing,
   quotaSamples = [],
+  calculationMode,
+  onCalculationModeChange,
+  onRefreshAnalytics,
+  isRefreshingAnalytics = false,
   className,
   nowMs,
 }: CodexCycleCapacityCardProps) {
@@ -269,7 +261,10 @@ export function CodexCycleCapacityCard({
     nowMs,
   );
   const [isExpanded, setIsExpanded] = useState(readInitialExpandedState);
-  const [selectedMode, setSelectedMode] = useState(readInitialCalculationMode);
+  const [uncontrolledMode, setUncontrolledMode] = useState(
+    readCodexCycleCapacityMode,
+  );
+  const selectedMode = calculationMode ?? uncontrolledMode;
   const rawId = useId();
   const gradientId = `codex-capacity-${rawId.replace(/[^a-zA-Z0-9_-]/g, "")}`;
 
@@ -351,8 +346,9 @@ export function CodexCycleCapacityCard({
   };
 
   const handleModeChange = (mode: CodexCycleCapacityCalculationMode) => {
-    setSelectedMode(mode);
-    persistCalculationMode(mode);
+    if (calculationMode == null) setUncontrolledMode(mode);
+    persistCodexCycleCapacityMode(mode);
+    onCalculationModeChange?.(mode);
   };
 
   const formatUsdEstimate = (value: number) =>
@@ -434,6 +430,31 @@ export function CodexCycleCapacityCard({
                     </Button>
                   ))}
                 </div>
+              ) : null}
+              {effectiveMode === "analytics" && onRefreshAnalytics ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8 shrink-0 gap-1.5 px-2.5 text-[11px]"
+                  disabled={isRefreshingAnalytics}
+                  aria-label={t("common.refresh", "刷新")}
+                  title={t("common.refresh", "刷新")}
+                  onClick={() => void onRefreshAnalytics()}
+                >
+                  <RefreshCw
+                    className={cn(
+                      "h-3.5 w-3.5",
+                      isRefreshingAnalytics && "animate-spin",
+                    )}
+                    aria-hidden="true"
+                  />
+                  <span>
+                    {isRefreshingAnalytics
+                      ? t("common.refreshing", "刷新中...")
+                      : t("common.refresh", "刷新")}
+                  </span>
+                </Button>
               ) : null}
               <CollapsibleTrigger asChild>
                 <Button

@@ -160,6 +160,44 @@ describe("CodexCycleCapacityCard", () => {
     expect(screen.getByText("$4.00")).toBeInTheDocument();
   });
 
+  it("shows manual refresh only in official API mode", () => {
+    const refreshAnalytics = vi.fn();
+    const { rerender } = render(
+      <CodexCycleCapacityCard
+        quota={quota}
+        usage={usage}
+        analyticsUsage={analyticsUsage}
+        modelPricing={modelPricing}
+        nowMs={queriedAt}
+        onRefreshAnalytics={refreshAnalytics}
+      />,
+    );
+
+    expect(
+      screen.queryByRole("button", { name: "刷新" }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("radio", { name: "官方接口" }));
+    fireEvent.click(screen.getByRole("button", { name: "刷新" }));
+    expect(refreshAnalytics).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <CodexCycleCapacityCard
+        quota={quota}
+        usage={usage}
+        analyticsUsage={analyticsUsage}
+        modelPricing={modelPricing}
+        nowMs={queriedAt}
+        calculationMode="analytics"
+        onRefreshAnalytics={refreshAnalytics}
+        isRefreshingAnalytics
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "刷新" })).toBeDisabled();
+    expect(screen.getByText("刷新中...")).toBeInTheDocument();
+  });
+
   it("defaults to expanded and restores the persisted collapse state", () => {
     const { unmount } = render(
       <CodexCycleCapacityCard quota={quota} usage={usage} nowMs={queriedAt} />,

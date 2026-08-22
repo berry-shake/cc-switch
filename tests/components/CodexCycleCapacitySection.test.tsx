@@ -1,7 +1,8 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { CodexCycleCapacitySection } from "@/components/usage/CodexCycleCapacitySection";
+import { CODEX_CYCLE_CAPACITY_MODE_STORAGE_KEY } from "@/lib/codexCycleCapacityMode";
 import type {
   CodexAnalyticsUsage,
   SubscriptionQuota,
@@ -14,6 +15,9 @@ const getCodexUsageAnalyticsMock = vi.hoisted(() => vi.fn());
 const getUsageSummaryMock = vi.hoisted(() => vi.fn());
 const getModelPricingMock = vi.hoisted(() => vi.fn());
 const loadQuotaSamplesMock = vi.hoisted(() => vi.fn());
+const quotaRefetchMock = vi.hoisted(() => vi.fn());
+const analyticsRefetchMock = vi.hoisted(() => vi.fn());
+const pricingRefetchMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@tanstack/react-query", () => ({
   useQuery: (options: unknown) => useQueryMock(options),
@@ -43,16 +47,29 @@ vi.mock("@/components/usage/CodexCycleCapacityCard", () => ({
     usage,
     quotaSamples,
     analyticsUsage,
+    calculationMode,
+    onCalculationModeChange,
+    onRefreshAnalytics,
   }: {
     quota: SubscriptionQuota;
     usage: UsageSummary | null;
     analyticsUsage?: CodexAnalyticsUsage | null;
     quotaSamples?: readonly unknown[];
+    calculationMode?: "local" | "analytics";
+    onCalculationModeChange?: (mode: "local" | "analytics") => void;
+    onRefreshAnalytics?: () => void | Promise<void>;
   }) => (
     <div data-testid="capacity-entry">
       {quota.tool}:{usage?.realTotalTokens ?? "no-local"}:
       {analyticsUsage?.accountMode ?? "no-analytics"}
       <span data-testid="sample-count">{quotaSamples?.length ?? 0}</span>
+      <span data-testid="calculation-mode">{calculationMode}</span>
+      <button onClick={() => onCalculationModeChange?.("analytics")}>
+        select-official
+      </button>
+      <button onClick={() => void onRefreshAnalytics?.()}>
+        refresh-official
+      </button>
     </div>
   ),
 }));
@@ -123,7 +140,14 @@ describe("CodexCycleCapacitySection", () => {
     getUsageSummaryMock.mockReset();
     getModelPricingMock.mockReset();
     loadQuotaSamplesMock.mockReset();
+    quotaRefetchMock.mockReset();
+    analyticsRefetchMock.mockReset();
+    pricingRefetchMock.mockReset();
+    quotaRefetchMock.mockResolvedValue(undefined);
+    analyticsRefetchMock.mockResolvedValue(undefined);
+    pricingRefetchMock.mockResolvedValue(undefined);
     loadQuotaSamplesMock.mockReturnValue([{ capturedAtMs: QUERIED_AT }]);
+    window.localStorage.removeItem(CODEX_CYCLE_CAPACITY_MODE_STORAGE_KEY);
   });
 
   it("shows the entry only after both current quota and cycle usage succeed", async () => {
@@ -138,7 +162,7 @@ describe("CodexCycleCapacitySection", () => {
               : { isSuccess: true, isError: false, data: usage },
     );
 
-    render(<CodexCycleCapacitySection enabled refreshIntervalMs={0} />);
+    render(<CodexCycleCapacitySection enabled />);
 
     expect(screen.getByTestId("capacity-entry")).toHaveTextContent(
       "codex:100:personal",
@@ -164,6 +188,13 @@ describe("CodexCycleCapacitySection", () => {
       .map(([options]) => options)
       .find((options) => queryKind(options) === "analytics");
     expect(analyticsOptions.enabled).toBe(true);
+    expect(analyticsOptions.refetchInterval).toBe(false);
+    expect(analyticsOptions.refetchOnWindowFocus).toBe(false);
+    const quotaOptions = useQueryMock.mock.calls
+      .map(([options]) => options)
+      .find((options) => queryKind(options) === "quota");
+    expect(quotaOptions.refetchInterval).toBe(5 * 60 * 1000);
+    expect(quotaOptions.refetchOnWindowFocus).toBe(true);
     getCodexUsageAnalyticsMock.mockResolvedValue(analyticsUsage);
     await analyticsOptions.queryFn();
     expect(getCodexUsageAnalyticsMock).toHaveBeenCalledWith(
@@ -172,6 +203,75 @@ describe("CodexCycleCapacitySection", () => {
         .slice(0, 10),
       new Date(QUERIED_AT + 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
     );
+  });
+
+  it("polls official usage hourly only while official API mode is selected", async () => {
+    window.localStorage.setItem(
+      CODEX_CYCLE_CAPACITY_MODE_STORAGE_KEY,
+      "analytics",
+    );
+    useQueryMock.mockImplementation(
+      (options: { queryKey?: readonly unknown[] }) => {
+        const kind = queryKind(options);
+        return kind === "quota"
+          ? {
+              isSuccess: true,
+              isError: false,
+              isFetching: false,
+              data: quota,
+              refetch: quotaRefetchMock,
+            }
+          : kind === "analytics"
+            ? {
+                isSuccess: true,
+                isError: false,
+                isFetching: false,
+                data: analyticsUsage,
+                refetch: analyticsRefetchMock,
+              }
+            : kind === "pricing"
+              ? {
+                  isSuccess: true,
+                  isError: false,
+                  isFetching: false,
+                  data: modelPricing,
+                  refetch: pricingRefetchMock,
+                }
+              : {
+                  isSuccess: true,
+                  isError: false,
+                  isFetching: false,
+                  data: usage,
+                  refetch: vi.fn(),
+                };
+      },
+    );
+
+    render(<CodexCycleCapacitySection enabled />);
+
+    expect(screen.getByTestId("calculation-mode")).toHaveTextContent(
+      "analytics",
+    );
+    const analyticsOptions = useQueryMock.mock.calls
+      .map(([options]) => options)
+      .find((options) => queryKind(options) === "analytics");
+    expect(analyticsOptions.refetchInterval).toBe(60 * 60 * 1000);
+    expect(analyticsOptions.staleTime).toBe(60 * 60 * 1000);
+    expect(analyticsOptions.refetchIntervalInBackground).toBe(false);
+    expect(analyticsOptions.refetchOnWindowFocus).toBe(false);
+    const quotaOptions = useQueryMock.mock.calls
+      .map(([options]) => options)
+      .find((options) => queryKind(options) === "quota");
+    expect(quotaOptions.refetchInterval).toBe(60 * 60 * 1000);
+    expect(quotaOptions.staleTime).toBe(60 * 60 * 1000);
+    expect(quotaOptions.refetchOnWindowFocus).toBe(false);
+
+    fireEvent.click(screen.getByText("refresh-official"));
+    await waitFor(() => {
+      expect(quotaRefetchMock).toHaveBeenCalledTimes(1);
+      expect(analyticsRefetchMock).toHaveBeenCalledTimes(1);
+      expect(pricingRefetchMock).toHaveBeenCalledTimes(1);
+    });
   });
 
   it("keeps the same card available when only web analytics succeeds", () => {
