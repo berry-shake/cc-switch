@@ -491,7 +491,8 @@ type CodexCredentials = (
 /// 1. macOS Keychain (service: "Codex Auth")
 /// 2. 凭据文件 ~/.codex/auth.json
 ///
-/// 仅 auth_mode == "chatgpt" (OAuth) 时有效，API key 模式不支持用量查询。
+/// 显式的非 ChatGPT auth_mode 不支持用量查询。新版 Codex 凭据可能省略
+/// auth_mode；只要仍包含完整 OAuth token，就继续按 OAuth 凭据处理。
 fn read_codex_credentials() -> CodexCredentials {
     #[cfg(target_os = "macos")]
     {
@@ -561,8 +562,14 @@ fn parse_codex_credentials_json(content: &str) -> CodexCredentials {
         }
     };
 
-    // 仅 OAuth 模式有用量数据
-    if auth.auth_mode.as_deref() != Some("chatgpt") {
+    // 旧版凭据用 auth_mode="chatgpt" 标识 OAuth；新版 Codex 凭据会省略
+    // auth_mode，但仍保存 tokens。只拒绝明确声明的非 OAuth 模式，缺失字段
+    // 则交给下面的 token 完整性检查判断，兼容两种格式。
+    if auth
+        .auth_mode
+        .as_deref()
+        .is_some_and(|mode| mode != "chatgpt")
+    {
         return (
             None,
             None,
@@ -1376,6 +1383,63 @@ fn now_millis() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn codex_credentials_accept_legacy_chatgpt_auth_mode() {
+        let (token, account_id, status, message) = parse_codex_credentials_json(
+            r#"{
+                "auth_mode": "chatgpt",
+                "tokens": {
+                    "access_token": "legacy-token",
+                    "account_id": "legacy-account"
+                }
+            }"#,
+        );
+
+        assert_eq!(token.as_deref(), Some("legacy-token"));
+        assert_eq!(account_id.as_deref(), Some("legacy-account"));
+        assert!(matches!(status, CredentialStatus::Valid));
+        assert_eq!(message, None);
+    }
+
+    #[test]
+    fn codex_credentials_accept_oauth_tokens_when_auth_mode_is_omitted() {
+        let (token, account_id, status, message) = parse_codex_credentials_json(
+            r#"{
+                "type": "codex",
+                "OPENAI_API_KEY": null,
+                "tokens": {
+                    "access_token": "current-token",
+                    "account_id": "current-account",
+                    "refresh_token": "refresh-token",
+                    "id_token": "id-token"
+                }
+            }"#,
+        );
+
+        assert_eq!(token.as_deref(), Some("current-token"));
+        assert_eq!(account_id.as_deref(), Some("current-account"));
+        assert!(matches!(status, CredentialStatus::Valid));
+        assert_eq!(message, None);
+    }
+
+    #[test]
+    fn codex_credentials_reject_explicit_non_oauth_mode_even_with_tokens() {
+        let (token, account_id, status, message) = parse_codex_credentials_json(
+            r#"{
+                "auth_mode": "apikey",
+                "tokens": {
+                    "access_token": "must-not-be-used",
+                    "account_id": "account"
+                }
+            }"#,
+        );
+
+        assert_eq!(token, None);
+        assert_eq!(account_id, None);
+        assert!(matches!(status, CredentialStatus::NotFound));
+        assert_eq!(message.as_deref(), Some("Codex not using OAuth mode"));
+    }
 
     #[test]
     fn window_seconds_map_to_expected_tier_names() {
