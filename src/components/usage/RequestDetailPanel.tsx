@@ -8,7 +8,7 @@ import {
 import { useRequestDetail } from "@/lib/query/usage";
 import {
   getFreshInputTokens,
-  hasKnownCacheCreationTokens,
+  hasKnownCacheWriteTokens,
   isUnpricedUsage,
 } from "@/types/usage";
 
@@ -59,7 +59,7 @@ export function RequestDetailPanel({
 
   const freshInput = getFreshInputTokens(request);
   const isCacheInclusive = request.inputTokens !== freshInput;
-  const cacheCreationKnown = hasKnownCacheCreationTokens(request);
+  const cacheWriteKnown = hasKnownCacheWriteTokens(request);
   const unpriced = isUnpricedUsage(request);
 
   return (
@@ -166,7 +166,7 @@ export function RequestDetailPanel({
             <dl className="grid grid-cols-2 gap-3 text-sm">
               <div>
                 <dt className="text-muted-foreground">
-                  {t("usage.inputTokens", "输入 Tokens")}
+                  {t("usage.inputTokens", "输入")}
                 </dt>
                 <dd className="font-mono">
                   {freshInput.toLocaleString()}
@@ -180,10 +180,19 @@ export function RequestDetailPanel({
               </div>
               <div>
                 <dt className="text-muted-foreground">
-                  {t("usage.outputTokens", "输出 Tokens")}
+                  {t("usage.cacheCreationTokens", "缓存写入")}
                 </dt>
                 <dd className="font-mono">
-                  {request.outputTokens.toLocaleString()}
+                  {cacheWriteKnown ? (
+                    request.cacheCreationTokens.toLocaleString()
+                  ) : (
+                    <span
+                      className="text-muted-foreground"
+                      title={t("common.unknown")}
+                    >
+                      —
+                    </span>
+                  )}
                 </dd>
               </div>
               <div>
@@ -196,19 +205,10 @@ export function RequestDetailPanel({
               </div>
               <div>
                 <dt className="text-muted-foreground">
-                  {t("usage.cacheCreationTokens", "缓存写入")}
+                  {t("usage.outputTokens", "输出")}
                 </dt>
                 <dd className="font-mono">
-                  {cacheCreationKnown ? (
-                    request.cacheCreationTokens.toLocaleString()
-                  ) : (
-                    <span
-                      className="text-muted-foreground"
-                      title={t("common.unknown")}
-                    >
-                      —
-                    </span>
-                  )}
+                  {request.outputTokens.toLocaleString()}
                 </dd>
               </div>
               <div className="col-span-2">
@@ -241,13 +241,22 @@ export function RequestDetailPanel({
               </div>
               <div>
                 <dt className="text-muted-foreground">
-                  {t("usage.outputCost", "输出成本")}
+                  {t("usage.cacheCreationCost", "缓存写入成本")}
                   <span className="ml-1 text-xs">
                     ({t("usage.baseCost", "基础")})
                   </span>
                 </dt>
                 <dd className="font-mono">
-                  ${parseFloat(request.outputCostUsd).toFixed(6)}
+                  {cacheWriteKnown ? (
+                    `$${parseFloat(request.cacheCreationCostUsd).toFixed(6)}`
+                  ) : (
+                    <span
+                      className="text-muted-foreground"
+                      title={t("common.unknown")}
+                    >
+                      —
+                    </span>
+                  )}
                 </dd>
               </div>
               <div>
@@ -263,22 +272,13 @@ export function RequestDetailPanel({
               </div>
               <div>
                 <dt className="text-muted-foreground">
-                  {t("usage.cacheCreationCost", "缓存写入成本")}
+                  {t("usage.outputCost", "输出成本")}
                   <span className="ml-1 text-xs">
                     ({t("usage.baseCost", "基础")})
                   </span>
                 </dt>
                 <dd className="font-mono">
-                  {cacheCreationKnown ? (
-                    `$${parseFloat(request.cacheCreationCostUsd).toFixed(6)}`
-                  ) : (
-                    <span
-                      className="text-muted-foreground"
-                      title={t("common.unknown")}
-                    >
-                      —
-                    </span>
-                  )}
+                  ${parseFloat(request.outputCostUsd).toFixed(6)}
                 </dd>
               </div>
               {/* 显示成本倍率（如果不等于1） */}

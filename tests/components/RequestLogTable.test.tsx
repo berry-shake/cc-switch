@@ -234,7 +234,7 @@ describe("RequestLogTable", () => {
 
     const headers = screen.getAllByRole("columnheader");
     expect(headers).toHaveLength(11);
-    expect(headers[3]).toHaveTextContent("usage.freshInput");
+    expect(headers[3]).toHaveTextContent("usage.inputTokens");
     expect(headers[4]).toHaveTextContent("usage.cacheCreationTokens");
     expect(headers[5]).toHaveTextContent("usage.cacheReadTokens");
     expect(headers[6]).toHaveTextContent("usage.outputTokens");

@@ -149,12 +149,15 @@ export function ModelsDevPickerDialog({
   const priceColumns = (entry: ModelsDevEntry) =>
     [
       { label: t("usage.inputCost", "输入成本"), value: entry.input },
-      { label: t("usage.outputCost", "输出成本"), value: entry.output },
-      { label: t("usage.cacheReadCost", "缓存命中"), value: entry.cacheRead },
       {
-        label: t("usage.cacheWriteCost", "缓存创建"),
+        label: t("usage.cacheWriteCost", "缓存写入成本"),
         value: entry.cacheWrite,
       },
+      {
+        label: t("usage.cacheReadCost", "缓存读取成本"),
+        value: entry.cacheRead,
+      },
+      { label: t("usage.outputCost", "输出成本"), value: entry.output },
     ] as const;
 
   return (

@@ -376,13 +376,13 @@ export function PricingConfigPanel() {
                       {t("usage.inputCost")}
                     </TableHead>
                     <TableHead className="text-right">
-                      {t("usage.outputCost")}
+                      {t("usage.cacheWriteCost")}
                     </TableHead>
                     <TableHead className="text-right">
                       {t("usage.cacheReadCost")}
                     </TableHead>
                     <TableHead className="text-right">
-                      {t("usage.cacheWriteCost")}
+                      {t("usage.outputCost")}
                     </TableHead>
                     <TableHead className="text-right">
                       {t("common.actions")}
@@ -400,13 +400,13 @@ export function PricingConfigPanel() {
                         ${model.inputCostPerMillion}
                       </TableCell>
                       <TableCell className="text-right font-mono text-sm">
-                        ${model.outputCostPerMillion}
+                        ${model.cacheCreationCostPerMillion}
                       </TableCell>
                       <TableCell className="text-right font-mono text-sm">
                         ${model.cacheReadCostPerMillion}
                       </TableCell>
                       <TableCell className="text-right font-mono text-sm">
-                        ${model.cacheCreationCostPerMillion}
+                        ${model.outputCostPerMillion}
                       </TableCell>
                       <TableCell className="text-right">
                         <div className="flex justify-end gap-1">

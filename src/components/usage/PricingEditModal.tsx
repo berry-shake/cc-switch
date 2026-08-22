@@ -187,17 +187,20 @@ export function PricingEditModal({
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="outputCost">
-            {t("usage.outputCostPerMillion", "输出成本 (每百万 tokens, USD)")}
+          <Label htmlFor="cacheCreationCost">
+            {t(
+              "usage.cacheCreationCostPerMillion",
+              "缓存写入成本 (每百万 tokens, USD)",
+            )}
           </Label>
           <Input
-            id="outputCost"
+            id="cacheCreationCost"
             type="number"
             step={PRICE_INPUT_STEP}
             min="0"
-            value={formData.outputCost}
+            value={formData.cacheCreationCost}
             onChange={(e) =>
-              setFormData({ ...formData, outputCost: e.target.value })
+              setFormData({ ...formData, cacheCreationCost: e.target.value })
             }
             required
           />
@@ -224,20 +227,17 @@ export function PricingEditModal({
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="cacheCreationCost">
-            {t(
-              "usage.cacheCreationCostPerMillion",
-              "缓存写入成本 (每百万 tokens, USD)",
-            )}
+          <Label htmlFor="outputCost">
+            {t("usage.outputCostPerMillion", "输出成本 (每百万 tokens, USD)")}
           </Label>
           <Input
-            id="cacheCreationCost"
+            id="outputCost"
             type="number"
             step={PRICE_INPUT_STEP}
             min="0"
-            value={formData.cacheCreationCost}
+            value={formData.outputCost}
             onChange={(e) =>
-              setFormData({ ...formData, cacheCreationCost: e.target.value })
+              setFormData({ ...formData, outputCost: e.target.value })
             }
             required
           />

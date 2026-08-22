@@ -350,7 +350,7 @@ pub(crate) fn effective_usage_log_filter(log_alias: &str) -> String {
 
 /// 跨源去重指纹键。
 ///
-/// `cache_creation_known` 显式区分“字段缺失”和“字段明确上报为 0”。只有
+/// `cache_write_known` 显式区分“字段缺失”和“字段明确上报为 0”。只有
 /// 缺失时才允许匹配 proxy 侧任意 cache_creation_tokens 值。
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct DedupKey<'a> {
@@ -360,7 +360,7 @@ pub(crate) struct DedupKey<'a> {
     pub output_tokens: u32,
     pub cache_read_tokens: u32,
     pub cache_creation_tokens: u32,
-    pub cache_creation_known: bool,
+    pub cache_write_known: bool,
     pub created_at: i64,
 }
 
@@ -418,7 +418,7 @@ pub(crate) fn has_matching_proxy_usage_log(
 ) -> Result<bool, AppError> {
     let allow_missing_cache_creation = matches!(key.app_type, "codex" | "gemini" | "opencode")
         && key.cache_creation_tokens == 0
-        && !key.cache_creation_known;
+        && !key.cache_write_known;
 
     conn.prepare_cached(&MATCHING_PROXY_USAGE_LOG_SQL)
         .and_then(|mut stmt| {
@@ -510,7 +510,7 @@ pub(crate) fn has_suspected_codex_session_duplicate(
                     key.cache_creation_tokens as i64,
                     key.created_at,
                     SESSION_PROXY_DEDUP_WINDOW_SECONDS,
-                    (!key.cache_creation_known && key.cache_creation_tokens == 0) as i64,
+                    (!key.cache_write_known && key.cache_creation_tokens == 0) as i64,
                 ],
                 |row| row.get::<_, bool>(0),
             )
@@ -2524,7 +2524,7 @@ mod tests {
             output_tokens: 2,
             cache_read_tokens: 1,
             cache_creation_tokens: 0,
-            cache_creation_known: false,
+            cache_write_known: false,
             created_at: 1000,
         };
         assert!(has_matching_proxy_usage_log(&conn, &key)?);
@@ -2553,13 +2553,13 @@ mod tests {
             output_tokens: 5,
             cache_read_tokens: 20,
             cache_creation_tokens: 0,
-            cache_creation_known: false,
+            cache_write_known: false,
             created_at: 1000,
         };
         assert!(has_matching_proxy_usage_log(&conn, &unknown_zero)?);
 
         let known_zero = DedupKey {
-            cache_creation_known: true,
+            cache_write_known: true,
             ..unknown_zero
         };
         assert!(!has_matching_proxy_usage_log(&conn, &known_zero)?);
@@ -2568,7 +2568,7 @@ mod tests {
             input_tokens: 200,
             output_tokens: 10,
             cache_read_tokens: 40,
-            cache_creation_known: true,
+            cache_write_known: true,
             ..unknown_zero
         };
         assert!(has_matching_proxy_usage_log(&conn, &known_matching_zero)?);
@@ -2627,7 +2627,7 @@ mod tests {
             output_tokens: 20,
             cache_read_tokens: 10,
             cache_creation_tokens: 5,
-            cache_creation_known: true,
+            cache_write_known: true,
             created_at: 1060,
         };
         assert!(has_matching_proxy_usage_log(&conn, &key)?);

@@ -2,30 +2,30 @@ import { describe, expect, it } from "vitest";
 import {
   getCacheWriteAvailability,
   getFreshInputTokens,
-  hasKnownCacheCreationTokens,
+  hasKnownCacheWriteTokens,
   INPUT_TOKEN_SEMANTICS_FRESH,
   INPUT_TOKEN_SEMANTICS_LEGACY,
   INPUT_TOKEN_SEMANTICS_TOTAL,
 } from "@/types/usage";
 
-describe("hasKnownCacheCreationTokens", () => {
+describe("hasKnownCacheWriteTokens", () => {
   it("distinguishes explicit Codex session zero from a legacy unknown", () => {
     expect(
-      hasKnownCacheCreationTokens({
+      hasKnownCacheWriteTokens({
         appType: "codex",
         cacheCreationTokens: 0,
         inputTokenSemantics: INPUT_TOKEN_SEMANTICS_TOTAL,
       }),
     ).toBe(true);
     expect(
-      hasKnownCacheCreationTokens({
+      hasKnownCacheWriteTokens({
         appType: "codex",
         cacheCreationTokens: 0,
         inputTokenSemantics: INPUT_TOKEN_SEMANTICS_LEGACY,
       }),
     ).toBe(false);
     expect(
-      hasKnownCacheCreationTokens({
+      hasKnownCacheWriteTokens({
         appType: "codex",
         cacheCreationTokens: 0,
       }),
@@ -34,21 +34,21 @@ describe("hasKnownCacheCreationTokens", () => {
 
   it("keeps reported values and non-Codex apps numeric", () => {
     expect(
-      hasKnownCacheCreationTokens({
+      hasKnownCacheWriteTokens({
         appType: "codex",
         cacheCreationTokens: 12,
         inputTokenSemantics: INPUT_TOKEN_SEMANTICS_LEGACY,
       }),
     ).toBe(true);
     expect(
-      hasKnownCacheCreationTokens({
+      hasKnownCacheWriteTokens({
         appType: "codex",
         cacheCreationTokens: 0,
         inputTokenSemantics: INPUT_TOKEN_SEMANTICS_LEGACY,
       }),
     ).toBe(false);
     expect(
-      hasKnownCacheCreationTokens({
+      hasKnownCacheWriteTokens({
         appType: "claude",
         cacheCreationTokens: 0,
         inputTokenSemantics: INPUT_TOKEN_SEMANTICS_LEGACY,

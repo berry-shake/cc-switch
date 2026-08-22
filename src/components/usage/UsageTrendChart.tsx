@@ -49,10 +49,98 @@ export interface UsageTrendChartPoint {
   tooltipLabel: string;
   hour: number;
   inputTokens: number;
-  outputTokens: number;
   cacheCreationTokens: number;
   cacheReadTokens: number;
+  outputTokens: number;
   cost: number | null;
+}
+
+type UsageTrendSeriesKey =
+  | "inputTokens"
+  | "cacheCreationTokens"
+  | "cacheReadTokens"
+  | "outputTokens"
+  | "cost";
+
+interface UsageTrendSeriesDefinition {
+  dataKey: UsageTrendSeriesKey;
+  nameKey: string;
+  fallback: string;
+  yAxisId: "tokens" | "cost";
+  stroke: string;
+  fill: string;
+  fillOpacity?: number;
+  strokeDasharray?: string;
+}
+
+/** Shared order for chart layers, legend entries, and tooltip rows. */
+export const USAGE_TREND_SERIES: readonly UsageTrendSeriesDefinition[] = [
+  {
+    dataKey: "inputTokens",
+    nameKey: "usage.inputTokens",
+    fallback: "输入",
+    yAxisId: "tokens",
+    stroke: "#3b82f6",
+    fill: "url(#colorInput)",
+    fillOpacity: 1,
+  },
+  {
+    dataKey: "cacheCreationTokens",
+    nameKey: "usage.cacheCreationTokens",
+    fallback: "缓存写入",
+    yAxisId: "tokens",
+    stroke: "#f97316",
+    fill: "url(#colorCacheCreation)",
+    fillOpacity: 1,
+  },
+  {
+    dataKey: "cacheReadTokens",
+    nameKey: "usage.cacheReadTokens",
+    fallback: "缓存读取",
+    yAxisId: "tokens",
+    stroke: "#a855f7",
+    fill: "url(#colorCacheRead)",
+    fillOpacity: 1,
+  },
+  {
+    dataKey: "outputTokens",
+    nameKey: "usage.outputTokens",
+    fallback: "输出",
+    yAxisId: "tokens",
+    stroke: "#22c55e",
+    fill: "url(#colorOutput)",
+    fillOpacity: 1,
+  },
+  {
+    dataKey: "cost",
+    nameKey: "usage.cost",
+    fallback: "成本",
+    yAxisId: "cost",
+    stroke: "#f43f5e",
+    fill: "none",
+    strokeDasharray: "4 4",
+  },
+];
+
+const usageTrendSeriesOrder = new Map(
+  USAGE_TREND_SERIES.map((series, index) => [series.dataKey, index]),
+);
+
+/** Keep tooltip rows canonical even if Recharts changes payload order. */
+export function orderUsageTrendTooltipPayload<T extends { dataKey?: unknown }>(
+  payload: readonly T[],
+): T[] {
+  return payload
+    .map((entry, index) => ({
+      entry,
+      index,
+      order:
+        usageTrendSeriesOrder.get(
+          String(entry.dataKey) as UsageTrendSeriesKey,
+        ) ?? USAGE_TREND_SERIES.length,
+    }))
+    .sort((a, b) => a.order - b.order || a.index - b.index)
+    .map(({ entry }) => entry);
 }
 
 /** Build chart rows from backend trend stats. Exported for unit tests. */
@@ -117,9 +205,9 @@ export function buildUsageTrendChartData(
         tooltipLabel,
         hour: pointDate.getHours(),
         inputTokens: stat.totalInputTokens,
-        outputTokens: stat.totalOutputTokens,
         cacheCreationTokens: stat.totalCacheCreationTokens,
         cacheReadTokens: stat.totalCacheReadTokens,
+        outputTokens: stat.totalOutputTokens,
         cost: cost ?? null,
       };
     }) || []
@@ -181,12 +269,13 @@ export function UsageTrendChart({
     if (active && payload && payload.length) {
       const point = payload[0]?.payload as UsageTrendChartPoint | undefined;
       const heading = point?.tooltipLabel ?? point?.label ?? "";
+      const orderedPayload = orderUsageTrendTooltipPayload(payload);
       return (
         <div className="rounded-lg border bg-background/95 p-3 shadow-lg backdrop-blur-md">
           <p className="mb-2 font-medium">{heading}</p>
-          {payload.map((entry: any, index: number) => (
+          {orderedPayload.map((entry: any, index: number) => (
             <div
-              key={index}
+              key={`${String(entry.dataKey)}-${index}`}
               className="flex items-center gap-2 text-sm"
               style={{ color: entry.color }}
             >
@@ -281,56 +370,20 @@ export function UsageTrendChart({
             />
             <Tooltip content={<CustomTooltip />} />
             <Legend />
-            <Area
-              yAxisId="tokens"
-              type="monotone"
-              dataKey="inputTokens"
-              name={t("usage.inputTokens", "输入 Tokens")}
-              stroke="#3b82f6"
-              fillOpacity={1}
-              fill="url(#colorInput)"
-              strokeWidth={2}
-            />
-            <Area
-              yAxisId="tokens"
-              type="monotone"
-              dataKey="outputTokens"
-              name={t("usage.outputTokens", "输出 Tokens")}
-              stroke="#22c55e"
-              fillOpacity={1}
-              fill="url(#colorOutput)"
-              strokeWidth={2}
-            />
-            <Area
-              yAxisId="tokens"
-              type="monotone"
-              dataKey="cacheCreationTokens"
-              name={t("usage.cacheCreationTokens", "缓存创建")}
-              stroke="#f97316"
-              fillOpacity={1}
-              fill="url(#colorCacheCreation)"
-              strokeWidth={2}
-            />
-            <Area
-              yAxisId="tokens"
-              type="monotone"
-              dataKey="cacheReadTokens"
-              name={t("usage.cacheReadTokens", "缓存命中")}
-              stroke="#a855f7"
-              fillOpacity={1}
-              fill="url(#colorCacheRead)"
-              strokeWidth={2}
-            />
-            <Area
-              yAxisId="cost"
-              type="monotone"
-              dataKey="cost"
-              name={t("usage.cost", "成本")}
-              stroke="#f43f5e"
-              fill="none"
-              strokeWidth={2}
-              strokeDasharray="4 4"
-            />
+            {USAGE_TREND_SERIES.map((series) => (
+              <Area
+                key={series.dataKey}
+                yAxisId={series.yAxisId}
+                type="monotone"
+                dataKey={series.dataKey}
+                name={t(series.nameKey, series.fallback)}
+                stroke={series.stroke}
+                fill={series.fill}
+                fillOpacity={series.fillOpacity}
+                strokeWidth={2}
+                strokeDasharray={series.strokeDasharray}
+              />
+            ))}
           </AreaChart>
         </ResponsiveContainer>
       </div>

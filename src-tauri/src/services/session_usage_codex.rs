@@ -275,12 +275,12 @@ struct StagedCodexRow {
     input_tokens: u32,
     output_tokens: u32,
     cache_read_tokens: u32,
-    cache_creation_tokens: u32,
+    cache_write_tokens: u32,
     input_token_semantics: i64,
     input_cost_usd: String,
     output_cost_usd: String,
     cache_read_cost_usd: String,
-    cache_creation_cost_usd: String,
+    cache_write_cost_usd: String,
     total_cost_usd: String,
     session_id: String,
     cost_multiplier: String,
@@ -999,14 +999,14 @@ fn reprice_staged_codex_rows(
             input_tokens: row.input_tokens,
             output_tokens: row.output_tokens,
             cache_read_tokens: row.cache_read_tokens,
-            cache_creation_tokens: row.cache_creation_tokens,
+            cache_creation_tokens: row.cache_write_tokens,
             model: Some(row.model.clone()),
             message_id: None,
         };
         let pricing = pricing_cache
             .entry(row.model.clone())
             .or_insert_with(|| find_codex_pricing(conn, &row.model));
-        let (input, output, cache_read, cache_creation, total) = match pricing {
+        let (input, output, cache_read, cache_write_cost, total) = match pricing {
             Some(pricing) => {
                 let cost = CostCalculator::calculate_for_app("codex", &usage, pricing, multiplier);
                 (
@@ -1028,7 +1028,7 @@ fn reprice_staged_codex_rows(
         row.input_cost_usd = input;
         row.output_cost_usd = output;
         row.cache_read_cost_usd = cache_read;
-        row.cache_creation_cost_usd = cache_creation;
+        row.cache_write_cost_usd = cache_write_cost;
         row.total_cost_usd = total;
     }
     Ok(())
@@ -1058,12 +1058,12 @@ fn load_staged_codex_rows(staging: &Database) -> Result<Vec<StagedCodexRow>, App
                 input_tokens: row.get::<_, i64>(4)? as u32,
                 output_tokens: row.get::<_, i64>(5)? as u32,
                 cache_read_tokens: row.get::<_, i64>(6)? as u32,
-                cache_creation_tokens: row.get::<_, i64>(7)? as u32,
+                cache_write_tokens: row.get::<_, i64>(7)? as u32,
                 input_token_semantics: row.get(8)?,
                 input_cost_usd: row.get(9)?,
                 output_cost_usd: row.get(10)?,
                 cache_read_cost_usd: row.get(11)?,
-                cache_creation_cost_usd: row.get(12)?,
+                cache_write_cost_usd: row.get(12)?,
                 total_cost_usd: row.get(13)?,
                 session_id: row.get(14)?,
                 cost_multiplier: row.get(15)?,
@@ -1303,9 +1303,9 @@ fn apply_staged_codex_usage(
                 input_tokens: row.input_tokens,
                 output_tokens: row.output_tokens,
                 cache_read_tokens: row.cache_read_tokens,
-                cache_creation_tokens: row.cache_creation_tokens,
-                cache_creation_known: row.input_token_semantics == INPUT_TOKEN_SEMANTICS_TOTAL
-                    || row.cache_creation_tokens > 0,
+                cache_creation_tokens: row.cache_write_tokens,
+                cache_write_known: row.input_token_semantics == INPUT_TOKEN_SEMANTICS_TOTAL
+                    || row.cache_write_tokens > 0,
                 created_at: effective_created_at,
             };
             if should_skip_session_insert(&transaction, &row.request_id, &dedup_key)? {
@@ -1337,12 +1337,12 @@ fn apply_staged_codex_usage(
                         row.input_tokens,
                         row.output_tokens,
                         row.cache_read_tokens,
-                        row.cache_creation_tokens,
+                        row.cache_write_tokens,
                         row.input_token_semantics,
                         row.input_cost_usd,
                         row.output_cost_usd,
                         row.cache_read_cost_usd,
-                        row.cache_creation_cost_usd,
+                        row.cache_write_cost_usd,
                         row.total_cost_usd,
                         row.session_id,
                         row.cost_multiplier,
@@ -2244,7 +2244,7 @@ fn insert_codex_session_entry_on_conn(
         output_tokens: delta.output,
         cache_read_tokens: delta.cached_input,
         cache_creation_tokens: delta.cache_write_input,
-        cache_creation_known: delta.cache_write_reported,
+        cache_write_known: delta.cache_write_reported,
         created_at,
     };
     if should_skip_session_insert(conn, request_id, &dedup_key)? {
@@ -2559,12 +2559,12 @@ mod tests {
             input_tokens,
             output_tokens: 2,
             cache_read_tokens: 3,
-            cache_creation_tokens: 4,
+            cache_write_tokens: 4,
             input_token_semantics: INPUT_TOKEN_SEMANTICS_TOTAL,
             input_cost_usd: total_cost_usd.to_string(),
             output_cost_usd: "0".to_string(),
             cache_read_cost_usd: "0".to_string(),
-            cache_creation_cost_usd: "0".to_string(),
+            cache_write_cost_usd: "0".to_string(),
             total_cost_usd: total_cost_usd.to_string(),
             session_id: thread_id.to_string(),
             cost_multiplier: "2.5".to_string(),

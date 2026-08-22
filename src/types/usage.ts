@@ -261,7 +261,7 @@ export interface CacheNormalizableLog {
   inputTokenSemantics?: number;
 }
 
-export interface CacheCreationReportableLog {
+export interface CacheWriteReportableLog {
   appType: string;
   cacheCreationTokens?: number;
   inputTokenSemantics?: number;
@@ -277,8 +277,8 @@ export const INPUT_TOKEN_SEMANTICS_FRESH = 2;
  * unknown from an explicitly reported zero. Other apps keep their existing
  * numeric display semantics.
  */
-export function hasKnownCacheCreationTokens(
-  log: CacheCreationReportableLog,
+export function hasKnownCacheWriteTokens(
+  log: CacheWriteReportableLog,
 ): boolean {
   if ((log.cacheCreationTokens ?? 0) > 0) return true;
   if (log.appType !== "codex") return true;

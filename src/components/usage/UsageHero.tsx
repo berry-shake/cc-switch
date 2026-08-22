@@ -200,7 +200,7 @@ export function UsageHero({
       cacheWriteState === "na"
         ? t(
             "usage.cacheWriteNotReported",
-            "OpenAI 协议不区分缓存写入，仅上报缓存命中",
+            "OpenAI 协议不区分缓存写入，仅上报缓存读取",
           )
         : cacheWriteState === "partial"
           ? t(
@@ -297,19 +297,13 @@ export function UsageHero({
             <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
               <MiniStat
                 icon={<ArrowDownToLine className="h-3.5 w-3.5" />}
-                label={t("usage.freshInput", "新增输入")}
+                label={t("usage.inputTokens", "输入")}
                 value={formatTokensShort(input, lang)}
                 accent="text-blue-500"
               />
               <MiniStat
-                icon={<ArrowUpFromLine className="h-3.5 w-3.5" />}
-                label={t("usage.output")}
-                value={formatTokensShort(output, lang)}
-                accent="text-purple-500"
-              />
-              <MiniStat
                 icon={<Database className="h-3.5 w-3.5" />}
-                label={t("usage.cacheWrite", "缓存写入")}
+                label={t("usage.cacheCreationTokens", "缓存写入")}
                 value={cacheWriteDisplay.value}
                 accent="text-amber-500"
                 muted={cacheWriteDisplay.muted}
@@ -317,9 +311,15 @@ export function UsageHero({
               />
               <MiniStat
                 icon={<Sparkles className="h-3.5 w-3.5" />}
-                label={t("usage.cacheRead", "缓存命中")}
+                label={t("usage.cacheReadTokens", "缓存读取")}
                 value={formatTokensShort(cacheRead, lang)}
                 accent="text-emerald-500"
+              />
+              <MiniStat
+                icon={<ArrowUpFromLine className="h-3.5 w-3.5" />}
+                label={t("usage.outputTokens", "输出")}
+                value={formatTokensShort(output, lang)}
+                accent="text-purple-500"
               />
 
               <div className="col-span-2 lg:col-span-1 flex flex-col justify-center rounded-xl border border-border/40 bg-background/40 p-3 shadow-sm">

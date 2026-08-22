@@ -200,9 +200,9 @@ function AutoSyncDialog({ state, onClose, onSaved }: AutoSyncDialogProps) {
   const priceColumns = (entry: ModelsDevEntry) =>
     [
       { label: t("usage.inputCost"), value: entry.input },
-      { label: t("usage.outputCost"), value: entry.output },
-      { label: t("usage.cacheReadCost"), value: entry.cacheRead },
       { label: t("usage.cacheWriteCost"), value: entry.cacheWrite },
+      { label: t("usage.cacheReadCost"), value: entry.cacheRead },
+      { label: t("usage.outputCost"), value: entry.output },
     ] as const;
 
   return (

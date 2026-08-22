@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  USAGE_TREND_SERIES,
   buildUsageTrendChartData,
   formatUsageTrendTickLabel,
+  orderUsageTrendTooltipPayload,
 } from "@/components/usage/UsageTrendChart";
 
 const day = (isoDate: string) =>
@@ -113,5 +115,45 @@ describe("formatUsageTrendTickLabel", () => {
     expect(formatUsageTrendTickLabel(last.xKey, points)).not.toBe(
       points[0].label,
     );
+  });
+});
+
+describe("usage trend series order", () => {
+  it("uses input, cache write, cache read, output, then cost", () => {
+    expect(USAGE_TREND_SERIES.map(({ dataKey }) => dataKey)).toEqual([
+      "inputTokens",
+      "cacheCreationTokens",
+      "cacheReadTokens",
+      "outputTokens",
+      "cost",
+    ]);
+    expect(USAGE_TREND_SERIES.map(({ nameKey }) => nameKey)).toEqual([
+      "usage.inputTokens",
+      "usage.cacheCreationTokens",
+      "usage.cacheReadTokens",
+      "usage.outputTokens",
+      "usage.cost",
+    ]);
+  });
+
+  it("normalizes a shuffled tooltip payload without mutating it", () => {
+    const payload = [
+      { dataKey: "cost", value: 5 },
+      { dataKey: "outputTokens", value: 4 },
+      { dataKey: "inputTokens", value: 1 },
+      { dataKey: "cacheReadTokens", value: 3 },
+      { dataKey: "cacheCreationTokens", value: 2 },
+    ];
+
+    expect(
+      orderUsageTrendTooltipPayload(payload).map(({ dataKey }) => dataKey),
+    ).toEqual([
+      "inputTokens",
+      "cacheCreationTokens",
+      "cacheReadTokens",
+      "outputTokens",
+      "cost",
+    ]);
+    expect(payload[0].dataKey).toBe("cost");
   });
 });

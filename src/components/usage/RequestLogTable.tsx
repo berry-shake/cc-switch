@@ -20,7 +20,7 @@ import {
 import { useRequestLogs } from "@/lib/query/usage";
 import {
   getFreshInputTokens,
-  hasKnownCacheCreationTokens,
+  hasKnownCacheWriteTokens,
   isUnpricedUsage,
   type LogFilters,
   type UsageRangeSelection,
@@ -167,7 +167,7 @@ export function RequestLogTable({
                     {t("usage.billingModel")}
                   </TableHead>
                   <TableHead className="text-center whitespace-nowrap">
-                    {t("usage.freshInput")}
+                    {t("usage.inputTokens")}
                   </TableHead>
                   <TableHead className="text-center whitespace-nowrap">
                     {t("usage.cacheCreationTokens")}
@@ -205,7 +205,7 @@ export function RequestLogTable({
                 ) : (
                   logs.map((log) => {
                     const unpriced = isUnpricedUsage(log);
-                    const cacheCreationKnown = hasKnownCacheCreationTokens(log);
+                    const cacheWriteKnown = hasKnownCacheWriteTokens(log);
                     return (
                       <TableRow key={log.requestId}>
                         <TableCell className="text-center whitespace-nowrap text-xs px-1.5">
@@ -265,7 +265,7 @@ export function RequestLogTable({
                           })()}
                         </TableCell>
                         <TableCell className="text-center px-1.5 whitespace-nowrap tabular-nums">
-                          {cacheCreationKnown ? (
+                          {cacheWriteKnown ? (
                             fmtInt(log.cacheCreationTokens, locale)
                           ) : (
                             <span
