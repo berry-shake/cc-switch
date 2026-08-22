@@ -1,6 +1,7 @@
 import type { TFunction } from "i18next";
 import { Activity } from "lucide-react";
 
+import { Badge } from "@/components/ui/badge";
 import type {
   CodexCycleForecast,
   CodexForecastExhaustion,
@@ -49,23 +50,146 @@ function formatRate(value: number, perDay: string): string {
   return `${value.toFixed(1)}${perDay}`;
 }
 
-function ForecastRow({
+type ForecastMetricTone = "neutral" | "info" | "success" | "warning" | "danger";
+
+const FORECAST_METRIC_TONE_CLASS: Record<ForecastMetricTone, string> = {
+  neutral: "border-border/50 bg-background/45",
+  info: "border-blue-500/20 bg-blue-500/[0.045] dark:bg-blue-500/[0.07]",
+  success:
+    "border-emerald-500/20 bg-emerald-500/[0.045] dark:bg-emerald-500/[0.07]",
+  warning: "border-amber-500/25 bg-amber-500/[0.055] dark:bg-amber-500/[0.08]",
+  danger: "border-red-500/25 bg-red-500/[0.055] dark:bg-red-500/[0.08]",
+};
+
+const FORECAST_METRIC_VALUE_CLASS: Record<ForecastMetricTone, string> = {
+  neutral: "text-foreground",
+  info: "text-blue-600 dark:text-blue-400",
+  success: "text-emerald-600 dark:text-emerald-400",
+  warning: "text-amber-600 dark:text-amber-400",
+  danger: "text-red-600 dark:text-red-400",
+};
+
+const FORECAST_METRIC_PROGRESS_CLASS: Record<ForecastMetricTone, string> = {
+  neutral: "bg-gradient-to-r from-emerald-500 via-cyan-500 to-blue-500",
+  info: "bg-blue-500",
+  success: "bg-emerald-500",
+  warning: "bg-amber-500",
+  danger: "bg-red-500",
+};
+
+function ForecastMetric({
+  metricId,
   label,
   value,
+  tone = "neutral",
+  primary = false,
+  className,
   valueClassName,
+  progressPercent,
+  markerPercent,
 }: {
+  metricId: string;
   label: string;
   value: string;
+  tone?: ForecastMetricTone;
+  primary?: boolean;
+  className?: string;
   valueClassName?: string;
+  progressPercent?: number;
+  markerPercent?: number;
 }) {
+  const safeProgress =
+    progressPercent == null
+      ? null
+      : Math.max(0, Math.min(100, progressPercent));
+  const safeMarker =
+    markerPercent == null ? null : Math.max(0, Math.min(100, markerPercent));
+
   return (
-    <div className="flex min-w-0 flex-col gap-1 border-b border-border/40 py-2.5 last:border-b-0 sm:flex-row sm:items-baseline sm:justify-between sm:gap-5">
-      <dt className="text-xs font-medium leading-relaxed text-muted-foreground">
+    <div
+      className={cn(
+        "flex min-w-0 flex-col rounded-xl border shadow-sm",
+        primary ? "min-h-[112px] p-4" : "min-h-[92px] p-3.5",
+        FORECAST_METRIC_TONE_CLASS[tone],
+        className,
+      )}
+      data-forecast-metric={metricId}
+      data-prominence={primary ? "primary" : "secondary"}
+      data-tone={tone}
+    >
+      <dt className="text-[11px] font-medium leading-snug text-muted-foreground">
         {label}
       </dt>
       <dd
         className={cn(
-          "text-sm font-semibold leading-relaxed tabular-nums text-foreground sm:text-right",
+          "mt-2 flex flex-1 flex-col break-words font-bold leading-snug tabular-nums tracking-tight",
+          primary ? "text-xl md:text-2xl" : "text-base",
+          FORECAST_METRIC_VALUE_CLASS[tone],
+          valueClassName,
+        )}
+      >
+        <span className="block">{value}</span>
+        {safeProgress != null ? (
+          <div
+            className="mt-auto pt-3"
+            role="progressbar"
+            aria-label={label}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={safeProgress}
+            aria-valuetext={value}
+          >
+            <div className="relative h-1.5 rounded-full bg-muted/80">
+              <div
+                className={cn(
+                  "h-full rounded-full",
+                  FORECAST_METRIC_PROGRESS_CLASS[tone],
+                )}
+                style={{ width: `${safeProgress}%` }}
+              />
+              {safeMarker != null ? (
+                <span
+                  className="absolute top-1/2 h-2.5 w-0.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-foreground/75 ring-2 ring-background"
+                  style={{ left: `${safeMarker}%` }}
+                  data-baseline-marker
+                  aria-hidden="true"
+                />
+              ) : null}
+            </div>
+          </div>
+        ) : null}
+      </dd>
+    </div>
+  );
+}
+
+function ForecastDetail({
+  metricId,
+  label,
+  value,
+  tone = "neutral",
+  valueClassName,
+}: {
+  metricId: string;
+  label: string;
+  value: string;
+  tone?: ForecastMetricTone;
+  valueClassName?: string;
+}) {
+  return (
+    <div
+      className="min-w-0"
+      data-forecast-metric={metricId}
+      data-prominence="secondary"
+      data-tone={tone}
+    >
+      <dt className="text-[11px] font-medium leading-snug text-muted-foreground">
+        {label}
+      </dt>
+      <dd
+        className={cn(
+          "mt-1.5 break-words text-sm font-semibold leading-snug tabular-nums",
+          FORECAST_METRIC_VALUE_CLASS[tone],
           valueClassName,
         )}
       >
@@ -78,7 +202,13 @@ function ForecastRow({
 function statusPresentation(
   status: CodexForecastStatusLevel,
   t: TFunction,
-): { label: string; comparison: string; className: string } {
+): {
+  label: string;
+  comparison: string;
+  className: string;
+  iconClassName: string;
+  metricTone: ForecastMetricTone;
+} {
   switch (status) {
     case "below_pace":
       return {
@@ -86,20 +216,27 @@ function statusPresentation(
         comparison: t("usage.cycleCapacity.comparison.belowPace", "低于基准"),
         className:
           "border-blue-500/25 bg-blue-500/10 text-blue-600 dark:text-blue-400",
+        iconClassName: "bg-blue-500/10 text-blue-600 dark:text-blue-400",
+        metricTone: "info",
       };
     case "on_pace":
       return {
         label: t("usage.cycleCapacity.status.onPace", "接近匀速基准"),
         comparison: t("usage.cycleCapacity.comparison.onPace", "基本一致"),
         className:
-          "border-emerald-500/25 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
+          "border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
+        iconClassName:
+          "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
+        metricTone: "success",
       };
     case "above_pace":
       return {
         label: t("usage.cycleCapacity.status.abovePace", "高于匀速基准"),
         comparison: t("usage.cycleCapacity.comparison.abovePace", "用量偏高"),
         className:
-          "border-amber-500/25 bg-amber-500/10 text-amber-600 dark:text-amber-400",
+          "border-amber-500/25 bg-amber-500/10 text-amber-700 dark:text-amber-400",
+        iconClassName: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+        metricTone: "warning",
       };
     case "far_above_pace":
       return {
@@ -109,14 +246,18 @@ function statusPresentation(
           "明显偏高",
         ),
         className:
-          "border-red-500/25 bg-red-500/10 text-red-600 dark:text-red-400",
+          "border-red-500/25 bg-red-500/10 text-red-700 dark:text-red-400",
+        iconClassName: "bg-red-500/10 text-red-600 dark:text-red-400",
+        metricTone: "danger",
       };
     case "exhausted":
       return {
         label: t("usage.cycleCapacity.status.exhausted", "额度已耗尽"),
         comparison: t("usage.cycleCapacity.comparison.exhausted", "已耗尽"),
         className:
-          "border-red-500/25 bg-red-500/10 text-red-600 dark:text-red-400",
+          "border-red-500/25 bg-red-500/10 text-red-700 dark:text-red-400",
+        iconClassName: "bg-red-500/10 text-red-600 dark:text-red-400",
+        metricTone: "danger",
       };
   }
 }
@@ -193,9 +334,11 @@ export function CodexCycleForecastPanel({
     forecast.cumulativeRatePercentPerDay,
     perDay,
   )} / ${formatRate(forecast.sustainableRatePercentPerDay, perDay)}`;
+  const recentPredictionUnavailable =
+    forecast.recentRatePercentPerDay == null || recentSpan == null;
   const recentRateValue =
     forecast.recentRatePercentPerDay == null || recentSpan == null
-      ? waitingForSample
+      ? "—"
       : t("usage.cycleCapacity.recentRateValue", {
           defaultValue: "{{rate}} · 采用最近 {{duration}} 的采样",
           rate: formatRate(forecast.recentRatePercentPerDay, perDay),
@@ -206,7 +349,7 @@ export function CodexCycleForecastPanel({
     forecast.recentExhaustion.atMs < resetAtMs - EXHAUSTION_TIME_EPSILON_MS;
   const projectedFinalValue =
     forecast.recentProjectedUtilizationAtReset == null
-      ? waitingForSample
+      ? "—"
       : t("usage.cycleCapacity.projectedFinalValue", {
           defaultValue: "{{value}}{{suffix}}",
           value: formatPercent(forecast.recentProjectedUtilizationAtReset),
@@ -214,20 +357,28 @@ export function CodexCycleForecastPanel({
             ? t("usage.cycleCapacity.projectedExhaustEarly", "（预计提前耗尽）")
             : "",
         });
+  const recentExhaustionValue = recentPredictionUnavailable
+    ? "—"
+    : formatExhaustion(forecast.recentExhaustion, locale, t);
 
   return (
     <section
-      className="mt-4 rounded-xl border border-border/50 bg-background/30 p-3.5 sm:p-4"
+      className="mt-5 border-t border-border/50 pt-5"
       data-testid="codex-cycle-forecast"
     >
-      <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-2 text-sm font-semibold">
-          <Activity className="h-4 w-4 text-muted-foreground" />
-          <h4>{t("usage.cycleCapacity.currentStatus", "当前状态")}</h4>
+      <div className="mb-4 flex flex-wrap items-center gap-3">
+        <div className="flex items-center gap-3">
+          <div className={cn("rounded-xl p-2.5", status.iconClassName)}>
+            <Activity className="h-5 w-5" />
+          </div>
+          <h4 className="text-base font-semibold tracking-tight">
+            {t("usage.cycleCapacity.currentStatus", "当前状态")}
+          </h4>
         </div>
-        <span
+        <Badge
+          variant="outline"
           className={cn(
-            "inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold",
+            "inline-flex items-center rounded-full border px-3 py-1.5 text-xs font-semibold shadow-sm",
             status.className,
           )}
           data-status={forecast.statusLevel}
@@ -235,81 +386,135 @@ export function CodexCycleForecastPanel({
           aria-live="polite"
         >
           {status.label}
-        </span>
+        </Badge>
       </div>
 
-      <dl className="grid grid-cols-1 gap-x-7 lg:grid-cols-2">
-        <ForecastRow
-          label={t("usage.cycleCapacity.timeProgress", "周期时间进度")}
-          value={timeProgressValue}
-        />
-        <ForecastRow
+      <dl
+        className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3"
+        data-testid="codex-cycle-forecast-overview"
+      >
+        <ForecastMetric
+          metricId="actual-vs-baseline"
           label={t(
             "usage.cycleCapacity.actualVsBaseline",
             "实际用量 / 基准用量（同期）",
           )}
           value={actualVsBaselineValue}
+          tone={status.metricTone}
+          primary
+          progressPercent={forecast.currentUtilizationPercent}
+          markerPercent={forecast.baselineUtilizationPercent}
         />
-        <ForecastRow
+        <ForecastMetric
+          metricId="time-progress"
+          label={t("usage.cycleCapacity.timeProgress", "周期时间进度")}
+          value={timeProgressValue}
+          primary
+          progressPercent={forecast.cycleTimeProgressPercent}
+        />
+        <ForecastMetric
+          metricId="cumulative-vs-sustainable-rate"
           label={t(
             "usage.cycleCapacity.cumulativeVsSustainableRate",
             "累计平均速率 / 可持续速率",
           )}
           value={cumulativeVsSustainableValue}
-        />
-        <ForecastRow
-          label={t(
-            "usage.cycleCapacity.recentRate",
-            "近期消耗速率（采样区间）",
-          )}
-          value={recentRateValue}
-          valueClassName={cn(
-            forecast.recentRatePercentPerDay == null &&
-              "font-medium text-muted-foreground",
-          )}
-        />
-        <ForecastRow
-          label={t(
-            "usage.cycleCapacity.cumulativeExhaustionAt",
-            "累计平均模型预计耗尽时间",
-          )}
-          value={formatExhaustion(forecast.cumulativeExhaustion, locale, t)}
-        />
-        <ForecastRow
-          label={t(
-            "usage.cycleCapacity.recentExhaustionAt",
-            "近期速率模型预计耗尽时间",
-          )}
-          value={formatExhaustion(forecast.recentExhaustion, locale, t)}
-          valueClassName={cn(
-            forecast.recentExhaustion.kind === "unavailable" &&
-              "font-medium text-muted-foreground",
-          )}
-        />
-        <ForecastRow
-          label={t(
-            "usage.cycleCapacity.projectedFinalUtilization",
-            "近期速率模型期末预计用量",
-          )}
-          value={projectedFinalValue}
-          valueClassName={cn(
-            forecast.recentProjectedUtilizationAtReset == null &&
-              "font-medium text-muted-foreground",
-            recentExhaustsEarly && "text-red-600 dark:text-red-400",
-          )}
-        />
-        <ForecastRow
-          label={t("usage.cycleCapacity.scheduledResetAt", "周期计划重置时间")}
-          value={formatDateTime(resetAtMs, locale)}
-        />
-        <ForecastRow
-          label={t(
-            "usage.cycleCapacity.remainingToReset",
-            "预测时点至重置的剩余时间",
-          )}
-          value={remaining}
+          primary
+          className="sm:col-span-2 xl:col-span-1"
         />
       </dl>
+
+      <div className="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,2fr)_minmax(260px,1fr)]">
+        <div
+          className="min-w-0 rounded-xl border border-border/50 bg-background/45 p-4 shadow-sm"
+          data-testid="codex-cycle-forecast-models"
+        >
+          {recentPredictionUnavailable ? (
+            <div
+              className="mb-4 rounded-lg border border-border/40 bg-muted/30 px-3 py-2 text-xs font-medium text-muted-foreground"
+              data-testid="codex-cycle-recent-sampling"
+              role="status"
+              aria-live="polite"
+            >
+              {waitingForSample}
+            </div>
+          ) : null}
+
+          <dl className="grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2">
+            <ForecastDetail
+              metricId="cumulative-exhaustion-at"
+              label={t(
+                "usage.cycleCapacity.cumulativeExhaustionAt",
+                "累计平均模型预计耗尽时间",
+              )}
+              value={formatExhaustion(forecast.cumulativeExhaustion, locale, t)}
+            />
+            <ForecastDetail
+              metricId="recent-rate"
+              label={t(
+                "usage.cycleCapacity.recentRate",
+                "近期消耗速率（采样区间）",
+              )}
+              value={recentRateValue}
+              valueClassName={cn(
+                recentPredictionUnavailable &&
+                  "font-medium text-muted-foreground",
+              )}
+            />
+            <ForecastDetail
+              metricId="recent-exhaustion-at"
+              label={t(
+                "usage.cycleCapacity.recentExhaustionAt",
+                "近期速率模型预计耗尽时间",
+              )}
+              value={recentExhaustionValue}
+              valueClassName={cn(
+                recentPredictionUnavailable &&
+                  "font-medium text-muted-foreground",
+              )}
+            />
+            <ForecastDetail
+              metricId="projected-final-utilization"
+              label={t(
+                "usage.cycleCapacity.projectedFinalUtilization",
+                "近期速率模型期末预计用量",
+              )}
+              value={projectedFinalValue}
+              tone={recentExhaustsEarly ? "danger" : "neutral"}
+              valueClassName={cn(
+                recentPredictionUnavailable &&
+                  "font-medium text-muted-foreground",
+              )}
+            />
+          </dl>
+        </div>
+
+        <div
+          className="min-w-0 rounded-xl border border-border/50 bg-background/45 p-4 shadow-sm"
+          data-testid="codex-cycle-forecast-reset"
+        >
+          <dl className="grid h-full grid-cols-1 gap-4">
+            <ForecastDetail
+              metricId="scheduled-reset-at"
+              label={t(
+                "usage.cycleCapacity.scheduledResetAt",
+                "周期计划重置时间",
+              )}
+              value={formatDateTime(resetAtMs, locale)}
+              valueClassName="text-base"
+            />
+            <ForecastDetail
+              metricId="remaining-to-reset"
+              label={t(
+                "usage.cycleCapacity.remainingToReset",
+                "预测时点至重置的剩余时间",
+              )}
+              value={remaining}
+              valueClassName="text-base"
+            />
+          </dl>
+        </div>
+      </div>
     </section>
   );
 }

@@ -93,8 +93,39 @@ describe("CodexCycleCapacityCard", () => {
       "data-status",
       "below_pace",
     );
-    expect(screen.getAllByText("采样中（至少需要 1 小时）")).toHaveLength(3);
+    expect(screen.getAllByText("采样中（至少需要 1 小时）")).toHaveLength(1);
+    expect(screen.getByTestId("codex-cycle-recent-sampling")).toHaveAttribute(
+      "role",
+      "status",
+    );
     expect(screen.getByText("本周期重置前不会耗尽")).toBeInTheDocument();
+
+    const forecast = screen.getByTestId("codex-cycle-forecast");
+    expect(forecast.querySelectorAll("[data-forecast-metric]")).toHaveLength(9);
+    expect(
+      screen
+        .getByTestId("codex-cycle-forecast-overview")
+        .querySelectorAll("[data-forecast-metric]"),
+    ).toHaveLength(3);
+    expect(
+      screen
+        .getByTestId("codex-cycle-forecast-models")
+        .querySelectorAll("[data-forecast-metric]"),
+    ).toHaveLength(4);
+    expect(
+      screen
+        .getByTestId("codex-cycle-forecast-reset")
+        .querySelectorAll("[data-forecast-metric]"),
+    ).toHaveLength(2);
+    expect(
+      forecast.querySelector('[data-forecast-metric="actual-vs-baseline"]'),
+    ).toHaveAttribute("data-tone", "info");
+    expect(
+      screen.getByRole("progressbar", {
+        name: "实际用量 / 基准用量（同期）",
+      }),
+    ).toHaveAttribute("aria-valuenow", "30");
+    expect(forecast.querySelector("[data-baseline-marker]")).not.toBeNull();
   });
 
   it("renders the reference pace and recent forecast from same-cycle samples", () => {
@@ -149,6 +180,14 @@ describe("CodexCycleCapacityCard", () => {
       screen.getByText("24.3%/天 · 采用最近 14小时 48分钟 的采样"),
     ).toBeInTheDocument();
     expect(screen.getByText(/152\.4%（预计提前耗尽）/)).toBeInTheDocument();
+    expect(
+      screen
+        .getByTestId("codex-cycle-forecast")
+        .querySelector('[data-forecast-metric="actual-vs-baseline"]'),
+    ).toHaveAttribute("data-tone", "success");
+    expect(
+      screen.queryByTestId("codex-cycle-recent-sampling"),
+    ).not.toBeInTheDocument();
 
     const forecast = screen.getByTestId("codex-cycle-forecast");
     expect(forecast.querySelectorAll("dt")).toHaveLength(9);
@@ -196,6 +235,44 @@ describe("CodexCycleCapacityCard", () => {
     const label = screen.getByText("近期速率模型期末预计用量");
     expect(label.parentElement?.querySelector("dd")).toHaveTextContent("100%");
     expect(screen.queryByText(/预计提前耗尽/)).not.toBeInTheDocument();
+  });
+
+  it("binds the far-above status to the actual-versus-baseline summary", () => {
+    const dayMs = 24 * 60 * 60 * 1000;
+    const startMs = Date.UTC(2026, 7, 21, 16, 57);
+    const currentMs = startMs + 19 * 60 * 60 * 1000 + 16 * 60 * 1000;
+    const cycleResetMs = startMs + 7 * dayMs;
+    const dangerQuota: SubscriptionQuota = {
+      ...quota,
+      queriedAt: currentMs,
+      tiers: [
+        {
+          name: "seven_day",
+          windowSeconds: 7 * 24 * 60 * 60,
+          utilization: 35,
+          resetsAt: new Date(cycleResetMs).toISOString(),
+        },
+      ],
+    };
+
+    render(
+      <CodexCycleCapacityCard
+        quota={dangerQuota}
+        usage={usage}
+        nowMs={currentMs}
+      />,
+    );
+
+    expect(screen.getByText("明显高于匀速基准")).toHaveAttribute(
+      "data-status",
+      "far_above_pace",
+    );
+    const actualMetric = screen
+      .getByTestId("codex-cycle-forecast")
+      .querySelector('[data-forecast-metric="actual-vs-baseline"]');
+    expect(actualMetric).toHaveAttribute("data-tone", "danger");
+    expect(actualMetric).toHaveAttribute("data-prominence", "primary");
+    expect(screen.getByText(/35% \/ 11\.5%（明显偏高）/)).toBeInTheDocument();
   });
 
   it("renders nothing when the quota request is unsuccessful", () => {
