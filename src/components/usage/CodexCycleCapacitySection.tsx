@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { subscriptionApi } from "@/lib/api/subscription";
 import { usageApi } from "@/lib/api/usage";
 import { resolveCodexQuotaCycle } from "@/lib/codexCycleCapacity";
+import { loadCodexQuotaSamples } from "@/lib/codexQuotaSamples";
 import { subscriptionKeys } from "@/lib/query/subscription";
 import { usageKeys } from "@/lib/query/usage";
 
@@ -50,6 +51,10 @@ export function CodexCycleCapacitySection({
   const cycle = useMemo(() => resolveCodexQuotaCycle(quota), [quota]);
   const startDate = cycle ? Math.floor(cycle.startMs / 1000) : undefined;
   const endDate = cycle ? Math.floor(cycle.endMs / 1000) : undefined;
+  const quotaSamples = useMemo(
+    () => (cycle ? loadCodexQuotaSamples() : []),
+    [cycle],
+  );
 
   const usageQuery = useQuery({
     queryKey: usageKeys.summary(
@@ -74,5 +79,11 @@ export function CodexCycleCapacitySection({
 
   if (!enabled || !cycle || !usageQuery.isSuccess) return null;
 
-  return <CodexCycleCapacityCard quota={quota} usage={usageQuery.data} />;
+  return (
+    <CodexCycleCapacityCard
+      quota={quota}
+      usage={usageQuery.data}
+      quotaSamples={quotaSamples}
+    />
+  );
 }

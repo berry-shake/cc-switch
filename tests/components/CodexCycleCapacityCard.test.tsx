@@ -2,12 +2,24 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { CodexCycleCapacityCard } from "@/components/usage/CodexCycleCapacityCard";
+import type { CodexQuotaSample } from "@/lib/codexQuotaSamples";
 import type { SubscriptionQuota } from "@/types/subscription";
 import type { UsageSummary } from "@/types/usage";
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
-    t: (_key: string, fallback?: string) => fallback ?? _key,
+    t: (
+      key: string,
+      fallbackOrOptions?:
+        | string
+        | ({ defaultValue?: string } & Record<string, unknown>),
+    ) => {
+      if (typeof fallbackOrOptions === "string") return fallbackOrOptions;
+      const template = fallbackOrOptions?.defaultValue ?? key;
+      return template.replace(/{{(\w+)}}/g, (_match, name: string) =>
+        String(fallbackOrOptions?.[name] ?? ""),
+      );
+    },
     i18n: { resolvedLanguage: "en", language: "en" },
   }),
 }));
@@ -74,6 +86,116 @@ describe("CodexCycleCapacityCard", () => {
     for (const label of labels) {
       expect(screen.getByText(label)).toBeInTheDocument();
     }
+
+    expect(screen.getByTestId("codex-cycle-forecast")).toBeInTheDocument();
+    expect(screen.getByText("当前状态")).toBeInTheDocument();
+    expect(screen.getByText("低于匀速基准")).toHaveAttribute(
+      "data-status",
+      "below_pace",
+    );
+    expect(screen.getAllByText("采样中（至少需要 1 小时）")).toHaveLength(3);
+    expect(screen.getByText("本周期重置前不会耗尽")).toBeInTheDocument();
+  });
+
+  it("renders the reference pace and recent forecast from same-cycle samples", () => {
+    const dayMs = 24 * 60 * 60 * 1000;
+    const hourMs = 60 * 60 * 1000;
+    const startMs = Date.UTC(2026, 7, 20, 12, 0, 0);
+    const elapsedMs = dayMs + 23 * hourMs + 16 * 60 * 1000;
+    const currentMs = startMs + elapsedMs;
+    const cycleResetMs = startMs + 7 * dayMs;
+    const recentSpanMs = 14 * hourMs + 48 * 60 * 1000;
+    const referenceQuota: SubscriptionQuota = {
+      ...quota,
+      queriedAt: currentMs,
+      tiers: [
+        {
+          name: "seven_day",
+          windowSeconds: 7 * 24 * 60 * 60,
+          utilization: 30,
+          resetsAt: new Date(cycleResetMs).toISOString(),
+        },
+      ],
+    };
+    const samples: CodexQuotaSample[] = [
+      {
+        capturedAtMs: currentMs - recentSpanMs,
+        cycleStartMs: startMs,
+        resetAtMs: cycleResetMs,
+        windowSeconds: 7 * 24 * 60 * 60,
+        utilizationPercent: 15,
+      },
+    ];
+
+    render(
+      <CodexCycleCapacityCard
+        quota={referenceQuota}
+        usage={usage}
+        quotaSamples={samples}
+        nowMs={currentMs}
+      />,
+    );
+
+    expect(screen.getByText("接近匀速基准")).toHaveAttribute(
+      "data-status",
+      "on_pace",
+    );
+    expect(
+      screen.getByText("28.1% · 已过 1天 23小时 16分钟"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("30% / 28.1%（基本一致）")).toBeInTheDocument();
+    expect(screen.getByText("15.2%/天 / 14.3%/天")).toBeInTheDocument();
+    expect(
+      screen.getByText("24.3%/天 · 采用最近 14小时 48分钟 的采样"),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/152\.4%（预计提前耗尽）/)).toBeInTheDocument();
+
+    const forecast = screen.getByTestId("codex-cycle-forecast");
+    expect(forecast.querySelectorAll("dt")).toHaveLength(9);
+    expect(forecast.querySelectorAll("dd")).toHaveLength(9);
+  });
+
+  it("does not label exhaustion exactly at reset as early", () => {
+    const dayMs = 24 * 60 * 60 * 1000;
+    const hourMs = 60 * 60 * 1000;
+    const startMs = Date.UTC(2026, 7, 18, 8);
+    const currentMs = startMs + 2 * dayMs;
+    const cycleResetMs = startMs + 7 * dayMs;
+    const sustainableRate = 100 / 7;
+    const currentUtilization = sustainableRate * 2;
+    const exactQuota: SubscriptionQuota = {
+      ...quota,
+      queriedAt: currentMs,
+      tiers: [
+        {
+          name: "seven_day",
+          windowSeconds: 7 * 24 * 60 * 60,
+          utilization: currentUtilization,
+          resetsAt: new Date(cycleResetMs).toISOString(),
+        },
+      ],
+    };
+
+    render(
+      <CodexCycleCapacityCard
+        quota={exactQuota}
+        usage={usage}
+        quotaSamples={[
+          {
+            capturedAtMs: currentMs - 2 * hourMs,
+            cycleStartMs: startMs,
+            resetAtMs: cycleResetMs,
+            windowSeconds: 7 * 24 * 60 * 60,
+            utilizationPercent: currentUtilization - sustainableRate * (2 / 24),
+          },
+        ]}
+        nowMs={currentMs}
+      />,
+    );
+
+    const label = screen.getByText("近期速率模型期末预计用量");
+    expect(label.parentElement?.querySelector("dd")).toHaveTextContent("100%");
+    expect(screen.queryByText(/预计提前耗尽/)).not.toBeInTheDocument();
   });
 
   it("renders nothing when the quota request is unsuccessful", () => {

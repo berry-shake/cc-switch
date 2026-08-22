@@ -1794,7 +1794,45 @@
       "totalUsd": "完整周期美元等效容量（估算）",
       "remainingTokens": "剩余额度 Token 等效容量（估算）",
       "remainingUsd": "剩余额度美元等效容量（估算）",
-      "disclaimer": "这是本机单账号用量按官方已用比例反推的 USD/Token 等效值，受本地日志完整性与同步延迟影响，不代表官方账单或固定 Token 上限。"
+      "disclaimer": "这是本机单账号用量按官方已用比例反推的 USD/Token 等效值，受本地日志完整性与同步延迟影响，不代表官方账单或固定 Token 上限。",
+      "currentStatus": "当前状态",
+      "status": {
+        "belowPace": "低于匀速基准",
+        "onPace": "接近匀速基准",
+        "abovePace": "高于匀速基准",
+        "farAbovePace": "明显高于匀速基准",
+        "exhausted": "额度已耗尽"
+      },
+      "comparison": {
+        "belowPace": "低于基准",
+        "onPace": "基本一致",
+        "abovePace": "用量偏高",
+        "farAbovePace": "明显偏高",
+        "exhausted": "已耗尽"
+      },
+      "timeProgress": "周期时间进度",
+      "timeProgressValue": "{{progress}} · 已过 {{elapsed}}",
+      "actualVsBaseline": "实际用量 / 基准用量（同期）",
+      "actualVsBaselineValue": "{{actual}} / {{baseline}}（{{comparison}}）",
+      "cumulativeVsSustainableRate": "累计平均速率 / 可持续速率",
+      "recentRate": "近期消耗速率（采样区间）",
+      "recentRateValue": "{{rate}} · 采用最近 {{duration}} 的采样",
+      "cumulativeExhaustionAt": "累计平均模型预计耗尽时间",
+      "recentExhaustionAt": "近期速率模型预计耗尽时间",
+      "projectedFinalUtilization": "近期速率模型期末预计用量",
+      "projectedFinalValue": "{{value}}{{suffix}}",
+      "projectedExhaustEarly": "（预计提前耗尽）",
+      "scheduledResetAt": "周期计划重置时间",
+      "remainingToReset": "预测时点至重置的剩余时间",
+      "waitingForSample": "采样中（至少需要 1 小时）",
+      "noExhaustionAtCurrentRate": "按当前速率不会耗尽",
+      "noExhaustionBeforeReset": "本周期重置前不会耗尽",
+      "perDay": "%/天",
+      "duration": {
+        "day": "天",
+        "hour": "小时",
+        "minute": "分钟"
+      }
     },
     "baseCost": "基础",
     "costMultiplier": "成本倍率",

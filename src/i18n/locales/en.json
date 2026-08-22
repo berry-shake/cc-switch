@@ -1794,7 +1794,45 @@
       "totalUsd": "Full-cycle USD-equivalent capacity (estimate)",
       "remainingTokens": "Remaining token-equivalent capacity (estimate)",
       "remainingUsd": "Remaining USD-equivalent capacity (estimate)",
-      "disclaimer": "This extrapolates this computer's single-account usage from the official used percentage into USD/token-equivalent values. It depends on local log completeness and sync latency, and is neither an official bill nor a fixed token limit."
+      "disclaimer": "This extrapolates this computer's single-account usage from the official used percentage into USD/token-equivalent values. It depends on local log completeness and sync latency, and is neither an official bill nor a fixed token limit.",
+      "currentStatus": "Current status",
+      "status": {
+        "belowPace": "Below even-pace baseline",
+        "onPace": "Close to even-pace baseline",
+        "abovePace": "Above even-pace baseline",
+        "farAbovePace": "Well above even-pace baseline",
+        "exhausted": "Quota exhausted"
+      },
+      "comparison": {
+        "belowPace": "below baseline",
+        "onPace": "roughly aligned",
+        "abovePace": "usage elevated",
+        "farAbovePace": "well above baseline",
+        "exhausted": "exhausted"
+      },
+      "timeProgress": "Cycle time progress",
+      "timeProgressValue": "{{progress}} · {{elapsed}} elapsed",
+      "actualVsBaseline": "Actual / baseline usage (same point)",
+      "actualVsBaselineValue": "{{actual}} / {{baseline}} ({{comparison}})",
+      "cumulativeVsSustainableRate": "Cumulative average / sustainable rate",
+      "recentRate": "Recent consumption rate (sample window)",
+      "recentRateValue": "{{rate}} · sampled over the latest {{duration}}",
+      "cumulativeExhaustionAt": "Estimated exhaustion from cumulative average",
+      "recentExhaustionAt": "Estimated exhaustion from recent rate",
+      "projectedFinalUtilization": "Projected end-of-cycle usage at recent rate",
+      "projectedFinalValue": "{{value}}{{suffix}}",
+      "projectedExhaustEarly": " (projected to exhaust early)",
+      "scheduledResetAt": "Scheduled cycle reset",
+      "remainingToReset": "Time remaining from forecast point",
+      "waitingForSample": "Sampling (at least 1 hour required)",
+      "noExhaustionAtCurrentRate": "No exhaustion at the current rate",
+      "noExhaustionBeforeReset": "Not expected to exhaust before reset",
+      "perDay": "%/day",
+      "duration": {
+        "day": "d",
+        "hour": "h",
+        "minute": "min"
+      }
     },
     "baseCost": "Base",
     "costMultiplier": "Cost Multiplier",

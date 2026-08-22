@@ -1,9 +1,26 @@
 import { invoke } from "@tauri-apps/api/core";
+import { resolveCodexQuotaCycle } from "@/lib/codexCycleCapacity";
+import {
+  recordCodexQuotaSample,
+  sampleCodexQuotaCycle,
+} from "@/lib/codexQuotaSamples";
 import type { SubscriptionQuota } from "@/types/subscription";
 
 export const subscriptionApi = {
-  getQuota: (tool: string): Promise<SubscriptionQuota> =>
-    invoke("get_subscription_quota", { tool }),
+  getQuota: async (tool: string): Promise<SubscriptionQuota> => {
+    const quota = await invoke<SubscriptionQuota>("get_subscription_quota", {
+      tool,
+    });
+
+    // 统一记录所有前端入口取得的 Codex CLI 长周期快照。记录失败只会让
+    // 近期趋势暂不可用，不能改变原额度请求的成功语义。
+    if (tool.trim().toLowerCase() === "codex") {
+      const cycle = resolveCodexQuotaCycle(quota);
+      if (cycle) recordCodexQuotaSample(sampleCodexQuotaCycle(cycle));
+    }
+
+    return quota;
+  },
   getCodexOauthQuota: (accountId: string | null): Promise<SubscriptionQuota> =>
     invoke("get_codex_oauth_quota", { accountId }),
   getXaiOauthQuota: (accountId: string | null): Promise<SubscriptionQuota> =>

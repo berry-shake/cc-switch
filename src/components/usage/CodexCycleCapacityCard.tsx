@@ -7,6 +7,11 @@ import {
   deriveCodexCycleCapacity,
   type CodexCycleCapacityEstimate,
 } from "@/lib/codexCycleCapacity";
+import { forecastCodexCycle } from "@/lib/codexCycleForecast";
+import {
+  getCodexQuotaSamplesForCycle,
+  type CodexQuotaSample,
+} from "@/lib/codexQuotaSamples";
 import { cn } from "@/lib/utils";
 import type { SubscriptionQuota } from "@/types/subscription";
 import type { UsageSummary } from "@/types/usage";
@@ -17,11 +22,14 @@ import {
   getLocaleFromLanguage,
   getResolvedLang,
 } from "./format";
+import { CodexCycleForecastPanel } from "./CodexCycleForecastPanel";
 
 export interface CodexCycleCapacityCardProps {
   quota: SubscriptionQuota | null | undefined;
   /** 必须是 `quota` 当前长周期精确起止范围内的本地 Codex 汇总。 */
   usage: UsageSummary | null | undefined;
+  /** 当前本机保存的官方额度采样；仅同一周期的数据会参与近期预测。 */
+  quotaSamples?: readonly CodexQuotaSample[];
   className?: string;
   /** 仅用于可重复测试；生产环境使用当前时间。 */
   nowMs?: number;
@@ -160,6 +168,7 @@ function CapacityRing({
 export function CodexCycleCapacityCard({
   quota,
   usage,
+  quotaSamples = [],
   className,
   nowMs,
 }: CodexCycleCapacityCardProps) {
@@ -171,6 +180,21 @@ export function CodexCycleCapacityCard({
   const gradientId = `codex-capacity-${rawId.replace(/[^a-zA-Z0-9_-]/g, "")}`;
 
   if (!estimate) return null;
+
+  const forecastSamples = getCodexQuotaSamplesForCycle(
+    quotaSamples,
+    estimate,
+  ).map((sample) => ({
+    timestampMs: sample.capturedAtMs,
+    utilizationPercent: sample.utilizationPercent,
+  }));
+  const forecast = forecastCodexCycle({
+    cycleStartMs: estimate.startMs,
+    resetAtMs: estimate.resetAtMs,
+    queriedAtMs: estimate.endMs,
+    utilizationPercent: estimate.utilizationPercent,
+    samples: forecastSamples,
+  });
 
   const usedLabel = t("usage.cycleCapacity.used", "已使用");
   const estimateLabel = t("usage.cycleCapacity.estimate", "等效估算");
@@ -284,6 +308,16 @@ export function CodexCycleCapacityCard({
             </div>
           </div>
         </div>
+
+        {forecast ? (
+          <CodexCycleForecastPanel
+            forecast={forecast}
+            resetAtMs={estimate.resetAtMs}
+            locale={locale}
+            lang={lang}
+            t={t}
+          />
+        ) : null}
 
         <div className="mt-4 flex items-start gap-2 rounded-lg bg-muted/30 px-3 py-2 text-[10px] leading-relaxed text-muted-foreground">
           <CircleDollarSign className="mt-0.5 h-3.5 w-3.5 shrink-0" />

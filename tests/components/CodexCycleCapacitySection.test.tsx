@@ -8,6 +8,7 @@ import type { UsageSummary } from "@/types/usage";
 const useQueryMock = vi.hoisted(() => vi.fn());
 const getQuotaMock = vi.hoisted(() => vi.fn());
 const getUsageSummaryMock = vi.hoisted(() => vi.fn());
+const loadQuotaSamplesMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@tanstack/react-query", () => ({
   useQuery: (options: unknown) => useQueryMock(options),
@@ -21,16 +22,23 @@ vi.mock("@/lib/api/usage", () => ({
   usageApi: { getUsageSummary: getUsageSummaryMock },
 }));
 
+vi.mock("@/lib/codexQuotaSamples", () => ({
+  loadCodexQuotaSamples: loadQuotaSamplesMock,
+}));
+
 vi.mock("@/components/usage/CodexCycleCapacityCard", () => ({
   CodexCycleCapacityCard: ({
     quota,
     usage,
+    quotaSamples,
   }: {
     quota: SubscriptionQuota;
     usage: UsageSummary;
+    quotaSamples?: readonly unknown[];
   }) => (
     <div data-testid="capacity-entry">
       {quota.tool}:{usage.realTotalTokens}
+      <span data-testid="sample-count">{quotaSamples?.length ?? 0}</span>
     </div>
   ),
 }));
@@ -78,6 +86,8 @@ describe("CodexCycleCapacitySection", () => {
     useQueryMock.mockReset();
     getQuotaMock.mockReset();
     getUsageSummaryMock.mockReset();
+    loadQuotaSamplesMock.mockReset();
+    loadQuotaSamplesMock.mockReturnValue([{ capturedAtMs: QUERIED_AT }]);
   });
 
   it("shows the entry only after both current quota and cycle usage succeed", async () => {
@@ -91,6 +101,8 @@ describe("CodexCycleCapacitySection", () => {
     render(<CodexCycleCapacitySection enabled refreshIntervalMs={0} />);
 
     expect(screen.getByTestId("capacity-entry")).toHaveTextContent("codex:100");
+    expect(screen.getByTestId("sample-count")).toHaveTextContent("1");
+    expect(loadQuotaSamplesMock).toHaveBeenCalledTimes(1);
     const usageOptions = useQueryMock.mock.calls
       .map(([options]) => options)
       .find((options) => queryKind(options) === "usage");
@@ -118,6 +130,7 @@ describe("CodexCycleCapacitySection", () => {
     render(<CodexCycleCapacitySection enabled />);
 
     expect(screen.queryByTestId("capacity-entry")).not.toBeInTheDocument();
+    expect(loadQuotaSamplesMock).not.toHaveBeenCalled();
     const usageOptions = useQueryMock.mock.calls
       .map(([options]) => options)
       .find((options) => queryKind(options) === "usage");
@@ -139,5 +152,6 @@ describe("CodexCycleCapacitySection", () => {
     render(<CodexCycleCapacitySection enabled />);
 
     expect(screen.queryByTestId("capacity-entry")).not.toBeInTheDocument();
+    expect(loadQuotaSamplesMock).not.toHaveBeenCalled();
   });
 });

@@ -4,6 +4,28 @@ import ja from "@/i18n/locales/ja.json";
 import zhTW from "@/i18n/locales/zh-TW.json";
 import zh from "@/i18n/locales/zh.json";
 
+function flattenTranslationStrings(
+  value: unknown,
+  path: string[] = [],
+  result = new Map<string, string>(),
+): Map<string, string> {
+  if (typeof value === "string") {
+    result.set(path.join("."), value);
+  } else if (value && typeof value === "object") {
+    for (const [key, child] of Object.entries(value)) {
+      flattenTranslationStrings(child, [...path, key], result);
+    }
+  }
+  return result;
+}
+
+function interpolationVariables(value: string): string[] {
+  return Array.from(
+    value.matchAll(/\{\{\s*([^}]+?)\s*\}\}/g),
+    ([, name]) => name,
+  ).sort();
+}
+
 describe("usage token labels", () => {
   it.each([
     [en, ["Input", "Cache Write", "Cache Read", "Output"]],
@@ -35,5 +57,20 @@ describe("usage token labels", () => {
       zh.usage.cacheReadCost,
       zh.usage.outputCost,
     ]).toEqual(["输入成本", "缓存写入成本", "缓存读取成本", "输出成本"]);
+  });
+
+  it("keeps Codex cycle forecast keys and interpolation variables aligned", () => {
+    const reference = flattenTranslationStrings(en.usage.cycleCapacity);
+
+    for (const locale of [zh, zhTW, ja]) {
+      const actual = flattenTranslationStrings(locale.usage.cycleCapacity);
+      expect([...actual.keys()].sort()).toEqual([...reference.keys()].sort());
+
+      for (const [key, template] of reference) {
+        expect(interpolationVariables(actual.get(key) ?? "")).toEqual(
+          interpolationVariables(template),
+        );
+      }
+    }
   });
 });

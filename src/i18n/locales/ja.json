@@ -1794,7 +1794,45 @@
       "totalUsd": "全サイクル USD 等価容量（推定）",
       "remainingTokens": "残り Token 等価容量（推定）",
       "remainingUsd": "残り USD 等価容量（推定）",
-      "disclaimer": "この端末の単一アカウント使用量を公式の使用済み割合から USD/Token 等価値へ外挿した推定です。ローカルログの完全性と同期遅延の影響を受け、公式請求額や固定 Token 上限ではありません。"
+      "disclaimer": "この端末の単一アカウント使用量を公式の使用済み割合から USD/Token 等価値へ外挿した推定です。ローカルログの完全性と同期遅延の影響を受け、公式請求額や固定 Token 上限ではありません。",
+      "currentStatus": "現在の状態",
+      "status": {
+        "belowPace": "均等ペースを下回る",
+        "onPace": "均等ペースに近い",
+        "abovePace": "均等ペースを上回る",
+        "farAbovePace": "均等ペースを大幅に上回る",
+        "exhausted": "クォータを使い切りました"
+      },
+      "comparison": {
+        "belowPace": "基準を下回る",
+        "onPace": "ほぼ一致",
+        "abovePace": "使用量が多い",
+        "farAbovePace": "基準を大幅に上回る",
+        "exhausted": "使い切り"
+      },
+      "timeProgress": "サイクル時間の進捗",
+      "timeProgressValue": "{{progress}} · {{elapsed}} 経過",
+      "actualVsBaseline": "実使用量 / 同時点の基準使用量",
+      "actualVsBaselineValue": "{{actual}} / {{baseline}}（{{comparison}}）",
+      "cumulativeVsSustainableRate": "累積平均速度 / 持続可能速度",
+      "recentRate": "直近の消費速度（サンプル区間）",
+      "recentRateValue": "{{rate}} · 直近 {{duration}} のサンプルを使用",
+      "cumulativeExhaustionAt": "累積平均による推定使い切り時刻",
+      "recentExhaustionAt": "直近速度による推定使い切り時刻",
+      "projectedFinalUtilization": "直近速度による期末予測使用量",
+      "projectedFinalValue": "{{value}}{{suffix}}",
+      "projectedExhaustEarly": "（早期に使い切る見込み）",
+      "scheduledResetAt": "予定リセット時刻",
+      "remainingToReset": "予測時点からリセットまでの残り時間",
+      "waitingForSample": "サンプリング中（最低 1 時間必要）",
+      "noExhaustionAtCurrentRate": "現在の速度では使い切りません",
+      "noExhaustionBeforeReset": "リセット前に使い切る見込みはありません",
+      "perDay": "%/日",
+      "duration": {
+        "day": "日",
+        "hour": "時間",
+        "minute": "分"
+      }
     },
     "baseCost": "基本",
     "costMultiplier": "コスト倍率",
