@@ -92,4 +92,22 @@ describe("subscriptionApi Codex quota sampling", () => {
     await expect(subscriptionApi.getQuota("codex")).rejects.toThrow("offline");
     expect(recordQuotaSampleMock).not.toHaveBeenCalled();
   });
+
+  it("forwards the UTC daily analytics range without exposing credentials", async () => {
+    const analytics = {
+      accountMode: "personal",
+      days: [],
+      queriedAt: QUERIED_AT,
+    };
+    invokeMock.mockResolvedValue(analytics);
+
+    await expect(
+      subscriptionApi.getCodexUsageAnalytics("2026-08-17", "2026-08-23"),
+    ).resolves.toBe(analytics);
+
+    expect(invokeMock).toHaveBeenCalledWith("get_codex_usage_analytics", {
+      startDate: "2026-08-17",
+      endDate: "2026-08-23",
+    });
+  });
 });

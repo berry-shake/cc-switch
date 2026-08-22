@@ -11,7 +11,13 @@ import { usageKeys } from "@/lib/query/usage";
 import { CodexCycleCapacityCard } from "./CodexCycleCapacityCard";
 
 const QUOTA_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
+const ANALYTICS_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 const DEFAULT_USAGE_REFRESH_INTERVAL_MS = 30 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+function utcDateKey(timestampMs: number): string {
+  return new Date(timestampMs).toISOString().slice(0, 10);
+}
 
 export interface CodexCycleCapacitySectionProps {
   /** 入口只在「全部」或 Codex 统计上下文中启用。 */
@@ -51,6 +57,12 @@ export function CodexCycleCapacitySection({
   const cycle = useMemo(() => resolveCodexQuotaCycle(quota), [quota]);
   const startDate = cycle ? Math.floor(cycle.startMs / 1000) : undefined;
   const endDate = cycle ? Math.floor(cycle.endMs / 1000) : undefined;
+  // usage.js 会把查询边界各放宽一天，再在前端按 UTC 日桶筛回当前周期。
+  // 这样能覆盖周期在某天中途开始或接口日桶延迟同步的情况。
+  const analyticsStartDate = cycle
+    ? utcDateKey(cycle.startMs - DAY_MS)
+    : undefined;
+  const analyticsEndDate = cycle ? utcDateKey(cycle.endMs + DAY_MS) : undefined;
   const quotaSamples = useMemo(
     () => (cycle ? loadCodexQuotaSamples() : []),
     [cycle],
@@ -77,12 +89,45 @@ export function CodexCycleCapacitySection({
     refetchIntervalInBackground: false,
   });
 
-  if (!enabled || !cycle || !usageQuery.isSuccess) return null;
+  const pricingQuery = useQuery({
+    queryKey: usageKeys.pricing(),
+    queryFn: usageApi.getModelPricing,
+    enabled: enabled && cycle != null,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const analyticsQuery = useQuery({
+    queryKey:
+      analyticsStartDate && analyticsEndDate
+        ? subscriptionKeys.codexAnalytics(analyticsStartDate, analyticsEndDate)
+        : subscriptionKeys.codexAnalytics("pending", "pending"),
+    queryFn: () =>
+      subscriptionApi.getCodexUsageAnalytics(
+        analyticsStartDate!,
+        analyticsEndDate!,
+      ),
+    enabled:
+      enabled &&
+      cycle != null &&
+      analyticsStartDate != null &&
+      analyticsEndDate != null,
+    retry: 1,
+    staleTime: 60_000,
+    refetchInterval: autoRefresh ? ANALYTICS_REFRESH_INTERVAL_MS : false,
+    refetchIntervalInBackground: false,
+    refetchOnWindowFocus: autoRefresh,
+  });
+
+  const hasLocalUsage = usageQuery.isSuccess;
+  const hasAnalyticsUsage = analyticsQuery.isSuccess && pricingQuery.isSuccess;
+  if (!enabled || !cycle || (!hasLocalUsage && !hasAnalyticsUsage)) return null;
 
   return (
     <CodexCycleCapacityCard
       quota={quota}
-      usage={usageQuery.data}
+      usage={usageQuery.isSuccess ? usageQuery.data : null}
+      analyticsUsage={analyticsQuery.isSuccess ? analyticsQuery.data : null}
+      modelPricing={pricingQuery.isSuccess ? pricingQuery.data : null}
       quotaSamples={quotaSamples}
     />
   );

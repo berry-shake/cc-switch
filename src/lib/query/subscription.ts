@@ -14,6 +14,8 @@ const REFETCH_INTERVAL = 5 * 60 * 1000; // 5 minutes
 export const subscriptionKeys = {
   all: ["subscription"] as const,
   quota: (appId: AppId) => [...subscriptionKeys.all, "quota", appId] as const,
+  codexAnalytics: (startDate: string, endDate: string) =>
+    [...subscriptionKeys.all, "codex-analytics", startDate, endDate] as const,
 };
 
 /**

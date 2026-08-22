@@ -34,6 +34,11 @@ export interface CodexCycleCapacityEstimate extends CodexQuotaCycle {
   remainingUsd: number;
 }
 
+export interface CodexCycleCapacityUsageBasis {
+  usedTokens: number;
+  usedUsd: number;
+}
+
 function isFinitePositive(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && value > 0;
 }
@@ -113,7 +118,28 @@ export function estimateCodexCycleCapacity(
 
   const usedTokens = usage.realTotalTokens;
   const usedUsd = parsePositiveCost(usage.totalCost);
-  if (!isFinitePositive(usedTokens) || usedUsd == null) return null;
+  if (usedUsd == null) return null;
+
+  return estimateCodexCycleCapacityFromBasis(cycle, {
+    usedTokens,
+    usedUsd,
+  });
+}
+
+/**
+ * 对已经归一化的同期 Token/USD 基数进行容量外推。
+ *
+ * 本地 JSONL 与 Codex Web analytics 的数据来源不同，但最终都遵循
+ * `同期实际值 ÷ 官方已用比例` 这一容量定义，因此在这里共享边界检查。
+ */
+export function estimateCodexCycleCapacityFromBasis(
+  cycle: CodexQuotaCycle | null | undefined,
+  basis: CodexCycleCapacityUsageBasis | null | undefined,
+): CodexCycleCapacityEstimate | null {
+  if (!cycle || !basis) return null;
+
+  const { usedTokens, usedUsd } = basis;
+  if (!isFinitePositive(usedTokens) || !isFinitePositive(usedUsd)) return null;
 
   const totalTokens = usedTokens / cycle.usedRatio;
   const totalUsd = usedUsd / cycle.usedRatio;

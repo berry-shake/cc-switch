@@ -1428,6 +1428,7 @@ pub fn run() {
             commands::testUsageScript,
             // subscription quota
             commands::get_subscription_quota,
+            commands::get_codex_usage_analytics,
             commands::get_codex_oauth_quota,
             commands::get_codex_oauth_models,
             commands::get_xai_oauth_models,

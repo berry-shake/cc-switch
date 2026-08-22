@@ -2,12 +2,17 @@ import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { CodexCycleCapacitySection } from "@/components/usage/CodexCycleCapacitySection";
-import type { SubscriptionQuota } from "@/types/subscription";
-import type { UsageSummary } from "@/types/usage";
+import type {
+  CodexAnalyticsUsage,
+  SubscriptionQuota,
+} from "@/types/subscription";
+import type { ModelPricing, UsageSummary } from "@/types/usage";
 
 const useQueryMock = vi.hoisted(() => vi.fn());
 const getQuotaMock = vi.hoisted(() => vi.fn());
+const getCodexUsageAnalyticsMock = vi.hoisted(() => vi.fn());
 const getUsageSummaryMock = vi.hoisted(() => vi.fn());
+const getModelPricingMock = vi.hoisted(() => vi.fn());
 const loadQuotaSamplesMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@tanstack/react-query", () => ({
@@ -15,11 +20,17 @@ vi.mock("@tanstack/react-query", () => ({
 }));
 
 vi.mock("@/lib/api/subscription", () => ({
-  subscriptionApi: { getQuota: getQuotaMock },
+  subscriptionApi: {
+    getQuota: getQuotaMock,
+    getCodexUsageAnalytics: getCodexUsageAnalyticsMock,
+  },
 }));
 
 vi.mock("@/lib/api/usage", () => ({
-  usageApi: { getUsageSummary: getUsageSummaryMock },
+  usageApi: {
+    getUsageSummary: getUsageSummaryMock,
+    getModelPricing: getModelPricingMock,
+  },
 }));
 
 vi.mock("@/lib/codexQuotaSamples", () => ({
@@ -31,13 +42,16 @@ vi.mock("@/components/usage/CodexCycleCapacityCard", () => ({
     quota,
     usage,
     quotaSamples,
+    analyticsUsage,
   }: {
     quota: SubscriptionQuota;
-    usage: UsageSummary;
+    usage: UsageSummary | null;
+    analyticsUsage?: CodexAnalyticsUsage | null;
     quotaSamples?: readonly unknown[];
   }) => (
     <div data-testid="capacity-entry">
-      {quota.tool}:{usage.realTotalTokens}
+      {quota.tool}:{usage?.realTotalTokens ?? "no-local"}:
+      {analyticsUsage?.accountMode ?? "no-analytics"}
       <span data-testid="sample-count">{quotaSamples?.length ?? 0}</span>
     </div>
   ),
@@ -77,15 +91,37 @@ const usage: UsageSummary = {
   cacheHitRate: 0.5,
 };
 
+const analyticsUsage: CodexAnalyticsUsage = {
+  accountMode: "personal",
+  queriedAt: QUERIED_AT,
+  days: [],
+};
+
+const modelPricing: ModelPricing[] = [
+  {
+    modelId: "gpt-5.6-sol",
+    displayName: "GPT-5.6 Sol",
+    inputCostPerMillion: "4",
+    outputCostPerMillion: "20",
+    cacheReadCostPerMillion: "0.4",
+    cacheCreationCostPerMillion: "5",
+  },
+];
+
 function queryKind(options: { queryKey?: readonly unknown[] }) {
-  return options.queryKey?.[0] === "subscription" ? "quota" : "usage";
+  if (options.queryKey?.[0] !== "subscription") {
+    return options.queryKey?.[1] === "pricing" ? "pricing" : "usage";
+  }
+  return options.queryKey?.[1] === "codex-analytics" ? "analytics" : "quota";
 }
 
 describe("CodexCycleCapacitySection", () => {
   beforeEach(() => {
     useQueryMock.mockReset();
     getQuotaMock.mockReset();
+    getCodexUsageAnalyticsMock.mockReset();
     getUsageSummaryMock.mockReset();
+    getModelPricingMock.mockReset();
     loadQuotaSamplesMock.mockReset();
     loadQuotaSamplesMock.mockReturnValue([{ capturedAtMs: QUERIED_AT }]);
   });
@@ -95,12 +131,18 @@ describe("CodexCycleCapacitySection", () => {
       (options: { queryKey?: readonly unknown[] }) =>
         queryKind(options) === "quota"
           ? { isSuccess: true, isError: false, data: quota }
-          : { isSuccess: true, isError: false, data: usage },
+          : queryKind(options) === "analytics"
+            ? { isSuccess: true, isError: false, data: analyticsUsage }
+            : queryKind(options) === "pricing"
+              ? { isSuccess: true, isError: false, data: modelPricing }
+              : { isSuccess: true, isError: false, data: usage },
     );
 
     render(<CodexCycleCapacitySection enabled refreshIntervalMs={0} />);
 
-    expect(screen.getByTestId("capacity-entry")).toHaveTextContent("codex:100");
+    expect(screen.getByTestId("capacity-entry")).toHaveTextContent(
+      "codex:100:personal",
+    );
     expect(screen.getByTestId("sample-count")).toHaveTextContent("1");
     expect(loadQuotaSamplesMock).toHaveBeenCalledTimes(1);
     const usageOptions = useQueryMock.mock.calls
@@ -117,6 +159,38 @@ describe("CodexCycleCapacitySection", () => {
       undefined,
       undefined,
     );
+
+    const analyticsOptions = useQueryMock.mock.calls
+      .map(([options]) => options)
+      .find((options) => queryKind(options) === "analytics");
+    expect(analyticsOptions.enabled).toBe(true);
+    getCodexUsageAnalyticsMock.mockResolvedValue(analyticsUsage);
+    await analyticsOptions.queryFn();
+    expect(getCodexUsageAnalyticsMock).toHaveBeenCalledWith(
+      new Date(RESET_AT - WINDOW_SECONDS * 1000 - 24 * 60 * 60 * 1000)
+        .toISOString()
+        .slice(0, 10),
+      new Date(QUERIED_AT + 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
+    );
+  });
+
+  it("keeps the same card available when only web analytics succeeds", () => {
+    useQueryMock.mockImplementation(
+      (options: { queryKey?: readonly unknown[] }) =>
+        queryKind(options) === "quota"
+          ? { isSuccess: true, isError: false, data: quota }
+          : queryKind(options) === "analytics"
+            ? { isSuccess: true, isError: false, data: analyticsUsage }
+            : queryKind(options) === "pricing"
+              ? { isSuccess: true, isError: false, data: modelPricing }
+              : { isSuccess: false, isError: true, data: undefined },
+    );
+
+    render(<CodexCycleCapacitySection enabled refreshIntervalMs={0} />);
+
+    expect(screen.getByTestId("capacity-entry")).toHaveTextContent(
+      "codex:no-local:personal",
+    );
   });
 
   it("hides stale quota data when the latest API request rejected", () => {
@@ -124,7 +198,11 @@ describe("CodexCycleCapacitySection", () => {
       (options: { queryKey?: readonly unknown[] }) =>
         queryKind(options) === "quota"
           ? { isSuccess: false, isError: true, data: quota }
-          : { isSuccess: true, isError: false, data: usage },
+          : queryKind(options) === "analytics"
+            ? { isSuccess: true, isError: false, data: analyticsUsage }
+            : queryKind(options) === "pricing"
+              ? { isSuccess: true, isError: false, data: modelPricing }
+              : { isSuccess: true, isError: false, data: usage },
     );
 
     render(<CodexCycleCapacitySection enabled />);
@@ -135,6 +213,10 @@ describe("CodexCycleCapacitySection", () => {
       .map(([options]) => options)
       .find((options) => queryKind(options) === "usage");
     expect(usageOptions.enabled).toBe(false);
+    const analyticsOptions = useQueryMock.mock.calls
+      .map(([options]) => options)
+      .find((options) => queryKind(options) === "analytics");
+    expect(analyticsOptions.enabled).toBe(false);
   });
 
   it("hides an HTTP/API failure returned as success=false", () => {
@@ -146,7 +228,11 @@ describe("CodexCycleCapacitySection", () => {
               isError: false,
               data: { ...quota, success: false, error: "HTTP 503" },
             }
-          : { isSuccess: true, isError: false, data: usage },
+          : queryKind(options) === "analytics"
+            ? { isSuccess: true, isError: false, data: analyticsUsage }
+            : queryKind(options) === "pricing"
+              ? { isSuccess: true, isError: false, data: modelPricing }
+              : { isSuccess: true, isError: false, data: usage },
     );
 
     render(<CodexCycleCapacitySection enabled />);

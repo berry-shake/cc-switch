@@ -33,3 +33,36 @@ export interface SubscriptionQuota {
   error: string | null;
   queriedAt: number | null;
 }
+
+export type CodexAnalyticsAccountMode = "workspace" | "personal";
+
+export interface CodexAnalyticsTokenCounts {
+  uncachedInputTokens: number;
+  cachedInputTokens: number;
+  cacheWriteInputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+}
+
+export interface CodexAnalyticsModelUsage {
+  model: string;
+  speed: string;
+  credits: number;
+  tokens: CodexAnalyticsTokenCounts;
+}
+
+export interface CodexAnalyticsDailyUsage {
+  date: string;
+  totals: CodexAnalyticsTokenCounts;
+  models: CodexAnalyticsModelUsage[];
+}
+
+/**
+ * Codex Web analytics 的脱敏结果。OAuth token 和 account id 始终留在
+ * Rust 侧，前端只接收计算所需的每日 Token 与模型/速度信息。
+ */
+export interface CodexAnalyticsUsage {
+  accountMode: CodexAnalyticsAccountMode;
+  days: CodexAnalyticsDailyUsage[];
+  queriedAt: number;
+}

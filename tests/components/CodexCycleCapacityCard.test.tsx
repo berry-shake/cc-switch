@@ -3,11 +3,15 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   CODEX_CYCLE_CAPACITY_EXPANDED_STORAGE_KEY,
+  CODEX_CYCLE_CAPACITY_MODE_STORAGE_KEY,
   CodexCycleCapacityCard,
 } from "@/components/usage/CodexCycleCapacityCard";
 import type { CodexQuotaSample } from "@/lib/codexQuotaSamples";
-import type { SubscriptionQuota } from "@/types/subscription";
-import type { UsageSummary } from "@/types/usage";
+import type {
+  CodexAnalyticsUsage,
+  SubscriptionQuota,
+} from "@/types/subscription";
+import type { ModelPricing, UsageSummary } from "@/types/usage";
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -60,9 +64,100 @@ const usage: UsageSummary = {
   cacheHitRate: 0.5,
 };
 
+const analyticsUsage: CodexAnalyticsUsage = {
+  accountMode: "workspace",
+  queriedAt,
+  days: [
+    {
+      date: "2026-08-22",
+      totals: {
+        uncachedInputTokens: 1_000_000,
+        cachedInputTokens: 0,
+        cacheWriteInputTokens: 0,
+        outputTokens: 0,
+        totalTokens: 1_000_000,
+      },
+      models: [
+        {
+          model: "gpt-5.6-sol",
+          speed: "standard",
+          credits: 0,
+          tokens: {
+            uncachedInputTokens: 1_000_000,
+            cachedInputTokens: 0,
+            cacheWriteInputTokens: 0,
+            outputTokens: 0,
+            totalTokens: 1_000_000,
+          },
+        },
+      ],
+    },
+  ],
+};
+
+const modelPricing: ModelPricing[] = [
+  {
+    modelId: "gpt-5.6-sol",
+    displayName: "GPT-5.6 Sol",
+    inputCostPerMillion: "4",
+    outputCostPerMillion: "20",
+    cacheReadCostPerMillion: "0.4",
+    cacheCreationCostPerMillion: "5",
+  },
+];
+
 describe("CodexCycleCapacityCard", () => {
   beforeEach(() => {
     window.localStorage.removeItem(CODEX_CYCLE_CAPACITY_EXPANDED_STORAGE_KEY);
+    window.localStorage.removeItem(CODEX_CYCLE_CAPACITY_MODE_STORAGE_KEY);
+  });
+
+  it("keeps the existing card and switches between persisted data sources", () => {
+    const { unmount } = render(
+      <CodexCycleCapacityCard
+        quota={quota}
+        usage={usage}
+        analyticsUsage={analyticsUsage}
+        modelPricing={modelPricing}
+        nowMs={queriedAt}
+      />,
+    );
+
+    expect(screen.getByTestId("codex-cycle-capacity-card")).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "本地日志" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    expect(screen.getByText("$691.48")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("radio", { name: "官方接口" }));
+
+    expect(screen.getByRole("radio", { name: "官方接口" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    expect(screen.getByText("$4.00")).toBeInTheDocument();
+    expect(screen.getByText("$13.33")).toBeInTheDocument();
+    expect(
+      window.localStorage.getItem(CODEX_CYCLE_CAPACITY_MODE_STORAGE_KEY),
+    ).toBe("analytics");
+
+    unmount();
+    render(
+      <CodexCycleCapacityCard
+        quota={quota}
+        usage={usage}
+        analyticsUsage={analyticsUsage}
+        modelPricing={modelPricing}
+        nowMs={queriedAt}
+      />,
+    );
+
+    expect(screen.getByRole("radio", { name: "官方接口" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    expect(screen.getByText("$4.00")).toBeInTheDocument();
   });
 
   it("defaults to expanded and restores the persisted collapse state", () => {

@@ -19,14 +19,21 @@ import {
   deriveCodexCycleCapacity,
   type CodexCycleCapacityEstimate,
 } from "@/lib/codexCycleCapacity";
+import {
+  deriveCodexAnalyticsCycleCapacity,
+  type CodexAnalyticsCycleCapacityEstimate,
+} from "@/lib/codexAnalyticsCapacity";
 import { forecastCodexCycle } from "@/lib/codexCycleForecast";
 import {
   getCodexQuotaSamplesForCycle,
   type CodexQuotaSample,
 } from "@/lib/codexQuotaSamples";
 import { cn } from "@/lib/utils";
-import type { SubscriptionQuota } from "@/types/subscription";
-import type { UsageSummary } from "@/types/usage";
+import type {
+  CodexAnalyticsUsage,
+  SubscriptionQuota,
+} from "@/types/subscription";
+import type { ModelPricing, UsageSummary } from "@/types/usage";
 
 import {
   fmtUsd,
@@ -40,6 +47,10 @@ export interface CodexCycleCapacityCardProps {
   quota: SubscriptionQuota | null | undefined;
   /** 必须是 `quota` 当前长周期精确起止范围内的本地 Codex 汇总。 */
   usage: UsageSummary | null | undefined;
+  /** 来自 Codex 官方用量接口的日级 Token 与模型/速度数据。 */
+  analyticsUsage?: CodexAnalyticsUsage | null;
+  /** 两种来源共用的本地模型定价；官方接口模式不会另起硬编码价格表。 */
+  modelPricing?: readonly ModelPricing[] | null;
   /** 当前本机保存的官方额度采样；仅同一周期的数据会参与近期预测。 */
   quotaSamples?: readonly CodexQuotaSample[];
   className?: string;
@@ -49,6 +60,10 @@ export interface CodexCycleCapacityCardProps {
 
 export const CODEX_CYCLE_CAPACITY_EXPANDED_STORAGE_KEY =
   "cc-switch.usage.codexCycleCapacity.expanded";
+export const CODEX_CYCLE_CAPACITY_MODE_STORAGE_KEY =
+  "cc-switch.usage.codexCycleCapacity.calculationMode";
+
+export type CodexCycleCapacityCalculationMode = "local" | "analytics";
 
 function readInitialExpandedState(): boolean {
   if (typeof window === "undefined") return true;
@@ -76,6 +91,31 @@ function persistExpandedState(expanded: boolean): void {
     );
   } catch {
     // The panel remains usable even when the preference cannot be persisted.
+  }
+}
+
+function readInitialCalculationMode(): CodexCycleCapacityCalculationMode {
+  if (typeof window === "undefined") return "local";
+
+  try {
+    const stored = window.localStorage.getItem(
+      CODEX_CYCLE_CAPACITY_MODE_STORAGE_KEY,
+    );
+    if (stored === "analytics") return "analytics";
+  } catch {
+    // localStorage may be unavailable in restricted webviews; keep the default.
+  }
+
+  return "local";
+}
+
+function persistCalculationMode(mode: CodexCycleCapacityCalculationMode): void {
+  if (typeof window === "undefined") return;
+
+  try {
+    window.localStorage.setItem(CODEX_CYCLE_CAPACITY_MODE_STORAGE_KEY, mode);
+  } catch {
+    // The switch remains usable even when the preference cannot be persisted.
   }
 }
 
@@ -212,6 +252,8 @@ function CapacityRing({
 export function CodexCycleCapacityCard({
   quota,
   usage,
+  analyticsUsage,
+  modelPricing,
   quotaSamples = [],
   className,
   nowMs,
@@ -219,12 +261,34 @@ export function CodexCycleCapacityCard({
   const { t, i18n } = useTranslation();
   const lang = getResolvedLang(i18n);
   const locale = getLocaleFromLanguage(lang);
-  const estimate = deriveCodexCycleCapacity(quota, usage, nowMs);
+  const localEstimate = deriveCodexCycleCapacity(quota, usage, nowMs);
+  const analyticsEstimate = deriveCodexAnalyticsCycleCapacity(
+    quota,
+    analyticsUsage,
+    modelPricing,
+    nowMs,
+  );
   const [isExpanded, setIsExpanded] = useState(readInitialExpandedState);
+  const [selectedMode, setSelectedMode] = useState(readInitialCalculationMode);
   const rawId = useId();
   const gradientId = `codex-capacity-${rawId.replace(/[^a-zA-Z0-9_-]/g, "")}`;
 
+  const effectiveMode: CodexCycleCapacityCalculationMode =
+    selectedMode === "analytics" && analyticsEstimate
+      ? "analytics"
+      : selectedMode === "local" && localEstimate
+        ? "local"
+        : analyticsEstimate
+          ? "analytics"
+          : "local";
+  const estimate =
+    effectiveMode === "analytics" ? analyticsEstimate : localEstimate;
+
   if (!estimate) return null;
+
+  const activeAnalyticsEstimate: CodexAnalyticsCycleCapacityEstimate | null =
+    effectiveMode === "analytics" ? analyticsEstimate : null;
+  const hasBothModes = Boolean(localEstimate && analyticsEstimate);
 
   const forecastSamples = getCodexQuotaSamplesForCycle(
     quotaSamples,
@@ -251,6 +315,31 @@ export function CodexCycleCapacityCard({
     ? t("usage.collapse", "收起")
     : t("usage.expand", "展开");
   const toggleAriaLabel = `${toggleLabel} ${titleLabel}`;
+  const basisLabel = activeAnalyticsEstimate
+    ? activeAnalyticsEstimate.accountMode === "workspace"
+      ? t(
+          "usage.cycleCapacity.analyticsWorkspaceBasis",
+          "按官方用量接口的模型级 Token 与速度折算",
+        )
+      : t(
+          "usage.cycleCapacity.analyticsPersonalBasis",
+          "按官方用量接口的每日 Token 与模型/速度额度占比折算",
+        )
+    : t("usage.cycleCapacity.basis", "按当前模型、速度及 Token 结构折算");
+  const disclaimer = activeAnalyticsEstimate
+    ? activeAnalyticsEstimate.accountMode === "workspace"
+      ? t(
+          "usage.cycleCapacity.analyticsWorkspaceDisclaimer",
+          "这是官方用量接口返回的模型级日统计按已用比例反推的 USD/Token 等效值。日桶存在同步延迟，周期中途重置时起始日可能偏高；结果不代表官方账单或固定 Token 上限。",
+        )
+      : t(
+          "usage.cycleCapacity.analyticsPersonalDisclaimer",
+          "这是官方用量接口返回的每日总 Token 与模型/速度额度占比经费率校正后，按已用比例反推的等效值。多模型拆分、日桶同步及周期中途重置均会带来误差；结果不代表官方账单或固定 Token 上限。",
+        )
+    : t(
+        "usage.cycleCapacity.disclaimer",
+        "这是本机单账号用量按官方已用比例反推的 USD/Token 等效值，受本地日志完整性与同步延迟影响，不代表官方账单或固定 Token 上限。",
+      );
   const cycleRange = `${formatCycleDateTime(
     estimate.startMs,
     locale,
@@ -260,6 +349,14 @@ export function CodexCycleCapacityCard({
     setIsExpanded(expanded);
     persistExpandedState(expanded);
   };
+
+  const handleModeChange = (mode: CodexCycleCapacityCalculationMode) => {
+    setSelectedMode(mode);
+    persistCalculationMode(mode);
+  };
+
+  const formatUsdEstimate = (value: number) =>
+    `${fmtUsd(value, 2)}${activeAnalyticsEstimate?.hasUnknownPricing ? "*" : ""}`;
 
   return (
     <Collapsible asChild open={isExpanded} onOpenChange={handleExpandedChange}>
@@ -289,14 +386,55 @@ export function CodexCycleCapacityCard({
               </div>
             </div>
 
-            <div className="flex shrink-0 items-center gap-2 sm:justify-end">
+            <div className="flex shrink-0 flex-wrap items-center gap-2 sm:justify-end">
               <div className="flex min-w-0 flex-1 items-center gap-1.5 rounded-lg border border-border/40 bg-background/40 px-2.5 py-1.5 text-[10px] leading-tight text-muted-foreground sm:flex-none">
                 <Info className="h-3.5 w-3.5 shrink-0" />
-                {t(
-                  "usage.cycleCapacity.basis",
-                  "按当前模型、速度及 Token 结构折算",
-                )}
+                {basisLabel}
               </div>
+              {hasBothModes ? (
+                <div
+                  className="inline-flex rounded-lg border border-border/60 bg-muted/45 p-0.5"
+                  role="radiogroup"
+                  aria-label={t(
+                    "usage.cycleCapacity.calculationMode",
+                    "估算方式",
+                  )}
+                >
+                  {(
+                    [
+                      [
+                        "local",
+                        t("usage.cycleCapacity.localCalculation", "本地日志"),
+                      ],
+                      [
+                        "analytics",
+                        t(
+                          "usage.cycleCapacity.analyticsCalculation",
+                          "官方接口",
+                        ),
+                      ],
+                    ] as const
+                  ).map(([mode, label]) => (
+                    <Button
+                      key={mode}
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      role="radio"
+                      aria-checked={effectiveMode === mode}
+                      className={cn(
+                        "h-7 rounded-md px-3 text-[11px] shadow-none transition-none",
+                        effectiveMode === mode
+                          ? "bg-background font-semibold text-foreground shadow-sm hover:bg-background"
+                          : "text-muted-foreground hover:text-foreground",
+                      )}
+                      onClick={() => handleModeChange(mode)}
+                    >
+                      {label}
+                    </Button>
+                  ))}
+                </div>
+              ) : null}
               <CollapsibleTrigger asChild>
                 <Button
                   type="button"
@@ -363,14 +501,14 @@ export function CodexCycleCapacityCard({
                       "usage.cycleCapacity.usedUsd",
                       "当前累计估算费用（USD）",
                     )}
-                    value={fmtUsd(estimate.usedUsd, 2)}
+                    value={formatUsdEstimate(estimate.usedUsd)}
                   />
                   <CapacityMetric
                     label={t(
                       "usage.cycleCapacity.totalUsd",
                       "完整周期美元等效容量（估算）",
                     )}
-                    value={fmtUsd(estimate.totalUsd, 2)}
+                    value={formatUsdEstimate(estimate.totalUsd)}
                     emphasized
                   />
                   <CapacityMetric
@@ -391,7 +529,7 @@ export function CodexCycleCapacityCard({
                       "usage.cycleCapacity.remainingUsd",
                       "剩余额度美元等效容量（估算）",
                     )}
-                    value={fmtUsd(estimate.remainingUsd, 2)}
+                    value={formatUsdEstimate(estimate.remainingUsd)}
                   />
                 </div>
               </div>
@@ -410,10 +548,13 @@ export function CodexCycleCapacityCard({
             <div className="mt-4 flex items-start gap-2 rounded-lg bg-muted/30 px-3 py-2 text-[10px] leading-relaxed text-muted-foreground">
               <CircleDollarSign className="mt-0.5 h-3.5 w-3.5 shrink-0" />
               <span>
-                {t(
-                  "usage.cycleCapacity.disclaimer",
-                  "这是本机单账号用量按官方已用比例反推的 USD/Token 等效值，受本地日志完整性与同步延迟影响，不代表官方账单或固定 Token 上限。",
-                )}
+                {disclaimer}
+                {activeAnalyticsEstimate?.hasUnknownPricing
+                  ? ` ${t(
+                      "usage.cycleCapacity.unknownPricing",
+                      "带 * 的金额只累计已识别公开价格的模型。",
+                    )}`
+                  : ""}
               </span>
             </div>
           </CollapsibleContent>

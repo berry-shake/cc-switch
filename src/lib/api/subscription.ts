@@ -4,7 +4,10 @@ import {
   recordCodexQuotaSample,
   sampleCodexQuotaCycle,
 } from "@/lib/codexQuotaSamples";
-import type { SubscriptionQuota } from "@/types/subscription";
+import type {
+  CodexAnalyticsUsage,
+  SubscriptionQuota,
+} from "@/types/subscription";
 
 export const subscriptionApi = {
   getQuota: async (tool: string): Promise<SubscriptionQuota> => {
@@ -23,6 +26,11 @@ export const subscriptionApi = {
   },
   getCodexOauthQuota: (accountId: string | null): Promise<SubscriptionQuota> =>
     invoke("get_codex_oauth_quota", { accountId }),
+  getCodexUsageAnalytics: (
+    startDate: string,
+    endDate: string,
+  ): Promise<CodexAnalyticsUsage> =>
+    invoke("get_codex_usage_analytics", { startDate, endDate }),
   getXaiOauthQuota: (accountId: string | null): Promise<SubscriptionQuota> =>
     invoke("get_xai_oauth_quota", { accountId }),
   getCodingPlanQuota: (

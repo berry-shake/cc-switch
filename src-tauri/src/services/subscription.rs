@@ -503,6 +503,22 @@ fn read_codex_credentials() -> CodexCredentials {
     read_codex_credentials_from_file()
 }
 
+/// 为 Codex Web 用量类只读请求提供当前 CLI OAuth 凭据。
+///
+/// `Expired` 仅表示本地刷新时间超过启发式阈值；与额度查询保持一致，仍允许
+/// 真实端点决定 token 是否有效。严格的 `auth_mode == "chatgpt"` 判断仍由
+/// `read_codex_credentials` 统一执行。
+pub(crate) fn read_codex_request_credentials() -> Result<(String, Option<String>), String> {
+    let (token, account_id, status, message) = read_codex_credentials();
+    match status {
+        CredentialStatus::Valid | CredentialStatus::Expired => token
+            .map(|token| (token, account_id))
+            .ok_or_else(|| "Codex OAuth access token is unavailable".to_string()),
+        CredentialStatus::NotFound | CredentialStatus::ParseError => Err(message
+            .unwrap_or_else(|| "Codex ChatGPT OAuth credentials are unavailable".to_string())),
+    }
+}
+
 /// 从 macOS Keychain 读取 Codex 凭据
 #[cfg(target_os = "macos")]
 fn read_codex_credentials_from_keychain() -> Option<CodexCredentials> {
