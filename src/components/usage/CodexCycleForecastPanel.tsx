@@ -426,67 +426,84 @@ export function CodexCycleForecastPanel({
 
       <div className="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,2fr)_minmax(260px,1fr)]">
         <div
-          className="min-w-0 rounded-xl border border-border/50 bg-background/45 p-4 shadow-sm"
+          className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2"
           data-testid="codex-cycle-forecast-models"
         >
-          {recentPredictionUnavailable ? (
-            <div
-              className="mb-4 rounded-lg border border-border/40 bg-muted/30 px-3 py-2 text-xs font-medium text-muted-foreground"
-              data-testid="codex-cycle-recent-sampling"
-              role="status"
-              aria-live="polite"
-            >
-              {waitingForSample}
-            </div>
-          ) : null}
+          <div
+            className="min-w-0 rounded-xl border border-border/50 bg-background/45 p-4 shadow-sm"
+            data-testid="codex-cycle-forecast-recent-model"
+          >
+            {recentPredictionUnavailable ? (
+              <div
+                className="mb-4 rounded-lg border border-border/40 bg-muted/30 px-3 py-2 text-xs font-medium text-muted-foreground"
+                data-testid="codex-cycle-recent-sampling"
+                role="status"
+                aria-live="polite"
+              >
+                {waitingForSample}
+              </div>
+            ) : null}
 
-          <dl className="grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2">
-            <ForecastDetail
-              metricId="cumulative-exhaustion-at"
-              label={t(
-                "usage.cycleCapacity.cumulativeExhaustionAt",
-                "累计平均模型预计耗尽时间",
-              )}
-              value={formatExhaustion(forecast.cumulativeExhaustion, locale, t)}
-            />
-            <ForecastDetail
-              metricId="recent-rate"
-              label={t(
-                "usage.cycleCapacity.recentRate",
-                "近期消耗速率（采样区间）",
-              )}
-              value={recentRateValue}
-              valueClassName={cn(
-                recentPredictionUnavailable &&
-                  "font-medium text-muted-foreground",
-              )}
-            />
-            <ForecastDetail
-              metricId="recent-exhaustion-at"
-              label={t(
-                "usage.cycleCapacity.recentExhaustionAt",
-                "近期速率模型预计耗尽时间",
-              )}
-              value={recentExhaustionValue}
-              valueClassName={cn(
-                recentPredictionUnavailable &&
-                  "font-medium text-muted-foreground",
-              )}
-            />
-            <ForecastDetail
-              metricId="projected-final-utilization"
-              label={t(
-                "usage.cycleCapacity.projectedFinalUtilization",
-                "近期速率模型期末预计用量",
-              )}
-              value={projectedFinalValue}
-              tone={recentExhaustsEarly ? "danger" : "neutral"}
-              valueClassName={cn(
-                recentPredictionUnavailable &&
-                  "font-medium text-muted-foreground",
-              )}
-            />
-          </dl>
+            <dl className="grid grid-cols-1 gap-4">
+              <ForecastDetail
+                metricId="recent-rate"
+                label={t(
+                  "usage.cycleCapacity.recentRate",
+                  "近期消耗速率（采样区间）",
+                )}
+                value={recentRateValue}
+                valueClassName={cn(
+                  recentPredictionUnavailable &&
+                    "font-medium text-muted-foreground",
+                )}
+              />
+              <ForecastDetail
+                metricId="projected-final-utilization"
+                label={t(
+                  "usage.cycleCapacity.projectedFinalUtilization",
+                  "近期速率模型期末预计用量",
+                )}
+                value={projectedFinalValue}
+                tone={recentExhaustsEarly ? "danger" : "neutral"}
+                valueClassName={cn(
+                  recentPredictionUnavailable &&
+                    "font-medium text-muted-foreground",
+                )}
+              />
+            </dl>
+          </div>
+
+          <div
+            className="min-w-0 rounded-xl border border-border/50 bg-background/45 p-4 shadow-sm"
+            data-testid="codex-cycle-forecast-exhaustion-models"
+          >
+            <dl className="grid grid-cols-1 gap-4">
+              <ForecastDetail
+                metricId="cumulative-exhaustion-at"
+                label={t(
+                  "usage.cycleCapacity.cumulativeExhaustionAt",
+                  "累计平均模型预计耗尽时间",
+                )}
+                value={formatExhaustion(
+                  forecast.cumulativeExhaustion,
+                  locale,
+                  t,
+                )}
+              />
+              <ForecastDetail
+                metricId="recent-exhaustion-at"
+                label={t(
+                  "usage.cycleCapacity.recentExhaustionAt",
+                  "近期速率模型预计耗尽时间",
+                )}
+                value={recentExhaustionValue}
+                valueClassName={cn(
+                  recentPredictionUnavailable &&
+                    "font-medium text-muted-foreground",
+                )}
+              />
+            </dl>
+          </div>
         </div>
 
         <div

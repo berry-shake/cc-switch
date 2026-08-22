@@ -1,7 +1,10 @@
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { CodexCycleCapacityCard } from "@/components/usage/CodexCycleCapacityCard";
+import {
+  CODEX_CYCLE_CAPACITY_EXPANDED_STORAGE_KEY,
+  CodexCycleCapacityCard,
+} from "@/components/usage/CodexCycleCapacityCard";
 import type { CodexQuotaSample } from "@/lib/codexQuotaSamples";
 import type { SubscriptionQuota } from "@/types/subscription";
 import type { UsageSummary } from "@/types/usage";
@@ -58,6 +61,61 @@ const usage: UsageSummary = {
 };
 
 describe("CodexCycleCapacityCard", () => {
+  beforeEach(() => {
+    window.localStorage.removeItem(CODEX_CYCLE_CAPACITY_EXPANDED_STORAGE_KEY);
+  });
+
+  it("defaults to expanded and restores the persisted collapse state", () => {
+    const { unmount } = render(
+      <CodexCycleCapacityCard quota={quota} usage={usage} nowMs={queriedAt} />,
+    );
+
+    const collapseButton = screen.getByRole("button", {
+      name: "收起 Codex 周期等效容量（估算）",
+    });
+    expect(collapseButton).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByTestId("codex-cycle-forecast")).toBeInTheDocument();
+
+    fireEvent.click(collapseButton);
+
+    expect(
+      screen.getByRole("button", {
+        name: "展开 Codex 周期等效容量（估算）",
+      }),
+    ).toHaveAttribute("aria-expanded", "false");
+    expect(
+      screen.queryByTestId("codex-cycle-forecast"),
+    ).not.toBeInTheDocument();
+    expect(
+      window.localStorage.getItem(CODEX_CYCLE_CAPACITY_EXPANDED_STORAGE_KEY),
+    ).toBe("false");
+
+    unmount();
+    render(
+      <CodexCycleCapacityCard quota={quota} usage={usage} nowMs={queriedAt} />,
+    );
+
+    const expandButton = screen.getByRole("button", {
+      name: "展开 Codex 周期等效容量（估算）",
+    });
+    expect(expandButton).toHaveAttribute("aria-expanded", "false");
+    expect(
+      screen.queryByTestId("codex-cycle-forecast"),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(expandButton);
+
+    expect(
+      screen.getByRole("button", {
+        name: "收起 Codex 周期等效容量（估算）",
+      }),
+    ).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByTestId("codex-cycle-forecast")).toBeInTheDocument();
+    expect(
+      window.localStorage.getItem(CODEX_CYCLE_CAPACITY_EXPANDED_STORAGE_KEY),
+    ).toBe("true");
+  });
+
   it("renders the ratio and six explicitly estimated capacity metrics", () => {
     render(
       <CodexCycleCapacityCard quota={quota} usage={usage} nowMs={queriedAt} />,
@@ -112,6 +170,28 @@ describe("CodexCycleCapacityCard", () => {
         .getByTestId("codex-cycle-forecast-models")
         .querySelectorAll("[data-forecast-metric]"),
     ).toHaveLength(4);
+    expect(
+      screen
+        .getByTestId("codex-cycle-forecast-recent-model")
+        .querySelectorAll("[data-forecast-metric]"),
+    ).toHaveLength(2);
+    expect(
+      screen
+        .getByTestId("codex-cycle-forecast-exhaustion-models")
+        .querySelectorAll("[data-forecast-metric]"),
+    ).toHaveLength(2);
+    expect(
+      [
+        ...screen
+          .getByTestId("codex-cycle-forecast-models")
+          .querySelectorAll("[data-forecast-metric]"),
+      ].map((metric) => metric.getAttribute("data-forecast-metric")),
+    ).toEqual([
+      "recent-rate",
+      "projected-final-utilization",
+      "cumulative-exhaustion-at",
+      "recent-exhaustion-at",
+    ]);
     expect(
       screen
         .getByTestId("codex-cycle-forecast-reset")

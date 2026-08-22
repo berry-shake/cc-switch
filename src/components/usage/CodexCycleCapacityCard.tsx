@@ -1,8 +1,20 @@
-import { useId } from "react";
+import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { CalendarClock, CircleDollarSign, Gauge, Info } from "lucide-react";
+import {
+  CalendarClock,
+  ChevronDown,
+  CircleDollarSign,
+  Gauge,
+  Info,
+} from "lucide-react";
 
+import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import {
   deriveCodexCycleCapacity,
   type CodexCycleCapacityEstimate,
@@ -33,6 +45,38 @@ export interface CodexCycleCapacityCardProps {
   className?: string;
   /** 仅用于可重复测试；生产环境使用当前时间。 */
   nowMs?: number;
+}
+
+export const CODEX_CYCLE_CAPACITY_EXPANDED_STORAGE_KEY =
+  "cc-switch.usage.codexCycleCapacity.expanded";
+
+function readInitialExpandedState(): boolean {
+  if (typeof window === "undefined") return true;
+
+  try {
+    const stored = window.localStorage.getItem(
+      CODEX_CYCLE_CAPACITY_EXPANDED_STORAGE_KEY,
+    );
+    if (stored === "false") return false;
+    if (stored === "true") return true;
+  } catch {
+    // localStorage may be unavailable in restricted webviews; keep the default.
+  }
+
+  return true;
+}
+
+function persistExpandedState(expanded: boolean): void {
+  if (typeof window === "undefined") return;
+
+  try {
+    window.localStorage.setItem(
+      CODEX_CYCLE_CAPACITY_EXPANDED_STORAGE_KEY,
+      String(expanded),
+    );
+  } catch {
+    // The panel remains usable even when the preference cannot be persisted.
+  }
 }
 
 function formatPercent(value: number): string {
@@ -176,6 +220,7 @@ export function CodexCycleCapacityCard({
   const lang = getResolvedLang(i18n);
   const locale = getLocaleFromLanguage(lang);
   const estimate = deriveCodexCycleCapacity(quota, usage, nowMs);
+  const [isExpanded, setIsExpanded] = useState(readInitialExpandedState);
   const rawId = useId();
   const gradientId = `codex-capacity-${rawId.replace(/[^a-zA-Z0-9_-]/g, "")}`;
 
@@ -198,137 +243,182 @@ export function CodexCycleCapacityCard({
 
   const usedLabel = t("usage.cycleCapacity.used", "已使用");
   const estimateLabel = t("usage.cycleCapacity.estimate", "等效估算");
+  const titleLabel = t(
+    "usage.cycleCapacity.title",
+    "Codex 周期等效容量（估算）",
+  );
+  const toggleLabel = isExpanded
+    ? t("usage.collapse", "收起")
+    : t("usage.expand", "展开");
+  const toggleAriaLabel = `${toggleLabel} ${titleLabel}`;
   const cycleRange = `${formatCycleDateTime(
     estimate.startMs,
     locale,
   )} → ${formatCycleDateTime(estimate.resetAtMs, locale)}`;
 
+  const handleExpandedChange = (expanded: boolean) => {
+    setIsExpanded(expanded);
+    persistExpandedState(expanded);
+  };
+
   return (
-    <Card
-      className={cn(
-        "overflow-hidden border border-border/50 bg-card/60 shadow-sm backdrop-blur-xl",
-        className,
-      )}
-      data-testid="codex-cycle-capacity-card"
-    >
-      <CardContent className="p-4 md:p-5">
-        <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-          <div className="flex min-w-0 items-start gap-3">
-            <div className="rounded-xl bg-emerald-500/10 p-2.5 text-emerald-600 dark:text-emerald-400">
-              <Gauge className="h-5 w-5" />
-            </div>
-            <div className="min-w-0">
-              <h3 className="text-base font-semibold tracking-tight">
-                {t("usage.cycleCapacity.title", "Codex 周期等效容量（估算）")}
-              </h3>
-              <div className="mt-1 flex items-center gap-1.5 text-[11px] text-muted-foreground">
-                <CalendarClock className="h-3.5 w-3.5 shrink-0" />
-                <span className="truncate" title={cycleRange}>
-                  {cycleRange}
-                </span>
+    <Collapsible asChild open={isExpanded} onOpenChange={handleExpandedChange}>
+      <Card
+        className={cn(
+          "overflow-hidden border border-border/50 bg-card/60 shadow-sm backdrop-blur-xl",
+          className,
+        )}
+        data-testid="codex-cycle-capacity-card"
+      >
+        <CardContent className="p-4 md:p-5">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+            <div className="flex min-w-0 items-start gap-3">
+              <div className="rounded-xl bg-emerald-500/10 p-2.5 text-emerald-600 dark:text-emerald-400">
+                <Gauge className="h-5 w-5" />
+              </div>
+              <div className="min-w-0">
+                <h3 className="text-base font-semibold tracking-tight">
+                  {titleLabel}
+                </h3>
+                <div className="mt-1 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                  <CalendarClock className="h-3.5 w-3.5 shrink-0" />
+                  <span className="truncate" title={cycleRange}>
+                    {cycleRange}
+                  </span>
+                </div>
               </div>
             </div>
-          </div>
-          <div className="flex items-center gap-1.5 rounded-lg border border-border/40 bg-background/40 px-2.5 py-1.5 text-[10px] leading-tight text-muted-foreground">
-            <Info className="h-3.5 w-3.5 shrink-0" />
-            {t(
-              "usage.cycleCapacity.basis",
-              "按当前模型、速度及 Token 结构折算",
-            )}
-          </div>
-        </div>
 
-        <div className="grid gap-5 lg:grid-cols-[190px_minmax(0,1fr)] lg:items-center">
-          <CapacityRing
-            estimate={estimate}
-            gradientId={gradientId}
-            usedLabel={usedLabel}
-            estimateLabel={estimateLabel}
-          />
-
-          <div className="min-w-0">
-            <div className="mb-4 h-2 overflow-hidden rounded-full bg-muted/70">
-              <div
-                className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-blue-500"
-                style={{
-                  width: `${Math.min(100, estimate.utilizationPercent)}%`,
-                }}
-              />
-            </div>
-
-            <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 xl:grid-cols-3">
-              <CapacityMetric
-                label={t(
-                  "usage.cycleCapacity.remainingQuota",
-                  "剩余额度（估算）",
+            <div className="flex shrink-0 items-center gap-2 sm:justify-end">
+              <div className="flex min-w-0 flex-1 items-center gap-1.5 rounded-lg border border-border/40 bg-background/40 px-2.5 py-1.5 text-[10px] leading-tight text-muted-foreground sm:flex-none">
+                <Info className="h-3.5 w-3.5 shrink-0" />
+                {t(
+                  "usage.cycleCapacity.basis",
+                  "按当前模型、速度及 Token 结构折算",
                 )}
-                value={formatPercent(estimate.remainingPercent)}
-              />
-              <CapacityMetric
-                label={t(
-                  "usage.cycleCapacity.totalTokens",
-                  "完整周期 Token 等效容量（估算）",
-                )}
-                value={formatEstimatedTokens(estimate.totalTokens, lang)}
-                title={Math.round(estimate.totalTokens).toLocaleString(locale)}
-                emphasized
-              />
-              <CapacityMetric
-                label={t(
-                  "usage.cycleCapacity.usedUsd",
-                  "当前累计估算费用（USD）",
-                )}
-                value={fmtUsd(estimate.usedUsd, 2)}
-              />
-              <CapacityMetric
-                label={t(
-                  "usage.cycleCapacity.totalUsd",
-                  "完整周期美元等效容量（估算）",
-                )}
-                value={fmtUsd(estimate.totalUsd, 2)}
-                emphasized
-              />
-              <CapacityMetric
-                label={t(
-                  "usage.cycleCapacity.remainingTokens",
-                  "剩余额度 Token 等效容量（估算）",
-                )}
-                value={formatEstimatedTokens(estimate.remainingTokens, lang)}
-                title={Math.round(estimate.remainingTokens).toLocaleString(
-                  locale,
-                )}
-              />
-              <CapacityMetric
-                label={t(
-                  "usage.cycleCapacity.remainingUsd",
-                  "剩余额度美元等效容量（估算）",
-                )}
-                value={fmtUsd(estimate.remainingUsd, 2)}
-              />
+              </div>
+              <CollapsibleTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-9 min-w-9 shrink-0 gap-1.5 px-2.5 transition-[background-color,color,transform] duration-150 active:scale-[0.97]"
+                  aria-label={toggleAriaLabel}
+                  title={toggleAriaLabel}
+                  data-testid="codex-cycle-capacity-toggle"
+                >
+                  <span className="hidden sm:inline">{toggleLabel}</span>
+                  <ChevronDown
+                    className={cn(
+                      "h-4 w-4 transition-transform duration-200 motion-reduce:transition-none",
+                      isExpanded && "rotate-180",
+                    )}
+                    aria-hidden="true"
+                  />
+                </Button>
+              </CollapsibleTrigger>
             </div>
           </div>
-        </div>
 
-        {forecast ? (
-          <CodexCycleForecastPanel
-            forecast={forecast}
-            resetAtMs={estimate.resetAtMs}
-            locale={locale}
-            lang={lang}
-            t={t}
-          />
-        ) : null}
+          <CollapsibleContent>
+            <div className="mt-4 grid gap-5 lg:grid-cols-[190px_minmax(0,1fr)] lg:items-center">
+              <CapacityRing
+                estimate={estimate}
+                gradientId={gradientId}
+                usedLabel={usedLabel}
+                estimateLabel={estimateLabel}
+              />
 
-        <div className="mt-4 flex items-start gap-2 rounded-lg bg-muted/30 px-3 py-2 text-[10px] leading-relaxed text-muted-foreground">
-          <CircleDollarSign className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          <span>
-            {t(
-              "usage.cycleCapacity.disclaimer",
-              "这是本机单账号用量按官方已用比例反推的 USD/Token 等效值，受本地日志完整性与同步延迟影响，不代表官方账单或固定 Token 上限。",
-            )}
-          </span>
-        </div>
-      </CardContent>
-    </Card>
+              <div className="min-w-0">
+                <div className="mb-4 h-2 overflow-hidden rounded-full bg-muted/70">
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-blue-500"
+                    style={{
+                      width: `${Math.min(100, estimate.utilizationPercent)}%`,
+                    }}
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 xl:grid-cols-3">
+                  <CapacityMetric
+                    label={t(
+                      "usage.cycleCapacity.remainingQuota",
+                      "剩余额度（估算）",
+                    )}
+                    value={formatPercent(estimate.remainingPercent)}
+                  />
+                  <CapacityMetric
+                    label={t(
+                      "usage.cycleCapacity.totalTokens",
+                      "完整周期 Token 等效容量（估算）",
+                    )}
+                    value={formatEstimatedTokens(estimate.totalTokens, lang)}
+                    title={Math.round(estimate.totalTokens).toLocaleString(
+                      locale,
+                    )}
+                    emphasized
+                  />
+                  <CapacityMetric
+                    label={t(
+                      "usage.cycleCapacity.usedUsd",
+                      "当前累计估算费用（USD）",
+                    )}
+                    value={fmtUsd(estimate.usedUsd, 2)}
+                  />
+                  <CapacityMetric
+                    label={t(
+                      "usage.cycleCapacity.totalUsd",
+                      "完整周期美元等效容量（估算）",
+                    )}
+                    value={fmtUsd(estimate.totalUsd, 2)}
+                    emphasized
+                  />
+                  <CapacityMetric
+                    label={t(
+                      "usage.cycleCapacity.remainingTokens",
+                      "剩余额度 Token 等效容量（估算）",
+                    )}
+                    value={formatEstimatedTokens(
+                      estimate.remainingTokens,
+                      lang,
+                    )}
+                    title={Math.round(estimate.remainingTokens).toLocaleString(
+                      locale,
+                    )}
+                  />
+                  <CapacityMetric
+                    label={t(
+                      "usage.cycleCapacity.remainingUsd",
+                      "剩余额度美元等效容量（估算）",
+                    )}
+                    value={fmtUsd(estimate.remainingUsd, 2)}
+                  />
+                </div>
+              </div>
+            </div>
+
+            {forecast ? (
+              <CodexCycleForecastPanel
+                forecast={forecast}
+                resetAtMs={estimate.resetAtMs}
+                locale={locale}
+                lang={lang}
+                t={t}
+              />
+            ) : null}
+
+            <div className="mt-4 flex items-start gap-2 rounded-lg bg-muted/30 px-3 py-2 text-[10px] leading-relaxed text-muted-foreground">
+              <CircleDollarSign className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              <span>
+                {t(
+                  "usage.cycleCapacity.disclaimer",
+                  "这是本机单账号用量按官方已用比例反推的 USD/Token 等效值，受本地日志完整性与同步延迟影响，不代表官方账单或固定 Token 上限。",
+                )}
+              </span>
+            </div>
+          </CollapsibleContent>
+        </CardContent>
+      </Card>
+    </Collapsible>
   );
 }
