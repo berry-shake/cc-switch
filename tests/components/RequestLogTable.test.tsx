@@ -235,21 +235,21 @@ describe("RequestLogTable", () => {
     const headers = screen.getAllByRole("columnheader");
     expect(headers).toHaveLength(11);
     expect(headers[3]).toHaveTextContent("usage.freshInput");
-    expect(headers[4]).toHaveTextContent("usage.cacheReadTokens");
-    expect(headers[5]).toHaveTextContent("usage.cacheCreationTokens");
+    expect(headers[4]).toHaveTextContent("usage.cacheCreationTokens");
+    expect(headers[5]).toHaveTextContent("usage.cacheReadTokens");
     expect(headers[6]).toHaveTextContent("usage.outputTokens");
 
     const dataRows = screen.getAllByRole("row").slice(1);
     const cells = within(dataRows[0]).getAllByRole("cell");
     expect(cells).toHaveLength(11);
     expect(cells[3]).toHaveTextContent("1,213");
-    expect(cells[4]).toHaveTextContent("185,088");
-    expect(cells[5]).toHaveTextContent("0");
+    expect(cells[4]).toHaveTextContent("0");
+    expect(cells[5]).toHaveTextContent("185,088");
     expect(cells[6]).toHaveTextContent("3,980");
 
     const legacyCells = within(dataRows[1]).getAllByRole("cell");
-    expect(legacyCells[5]).toHaveTextContent("—");
-    expect(legacyCells[5].querySelector("span")).toHaveAttribute(
+    expect(legacyCells[4]).toHaveTextContent("—");
+    expect(legacyCells[4].querySelector("span")).toHaveAttribute(
       "title",
       "common.unknown",
     );

@@ -170,10 +170,10 @@ export function RequestLogTable({
                     {t("usage.freshInput")}
                   </TableHead>
                   <TableHead className="text-center whitespace-nowrap">
-                    {t("usage.cacheReadTokens")}
+                    {t("usage.cacheCreationTokens")}
                   </TableHead>
                   <TableHead className="text-center whitespace-nowrap">
-                    {t("usage.cacheCreationTokens")}
+                    {t("usage.cacheReadTokens")}
                   </TableHead>
                   <TableHead className="text-center whitespace-nowrap">
                     {t("usage.outputTokens")}
@@ -265,9 +265,6 @@ export function RequestLogTable({
                           })()}
                         </TableCell>
                         <TableCell className="text-center px-1.5 whitespace-nowrap tabular-nums">
-                          {fmtInt(log.cacheReadTokens, locale)}
-                        </TableCell>
-                        <TableCell className="text-center px-1.5 whitespace-nowrap tabular-nums">
                           {cacheCreationKnown ? (
                             fmtInt(log.cacheCreationTokens, locale)
                           ) : (
@@ -278,6 +275,9 @@ export function RequestLogTable({
                               —
                             </span>
                           )}
+                        </TableCell>
+                        <TableCell className="text-center px-1.5 whitespace-nowrap tabular-nums">
+                          {fmtInt(log.cacheReadTokens, locale)}
                         </TableCell>
                         <TableCell className="text-center">
                           {fmtInt(log.outputTokens, locale)}
