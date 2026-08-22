@@ -832,6 +832,107 @@ fn schema_model_pricing_is_seeded_on_init() {
 }
 
 #[test]
+fn gpt56_sol_pricing_seed_and_guarded_repair_cover_all_aliases() {
+    const SOL_MODEL_IDS: [&str; 7] = [
+        "gpt-5.6-sol",
+        "gpt-5.6",
+        "gpt-5.6-low",
+        "gpt-5.6-medium",
+        "gpt-5.6-high",
+        "gpt-5.6-xhigh",
+        "gpt-5.6-minimal",
+    ];
+    let current_price = (
+        "4".to_string(),
+        "20".to_string(),
+        "0.40".to_string(),
+        "5".to_string(),
+    );
+    let db = Database::memory().expect("create memory db");
+
+    {
+        let conn = db.conn.lock().expect("lock conn");
+        for model_id in SOL_MODEL_IDS {
+            let price: (String, String, String, String) = conn
+                .query_row(
+                    "SELECT input_cost_per_million, output_cost_per_million,
+                            cache_read_cost_per_million, cache_creation_cost_per_million
+                     FROM model_pricing WHERE model_id = ?1",
+                    params![model_id],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                )
+                .unwrap_or_else(|error| panic!("query seeded Sol price for {model_id}: {error}"));
+            assert_eq!(price, current_price, "seeded price mismatch for {model_id}");
+
+            conn.execute(
+                "UPDATE model_pricing
+                 SET input_cost_per_million = '5',
+                     output_cost_per_million = '30',
+                     cache_read_cost_per_million = '0.50',
+                     cache_creation_cost_per_million = '6.25'
+                 WHERE model_id = ?1",
+                params![model_id],
+            )
+            .unwrap_or_else(|error| panic!("restore old Sol price for {model_id}: {error}"));
+        }
+    }
+
+    db.ensure_model_pricing_seeded()
+        .expect("repair old Sol prices");
+
+    {
+        let conn = db.conn.lock().expect("lock conn");
+        for model_id in SOL_MODEL_IDS {
+            let price: (String, String, String, String) = conn
+                .query_row(
+                    "SELECT input_cost_per_million, output_cost_per_million,
+                            cache_read_cost_per_million, cache_creation_cost_per_million
+                     FROM model_pricing WHERE model_id = ?1",
+                    params![model_id],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                )
+                .unwrap_or_else(|error| panic!("query repaired Sol price for {model_id}: {error}"));
+            assert_eq!(price, current_price, "repair mismatch for {model_id}");
+        }
+
+        // 只改了旧默认四元组中的一项也视为用户自定义，不应被修复覆盖。
+        conn.execute(
+            "UPDATE model_pricing
+             SET input_cost_per_million = '5.01',
+                 output_cost_per_million = '30',
+                 cache_read_cost_per_million = '0.50',
+                 cache_creation_cost_per_million = '6.25'
+             WHERE model_id = 'gpt-5.6-high'",
+            [],
+        )
+        .expect("set custom Sol price");
+    }
+
+    db.ensure_model_pricing_seeded()
+        .expect("preserve custom Sol price");
+
+    let conn = db.conn.lock().expect("lock conn");
+    let custom_price: (String, String, String, String) = conn
+        .query_row(
+            "SELECT input_cost_per_million, output_cost_per_million,
+                    cache_read_cost_per_million, cache_creation_cost_per_million
+             FROM model_pricing WHERE model_id = 'gpt-5.6-high'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .expect("query custom Sol price");
+    assert_eq!(
+        custom_price,
+        (
+            "5.01".to_string(),
+            "30".to_string(),
+            "0.50".to_string(),
+            "6.25".to_string(),
+        )
+    );
+}
+
+#[test]
 fn model_pricing_seed_repairs_known_outdated_builtin_prices() {
     let db = Database::memory().expect("create memory db");
 

@@ -3999,10 +3999,10 @@ mod tests {
         assert_eq!(row.1, INPUT_TOKEN_SEMANTICS_TOTAL);
         assert_eq!(row.2, "gpt-5.6-sol");
         assert_eq!(row.3.parse::<Decimal>().unwrap(), Decimal::new(25, 1));
-        assert_eq!(row.4.parse::<Decimal>().unwrap(), Decimal::from(4));
-        assert_eq!(row.5.parse::<Decimal>().unwrap(), Decimal::new(3, 1));
-        assert_eq!(row.6.parse::<Decimal>().unwrap(), Decimal::new(5, 2));
-        assert_eq!(row.7.parse::<Decimal>().unwrap(), Decimal::new(625, 3));
+        assert_eq!(row.4.parse::<Decimal>().unwrap(), Decimal::new(32, 1));
+        assert_eq!(row.5.parse::<Decimal>().unwrap(), Decimal::new(2, 1));
+        assert_eq!(row.6.parse::<Decimal>().unwrap(), Decimal::new(4, 2));
+        assert_eq!(row.7.parse::<Decimal>().unwrap(), Decimal::new(5, 1));
 
         let base_cost = row.4.parse::<Decimal>().unwrap()
             + row.5.parse::<Decimal>().unwrap()
@@ -4017,8 +4017,8 @@ mod tests {
             )?
             .parse()
             .unwrap();
-        assert_eq!(base_cost, Decimal::new(4975, 3));
-        assert_eq!(total_cost, Decimal::new(124375, 4));
+        assert_eq!(base_cost, Decimal::new(394, 2));
+        assert_eq!(total_cost, Decimal::new(985, 2));
         assert_eq!(total_cost, base_cost * Decimal::new(25, 1));
         Ok(())
     }

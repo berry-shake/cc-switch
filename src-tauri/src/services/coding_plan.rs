@@ -166,6 +166,7 @@ async fn query_kimi(api_key: &str) -> Result<SubscriptionQuota, String> {
                 };
                 tiers.push(QuotaTier {
                     name: "five_hour".to_string(),
+                    window_seconds: None,
                     utilization,
                     resets_at,
                     used_value_usd: None,
@@ -189,6 +190,7 @@ async fn query_kimi(api_key: &str) -> Result<SubscriptionQuota, String> {
         };
         tiers.push(QuotaTier {
             name: "weekly_limit".to_string(),
+            window_seconds: None,
             utilization,
             resets_at,
             used_value_usd: None,
@@ -292,6 +294,7 @@ fn parse_zhipu_token_tiers(data: &serde_json::Value) -> Vec<QuotaTier> {
         if let Some((_, percentage, resets_at)) = slot {
             tiers.push(QuotaTier {
                 name: name.to_string(),
+                window_seconds: None,
                 utilization: percentage,
                 resets_at,
                 used_value_usd: None,
@@ -573,6 +576,7 @@ async fn query_zenmux(base_url: &str, api_key: &str) -> Result<SubscriptionQuota
         let max_usd = q5h.get("max_value_usd").and_then(parse_f64);
         tiers.push(QuotaTier {
             name: "five_hour".to_string(),
+            window_seconds: None,
             utilization: usage_pct * 100.0,
             resets_at,
             used_value_usd: used_usd,
@@ -594,6 +598,7 @@ async fn query_zenmux(base_url: &str, api_key: &str) -> Result<SubscriptionQuota
         let max_usd = q7d.get("max_value_usd").and_then(parse_f64);
         tiers.push(QuotaTier {
             name: "weekly_limit".to_string(),
+            window_seconds: None,
             utilization: usage_pct * 100.0,
             resets_at,
             used_value_usd: used_usd,
@@ -669,6 +674,7 @@ fn parse_minimax_tiers(body: &serde_json::Value) -> Vec<QuotaTier> {
             .and_then(millis_to_iso8601);
         tiers.push(QuotaTier {
             name: TIER_FIVE_HOUR.to_string(),
+            window_seconds: None,
             utilization: 100.0 - remain_pct,
             resets_at,
             used_value_usd: None,
@@ -688,6 +694,7 @@ fn parse_minimax_tiers(body: &serde_json::Value) -> Vec<QuotaTier> {
                 .and_then(millis_to_iso8601);
             tiers.push(QuotaTier {
                 name: TIER_WEEKLY_LIMIT.to_string(),
+                window_seconds: None,
                 utilization: 100.0 - remain_pct,
                 resets_at,
                 used_value_usd: None,
@@ -1005,6 +1012,7 @@ fn parse_afp_tiers(result: &serde_json::Value) -> Vec<QuotaTier> {
         let resets_at = win.get("ResetTime").and_then(extract_reset_time);
         tiers.push(QuotaTier {
             name: name.to_string(),
+            window_seconds: None,
             utilization,
             resets_at,
             used_value_usd: None,
@@ -1064,6 +1072,7 @@ fn parse_coding_plan_tiers(result: &serde_json::Value) -> Vec<QuotaTier> {
             .and_then(extract_reset_time);
         tiers.push(QuotaTier {
             name: name.to_string(),
+            window_seconds: None,
             utilization,
             resets_at,
             used_value_usd: None,

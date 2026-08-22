@@ -1306,6 +1306,7 @@ mod tests {
     fn tier(name: &str, utilization: f64) -> QuotaTier {
         QuotaTier {
             name: name.to_string(),
+            window_seconds: None,
             utilization,
             resets_at: None,
             used_value_usd: None,

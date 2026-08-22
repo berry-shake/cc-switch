@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { UsageHero } from "./UsageHero";
+import { CodexCycleCapacitySection } from "./CodexCycleCapacitySection";
 import { UsageTrendChart } from "./UsageTrendChart";
 import { RequestLogTable } from "./RequestLogTable";
 import { ProviderStatsTable } from "./ProviderStatsTable";
@@ -373,6 +374,11 @@ export function UsageDashboard({
         appType={appType === "all" ? undefined : appType}
         providerName={providerName}
         model={model}
+        refreshIntervalMs={refreshIntervalMs}
+      />
+
+      <CodexCycleCapacitySection
+        enabled={appType === "all" || appType === "codex"}
         refreshIntervalMs={refreshIntervalMs}
       />
 

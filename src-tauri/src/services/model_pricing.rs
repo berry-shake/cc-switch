@@ -13,6 +13,24 @@ use std::sync::{Mutex, OnceLock};
 const MODEL_PRICING_FILE_NAME: &str = "model-pricing.json";
 const MODEL_PRICING_FILE_VERSION: u32 = 1;
 
+// OpenAI's current GPT-5.6 Sol promotional API pricing (verified 2026-08-22,
+// advertised through at least 2026-11-21). models.dev may lag the vendor page;
+// batch imports are known to originate from models.dev, so normalize these
+// public model IDs before they can replace the authoritative built-in price.
+const GPT56_SOL_MODEL_IDS: [&str; 7] = [
+    "gpt-5.6-sol",
+    "gpt-5.6",
+    "gpt-5.6-low",
+    "gpt-5.6-medium",
+    "gpt-5.6-high",
+    "gpt-5.6-xhigh",
+    "gpt-5.6-minimal",
+];
+const GPT56_SOL_INPUT_PRICE: &str = "4";
+const GPT56_SOL_OUTPUT_PRICE: &str = "20";
+const GPT56_SOL_CACHE_READ_PRICE: &str = "0.40";
+const GPT56_SOL_CACHE_WRITE_PRICE: &str = "5";
+
 static MODEL_PRICING_FILE_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
 fn file_lock() -> &'static Mutex<()> {
@@ -156,6 +174,57 @@ fn normalize_pricing(entry: ModelPricingInfo) -> Result<ModelPricingInfo, AppErr
     })
 }
 
+fn is_gpt56_sol_model_id(model_id: &str) -> bool {
+    GPT56_SOL_MODEL_IDS.contains(&model_id)
+}
+
+fn decimal_equals(value: &str, expected: Decimal) -> bool {
+    Decimal::from_str(value)
+        .map(|parsed| parsed == expected)
+        .unwrap_or(false)
+}
+
+fn set_current_gpt56_sol_price(entry: &mut ModelPricingInfo) {
+    entry.input_cost_per_million = GPT56_SOL_INPUT_PRICE.to_string();
+    entry.output_cost_per_million = GPT56_SOL_OUTPUT_PRICE.to_string();
+    entry.cache_read_cost_per_million = GPT56_SOL_CACHE_READ_PRICE.to_string();
+    entry.cache_creation_cost_per_million = GPT56_SOL_CACHE_WRITE_PRICE.to_string();
+}
+
+/// Repair only exact known stale tuples already persisted by earlier built-ins
+/// or models.dev syncs. Any differing field is treated as an intentional user
+/// override and remains untouched.
+fn repair_stale_gpt56_sol_price(entry: &mut ModelPricingInfo) -> bool {
+    if !is_gpt56_sol_model_id(&entry.model_id) {
+        return false;
+    }
+
+    let old_api_price = decimal_equals(&entry.input_cost_per_million, Decimal::from(5))
+        && decimal_equals(&entry.output_cost_per_million, Decimal::from(30))
+        && decimal_equals(&entry.cache_read_cost_per_million, Decimal::new(5, 1))
+        && (decimal_equals(&entry.cache_creation_cost_per_million, Decimal::new(625, 2))
+            || decimal_equals(&entry.cache_creation_cost_per_million, Decimal::ZERO));
+    let current_api_price_missing_cache_write =
+        decimal_equals(&entry.input_cost_per_million, Decimal::from(4))
+            && decimal_equals(&entry.output_cost_per_million, Decimal::from(20))
+            && decimal_equals(&entry.cache_read_cost_per_million, Decimal::new(4, 1))
+            && decimal_equals(&entry.cache_creation_cost_per_million, Decimal::ZERO);
+
+    if !old_api_price && !current_api_price_missing_cache_write {
+        return false;
+    }
+
+    set_current_gpt56_sol_price(entry);
+    true
+}
+
+fn repair_stale_local_gpt56_sol_prices(file: &mut ModelPricingFile) -> usize {
+    file.models
+        .iter_mut()
+        .map(|entry| usize::from(repair_stale_gpt56_sol_price(entry)))
+        .sum()
+}
+
 fn normalize_key_list(values: Vec<String>) -> Vec<String> {
     values
         .into_iter()
@@ -225,7 +294,12 @@ fn write_file_unlocked(file: &ModelPricingFile) -> Result<(), AppError> {
 }
 
 fn load_or_create_file_unlocked() -> Result<ModelPricingFile, AppError> {
-    if let Some(file) = read_file_unlocked()? {
+    if let Some(mut file) = read_file_unlocked()? {
+        let repaired = repair_stale_local_gpt56_sol_prices(&mut file);
+        if repaired > 0 {
+            write_file_unlocked(&file)?;
+            log::info!("已修复 model-pricing.json 中 {repaired} 条过期的 GPT-5.6 Sol 定价");
+        }
         return Ok(file);
     }
 
@@ -370,7 +444,12 @@ fn update_model_pricing_batch_inner(
     }
     let mut normalized = BTreeMap::new();
     for entry in entries {
-        let entry = normalize_pricing(entry)?;
+        let mut entry = normalize_pricing(entry)?;
+        // This batch command is reserved for models.dev imports. Prefer the
+        // currently verified OpenAI vendor price while the aggregator lags.
+        if is_gpt56_sol_model_id(&entry.model_id) {
+            set_current_gpt56_sol_price(&mut entry);
+        }
         normalized.insert(entry.model_id.clone(), entry);
     }
     let entries = normalized.into_values().collect::<Vec<_>>();
@@ -502,6 +581,23 @@ mod tests {
         }
     }
 
+    fn gpt56_sol_pricing(
+        model_id: &str,
+        input: &str,
+        output: &str,
+        cache_read: &str,
+        cache_write: &str,
+    ) -> ModelPricingInfo {
+        ModelPricingInfo {
+            model_id: model_id.to_string(),
+            display_name: "GPT-5.6 Sol".to_string(),
+            input_cost_per_million: input.to_string(),
+            output_cost_per_million: output.to_string(),
+            cache_read_cost_per_million: cache_read.to_string(),
+            cache_creation_cost_per_million: cache_write.to_string(),
+        }
+    }
+
     #[test]
     #[serial]
     fn creates_local_file_with_auto_sync_disabled_by_default() {
@@ -554,6 +650,100 @@ mod tests {
             let content = fs::read_to_string(path).expect("read override file");
             let file: ModelPricingFile = serde_json::from_str(&content).expect("parse file");
             assert!(file.models.is_empty());
+        });
+    }
+
+    #[test]
+    #[serial]
+    fn stale_local_gpt56_sol_overrides_are_repaired_but_custom_values_are_preserved() {
+        with_test_home(|db, path| {
+            let file = ModelPricingFile {
+                models: vec![
+                    gpt56_sol_pricing("gpt-5.6-sol", "5", "30", "0.5", "6.25"),
+                    gpt56_sol_pricing("gpt-5.6", "4", "20", "0.4", "0"),
+                    gpt56_sol_pricing("gpt-5.6-high", "5.01", "30", "0.5", "6.25"),
+                ],
+                ..ModelPricingFile::default()
+            };
+            write_file_unlocked(&file).expect("write stale local pricing");
+
+            sync_local_model_pricing(db).expect("repair and sync local pricing");
+
+            let content = fs::read_to_string(path).expect("read repaired pricing file");
+            let saved: ModelPricingFile =
+                serde_json::from_str(&content).expect("parse repaired pricing file");
+            for model_id in ["gpt-5.6-sol", "gpt-5.6"] {
+                let entry = saved
+                    .models
+                    .iter()
+                    .find(|entry| entry.model_id == model_id)
+                    .unwrap_or_else(|| panic!("missing repaired {model_id}"));
+                assert_eq!(
+                    (
+                        entry.input_cost_per_million.as_str(),
+                        entry.output_cost_per_million.as_str(),
+                        entry.cache_read_cost_per_million.as_str(),
+                        entry.cache_creation_cost_per_million.as_str(),
+                    ),
+                    ("4", "20", "0.40", "5")
+                );
+            }
+            let custom = saved
+                .models
+                .iter()
+                .find(|entry| entry.model_id == "gpt-5.6-high")
+                .expect("custom Sol entry");
+            assert_eq!(custom.input_cost_per_million, "5.01");
+
+            let conn = db.conn.lock().expect("lock database");
+            let persisted: (String, String, String, String) = conn
+                .query_row(
+                    "SELECT input_cost_per_million, output_cost_per_million,
+                            cache_read_cost_per_million, cache_creation_cost_per_million
+                     FROM model_pricing WHERE model_id = 'gpt-5.6-sol'",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                )
+                .expect("query repaired Sol price");
+            assert_eq!(
+                persisted,
+                (
+                    "4".to_string(),
+                    "20".to_string(),
+                    "0.40".to_string(),
+                    "5".to_string(),
+                )
+            );
+        });
+    }
+
+    #[test]
+    #[serial]
+    fn models_dev_batch_cannot_restore_stale_gpt56_sol_pricing() {
+        with_test_home(|db, path| {
+            update_model_pricing_batch(
+                db,
+                vec![gpt56_sol_pricing("gpt-5.6-sol", "5", "30", "0.5", "6.25")],
+            )
+            .expect("sync stale models.dev pricing");
+
+            let content = fs::read_to_string(path).expect("read pricing file");
+            let saved: ModelPricingFile =
+                serde_json::from_str(&content).expect("parse pricing file");
+            let entry = saved
+                .models
+                .iter()
+                .find(|entry| entry.model_id == "gpt-5.6-sol")
+                .expect("saved Sol entry");
+            assert_eq!(
+                (
+                    entry.input_cost_per_million.as_str(),
+                    entry.output_cost_per_million.as_str(),
+                    entry.cache_read_cost_per_million.as_str(),
+                    entry.cache_creation_cost_per_million.as_str(),
+                ),
+                ("4", "20", "0.40", "5")
+            );
         });
     }
 

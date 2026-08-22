@@ -13,6 +13,7 @@ import { UsageDashboard } from "@/components/usage/UsageDashboard";
 const useProviderStatsMock = vi.hoisted(() => vi.fn());
 const useModelStatsMock = vi.hoisted(() => vi.fn());
 const usageHeroMock = vi.hoisted(() => vi.fn());
+const cycleCapacitySectionMock = vi.hoisted(() => vi.fn());
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -50,6 +51,13 @@ vi.mock("@/components/usage/UsageHero", () => ({
   UsageHero: (props: unknown) => {
     usageHeroMock(props);
     return <div data-testid="usage-hero" />;
+  },
+}));
+
+vi.mock("@/components/usage/CodexCycleCapacitySection", () => ({
+  CodexCycleCapacitySection: (props: unknown) => {
+    cycleCapacitySectionMock(props);
+    return <div data-testid="codex-cycle-capacity-section" />;
   },
 }));
 
@@ -114,6 +122,7 @@ describe("UsageDashboard", () => {
     useProviderStatsMock.mockReset();
     useModelStatsMock.mockReset();
     usageHeroMock.mockReset();
+    cycleCapacitySectionMock.mockReset();
     useProviderStatsMock.mockReturnValue({ data: [] });
     useModelStatsMock.mockReturnValue({ data: [] });
   });
@@ -143,6 +152,35 @@ describe("UsageDashboard", () => {
     );
     expect(usageHeroMock).toHaveBeenLastCalledWith(
       expect.objectContaining({ appType: "pi" }),
+    );
+    expect(cycleCapacitySectionMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({ enabled: false }),
+    );
+  });
+
+  it("enables Codex capacity only for the all and Codex views", async () => {
+    renderDashboard();
+
+    expect(cycleCapacitySectionMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({ enabled: true }),
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "usage.appFilter.claude" }),
+    );
+    await waitFor(() =>
+      expect(cycleCapacitySectionMock).toHaveBeenLastCalledWith(
+        expect.objectContaining({ enabled: false }),
+      ),
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "usage.appFilter.codex" }),
+    );
+    await waitFor(() =>
+      expect(cycleCapacitySectionMock).toHaveBeenLastCalledWith(
+        expect.objectContaining({ enabled: true }),
+      ),
     );
   });
 

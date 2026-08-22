@@ -6,6 +6,8 @@ export type CredentialStatus =
 
 export interface QuotaTier {
   name: string;
+  /** 服务端返回的额度窗口长度（秒）；当前仅 Codex 明确提供。 */
+  windowSeconds?: number | null;
   utilization: number; // 0-100
   resetsAt: string | null;
   usedValueUsd?: number | null;

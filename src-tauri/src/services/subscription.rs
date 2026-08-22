@@ -28,6 +28,9 @@ pub enum CredentialStatus {
 pub struct QuotaTier {
     /// 窗口标识：five_hour, seven_day, seven_day_opus, seven_day_sonnet 等
     pub name: String,
+    /// 窗口长度（秒）；目前仅 Codex API 明确返回该字段
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub window_seconds: Option<i64>,
     /// 使用百分比 0–100
     pub utilization: f64,
     /// ISO 8601 重置时间
@@ -402,6 +405,7 @@ async fn query_claude_quota(access_token: &str) -> Result<SubscriptionQuota, Str
                 if let Some(util) = w.utilization {
                     tiers.push(QuotaTier {
                         name: tier_name.to_string(),
+                        window_seconds: None,
                         utilization: util,
                         resets_at: w.resets_at,
                         used_value_usd: None,
@@ -422,6 +426,7 @@ async fn query_claude_quota(access_token: &str) -> Result<SubscriptionQuota, Str
                 if let Some(util) = w.utilization {
                     tiers.push(QuotaTier {
                         name: key.clone(),
+                        window_seconds: None,
                         utilization: util,
                         resets_at: w.resets_at,
                         used_value_usd: None,
@@ -732,27 +737,7 @@ pub(crate) async fn query_codex_quota(
         }
     };
 
-    let mut tiers = Vec::new();
-
-    if let Some(rate_limit) = body.rate_limit {
-        for window in [rate_limit.primary_window, rate_limit.secondary_window]
-            .into_iter()
-            .flatten()
-        {
-            if let Some(used) = window.used_percent {
-                tiers.push(QuotaTier {
-                    name: window
-                        .limit_window_seconds
-                        .map(window_seconds_to_tier_name)
-                        .unwrap_or_else(|| "unknown".to_string()),
-                    utilization: used,
-                    resets_at: window.reset_at.and_then(unix_ts_to_iso),
-                    used_value_usd: None,
-                    max_value_usd: None,
-                });
-            }
-        }
-    }
+    let tiers = codex_usage_response_to_tiers(body);
 
     Ok(SubscriptionQuota {
         tool: tool_label.to_string(),
@@ -764,6 +749,33 @@ pub(crate) async fn query_codex_quota(
         error: None,
         queried_at: Some(now_millis()),
     })
+}
+
+fn codex_usage_response_to_tiers(body: CodexUsageResponse) -> Vec<QuotaTier> {
+    let mut tiers = Vec::new();
+
+    if let Some(rate_limit) = body.rate_limit {
+        for window in [rate_limit.primary_window, rate_limit.secondary_window]
+            .into_iter()
+            .flatten()
+        {
+            if let Some(used) = window.used_percent {
+                let window_seconds = window.limit_window_seconds;
+                tiers.push(QuotaTier {
+                    name: window_seconds
+                        .map(window_seconds_to_tier_name)
+                        .unwrap_or_else(|| "unknown".to_string()),
+                    window_seconds,
+                    utilization: used,
+                    resets_at: window.reset_at.and_then(unix_ts_to_iso),
+                    used_value_usd: None,
+                    max_value_usd: None,
+                });
+            }
+        }
+    }
+
+    tiers
 }
 
 // ── Gemini 凭据读取 ──────────────────────────────────────
@@ -1208,6 +1220,7 @@ async fn query_gemini_quota(access_token: &str) -> Result<SubscriptionQuota, Str
         .into_iter()
         .map(|(name, (remaining, reset_time))| QuotaTier {
             name,
+            window_seconds: None,
             utilization: (1.0 - remaining) * 100.0,
             resets_at: reset_time,
             used_value_usd: None,
@@ -1375,5 +1388,44 @@ mod tests {
         // 其他窗口按小时/天回退命名
         assert_eq!(window_seconds_to_tier_name(3600), "1_hour");
         assert_eq!(window_seconds_to_tier_name(86400), "1_day");
+    }
+
+    #[test]
+    fn codex_tiers_preserve_window_seconds_with_camel_case_serialization() {
+        let tiers = codex_usage_response_to_tiers(CodexUsageResponse {
+            rate_limit: Some(CodexRateLimit {
+                primary_window: Some(CodexRateLimitWindow {
+                    used_percent: Some(12.5),
+                    limit_window_seconds: Some(18_000),
+                    reset_at: Some(1_700_000_000),
+                }),
+                secondary_window: Some(CodexRateLimitWindow {
+                    used_percent: Some(37.5),
+                    limit_window_seconds: Some(604_800),
+                    reset_at: Some(1_700_604_800),
+                }),
+            }),
+        });
+
+        assert_eq!(tiers.len(), 2);
+        assert_eq!(tiers[0].name, TIER_FIVE_HOUR);
+        assert_eq!(tiers[0].window_seconds, Some(18_000));
+        assert_eq!(tiers[1].name, TIER_SEVEN_DAY);
+        assert_eq!(tiers[1].window_seconds, Some(604_800));
+
+        let serialized = serde_json::to_value(&tiers[1]).expect("serialize quota tier");
+        assert_eq!(serialized["windowSeconds"], serde_json::json!(604_800));
+        assert!(serialized.get("window_seconds").is_none());
+
+        let non_codex_tier = QuotaTier {
+            name: TIER_SEVEN_DAY.to_string(),
+            window_seconds: None,
+            utilization: 0.0,
+            resets_at: None,
+            used_value_usd: None,
+            max_value_usd: None,
+        };
+        let serialized = serde_json::to_value(non_codex_tier).expect("serialize quota tier");
+        assert!(serialized.get("windowSeconds").is_none());
     }
 }
