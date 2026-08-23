@@ -48,12 +48,16 @@ vi.mock("@/components/usage/CodexCycleCapacityCard", () => ({
     usage,
     quotaSamples,
     analyticsUsage,
+    accountEmail,
+    lastRefreshedAt,
     calculationMode,
     onRefreshAnalytics,
   }: {
     quota: SubscriptionQuota;
     usage: UsageSummary | null;
     analyticsUsage?: { accountMode: string } | null;
+    accountEmail?: string | null;
+    lastRefreshedAt?: number | null;
     quotaSamples?: readonly unknown[];
     calculationMode?: "local" | "analytics";
     onRefreshAnalytics?: () => void | Promise<void>;
@@ -63,6 +67,10 @@ vi.mock("@/components/usage/CodexCycleCapacityCard", () => ({
       {analyticsUsage?.accountMode ?? "no-analytics"}
       <span data-testid="sample-count">{quotaSamples?.length ?? 0}</span>
       <span data-testid="calculation-mode">{calculationMode}</span>
+      <span data-testid="account-email">{accountEmail ?? "no-email"}</span>
+      <span data-testid="last-refreshed-at">
+        {lastRefreshedAt ?? "no-refresh"}
+      </span>
       <button onClick={() => void onRefreshAnalytics?.()}>
         refresh-official
       </button>
@@ -94,6 +102,7 @@ const quota: SubscriptionQuota = {
 
 const localSnapshot: CodexQuotaSnapshot = {
   quota,
+  email: "local@example.com",
   credentialSource: "file",
   credentialScope: "scope-a",
 };
@@ -220,6 +229,12 @@ describe("CodexCycleCapacitySection", () => {
       "codex:100:personal",
     );
     expect(loadQuotaSamplesMock).toHaveBeenCalledWith("scope-a");
+    expect(screen.getByTestId("account-email")).toHaveTextContent(
+      "local@example.com",
+    );
+    expect(screen.getByTestId("last-refreshed-at")).toHaveTextContent(
+      String(QUERIED_AT),
+    );
 
     const options = useQueryMock.mock.calls.map(
       ([value]) => value as QueryOptions,
@@ -250,6 +265,9 @@ describe("CodexCycleCapacitySection", () => {
 
     expect(screen.getByTestId("calculation-mode")).toHaveTextContent(
       "analytics",
+    );
+    expect(screen.getByTestId("account-email")).toHaveTextContent(
+      "local@example.com",
     );
     const options = useQueryMock.mock.calls.map(
       ([value]) => value as QueryOptions,

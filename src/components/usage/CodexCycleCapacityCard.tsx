@@ -4,8 +4,10 @@ import {
   CalendarClock,
   ChevronDown,
   CircleDollarSign,
+  Clock3,
   Gauge,
   Info,
+  Mail,
   RefreshCw,
 } from "lucide-react";
 
@@ -53,6 +55,10 @@ import { CodexCycleForecastPanel } from "./CodexCycleForecastPanel";
 
 export interface CodexCycleCapacityCardProps {
   quota: SubscriptionQuota | null | undefined;
+  /** 与本次额度快照来自同一次官方响应的账号邮箱。 */
+  accountEmail?: string | null;
+  /** 本次额度快照完成查询的 Unix 毫秒时间戳。 */
+  lastRefreshedAt?: number | null;
   /** 必须是 `quota` 当前长周期精确起止范围内的本地 Codex 汇总。 */
   usage: UsageSummary | null | undefined;
   /** 来自 Codex 官方用量接口的日级 Token 与模型/速度数据。 */
@@ -239,6 +245,8 @@ function CapacityRing({
  */
 export function CodexCycleCapacityCard({
   quota,
+  accountEmail,
+  lastRefreshedAt,
   usage,
   analyticsUsage,
   modelPricing,
@@ -321,6 +329,17 @@ export function CodexCycleCapacityCard({
           "按官方用量接口的每日 Token 与模型/速度额度占比折算",
         )
     : t("usage.cycleCapacity.basis", "按当前模型、速度及 Token 结构折算");
+  const compactBasisLabel = activeAnalyticsEstimate
+    ? activeAnalyticsEstimate.accountMode === "workspace"
+      ? t(
+          "usage.cycleCapacity.analyticsWorkspaceCompactBasis",
+          "官方模型 Token · 速度",
+        )
+      : t(
+          "usage.cycleCapacity.analyticsPersonalCompactBasis",
+          "官方每日 Token · 模型/速度",
+        )
+    : t("usage.cycleCapacity.compactBasis", "模型 · 速度 · Token 结构");
   const disclaimer = activeAnalyticsEstimate
     ? activeAnalyticsEstimate.accountMode === "workspace"
       ? t(
@@ -339,6 +358,14 @@ export function CodexCycleCapacityCard({
     estimate.startMs,
     locale,
   )} → ${formatCycleDateTime(estimate.resetAtMs, locale)}`;
+  const normalizedEmail = accountEmail?.trim() || null;
+  const refreshTimestamp =
+    lastRefreshedAt != null && Number.isFinite(lastRefreshedAt)
+      ? lastRefreshedAt
+      : null;
+  const lastRefreshLabel = refreshTimestamp
+    ? formatCycleDateTime(refreshTimestamp, locale)
+    : null;
 
   const handleExpandedChange = (expanded: boolean) => {
     setIsExpanded(expanded);
@@ -364,28 +391,70 @@ export function CodexCycleCapacityCard({
         data-testid="codex-cycle-capacity-card"
       >
         <CardContent className="p-4 md:p-5">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-            <div className="flex min-w-0 items-start gap-3">
-              <div className="rounded-xl bg-emerald-500/10 p-2.5 text-emerald-600 dark:text-emerald-400">
+          <div className="flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex min-w-0 items-center gap-3">
+              <div className="rounded-lg bg-emerald-500/10 p-2 text-emerald-600 dark:text-emerald-400">
                 <Gauge className="h-5 w-5" />
               </div>
-              <div className="min-w-0">
-                <h3 className="text-base font-semibold tracking-tight">
-                  {titleLabel}
-                </h3>
-                <div className="mt-1 flex items-center gap-1.5 text-[11px] text-muted-foreground">
-                  <CalendarClock className="h-3.5 w-3.5 shrink-0" />
-                  <span className="truncate" title={cycleRange}>
-                    {cycleRange}
-                  </span>
+              <div className="min-w-0 flex-1">
+                <div
+                  className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-0.5"
+                  data-testid="codex-capacity-identity-line"
+                >
+                  <h3 className="shrink-0 text-base font-semibold tracking-tight">
+                    {titleLabel}
+                  </h3>
+                  {normalizedEmail ? (
+                    <div className="flex min-w-0 items-center gap-1.5 border-l border-border/60 pl-2.5 text-[11px] text-muted-foreground">
+                      <Mail className="h-3.5 w-3.5 shrink-0" />
+                      <span className="sr-only">
+                        {t("usage.cycleCapacity.accountEmail", "邮箱")}:
+                      </span>
+                      <span
+                        className="min-w-0 truncate text-foreground/75"
+                        title={normalizedEmail}
+                      >
+                        {normalizedEmail}
+                      </span>
+                    </div>
+                  ) : null}
+                </div>
+                <div
+                  className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-0.5 text-[11px] text-muted-foreground"
+                  data-testid="codex-capacity-timing-line"
+                >
+                  <div className="flex min-w-0 items-center gap-1.5">
+                    <CalendarClock className="h-3.5 w-3.5 shrink-0" />
+                    <span className="truncate tabular-nums" title={cycleRange}>
+                      {cycleRange}
+                    </span>
+                  </div>
+                  {lastRefreshLabel ? (
+                    <div className="flex min-w-0 items-center gap-1.5 border-l border-border/60 pl-2.5">
+                      <Clock3 className="h-3.5 w-3.5 shrink-0" />
+                      <span className="shrink-0">
+                        {t("usage.cycleCapacity.lastRefresh", "上次刷新")}
+                      </span>
+                      <span
+                        className="truncate tabular-nums text-foreground/75"
+                        title={lastRefreshLabel}
+                      >
+                        {lastRefreshLabel}
+                      </span>
+                    </div>
+                  ) : null}
                 </div>
               </div>
             </div>
 
-            <div className="flex shrink-0 flex-wrap items-center gap-2 sm:justify-end">
-              <div className="flex min-w-0 flex-1 items-center gap-1.5 rounded-lg border border-border/40 bg-background/40 px-2.5 py-1.5 text-[10px] leading-tight text-muted-foreground sm:flex-none">
+            <div className="flex shrink-0 flex-wrap items-center gap-1.5 sm:justify-end">
+              <div
+                className="flex min-w-0 flex-1 items-center gap-1.5 rounded-lg border border-border/40 bg-background/40 px-2.5 py-1.5 text-[10px] leading-tight text-muted-foreground sm:flex-none"
+                aria-label={basisLabel}
+                title={basisLabel}
+              >
                 <Info className="h-3.5 w-3.5 shrink-0" />
-                {basisLabel}
+                {compactBasisLabel}
               </div>
               {hasBothModes ? (
                 <div

@@ -554,7 +554,13 @@ struct CodexRateLimit {
 
 #[derive(Deserialize)]
 struct CodexUsageResponse {
+    email: Option<String>,
     rate_limit: Option<CodexRateLimit>,
+}
+
+pub(crate) struct CodexQuotaQueryResult {
+    pub quota: SubscriptionQuota,
+    pub email: Option<String>,
 }
 
 /// 根据窗口秒数映射到 tier 名称（与 Claude 的命名兼容以复用前端 i18n）
@@ -593,6 +599,23 @@ pub(crate) async fn query_codex_quota(
     tool_label: &str,
     expired_message: &str,
 ) -> Result<SubscriptionQuota, String> {
+    Ok(
+        query_codex_quota_with_metadata(access_token, account_id, tool_label, expired_message)
+            .await?
+            .quota,
+    )
+}
+
+/// 查询 Codex 额度，并保留与额度来自同一次响应的非敏感账号元数据。
+///
+/// 通用订阅入口继续使用 [`query_codex_quota`]，只有需要展示当前官方账号的
+/// 原子快照入口才消费这里的 `email`，避免再次请求导致账号切换竞态。
+pub(crate) async fn query_codex_quota_with_metadata(
+    access_token: &str,
+    account_id: Option<&str>,
+    tool_label: &str,
+    expired_message: &str,
+) -> Result<CodexQuotaQueryResult, String> {
     let client = crate::proxy::http_client::get();
 
     let mut req = client
@@ -613,20 +636,26 @@ pub(crate) async fn query_codex_quota(
     let status = resp.status();
 
     if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
-        return Ok(SubscriptionQuota::error(
-            tool_label,
-            CredentialStatus::Expired,
-            format!("{expired_message} (HTTP {status})"),
-        ));
+        return Ok(CodexQuotaQueryResult {
+            quota: SubscriptionQuota::error(
+                tool_label,
+                CredentialStatus::Expired,
+                format!("{expired_message} (HTTP {status})"),
+            ),
+            email: None,
+        });
     }
 
     if !status.is_success() {
         let body = resp.text().await.unwrap_or_default();
-        return Ok(SubscriptionQuota::error(
-            tool_label,
-            CredentialStatus::Valid,
-            format!("API error (HTTP {status}): {body}"),
-        ));
+        return Ok(CodexQuotaQueryResult {
+            quota: SubscriptionQuota::error(
+                tool_label,
+                CredentialStatus::Valid,
+                format!("API error (HTTP {status}): {body}"),
+            ),
+            email: None,
+        });
     }
 
     let raw = match resp.bytes().await {
@@ -636,25 +665,37 @@ pub(crate) async fn query_codex_quota(
     let body: CodexUsageResponse = match serde_json::from_slice(&raw) {
         Ok(v) => v,
         Err(e) => {
-            return Ok(SubscriptionQuota::error(
-                tool_label,
-                CredentialStatus::Valid,
-                format!("Failed to parse API response: {e}"),
-            ));
+            return Ok(CodexQuotaQueryResult {
+                quota: SubscriptionQuota::error(
+                    tool_label,
+                    CredentialStatus::Valid,
+                    format!("Failed to parse API response: {e}"),
+                ),
+                email: None,
+            });
         }
     };
 
+    let email = body
+        .email
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned);
     let tiers = codex_usage_response_to_tiers(body);
 
-    Ok(SubscriptionQuota {
-        tool: tool_label.to_string(),
-        credential_status: CredentialStatus::Valid,
-        credential_message: None,
-        success: true,
-        tiers,
-        extra_usage: None,
-        error: None,
-        queried_at: Some(now_millis()),
+    Ok(CodexQuotaQueryResult {
+        quota: SubscriptionQuota {
+            tool: tool_label.to_string(),
+            credential_status: CredentialStatus::Valid,
+            credential_message: None,
+            success: true,
+            tiers,
+            extra_usage: None,
+            error: None,
+            queried_at: Some(now_millis()),
+        },
+        email,
     })
 }
 
@@ -1300,6 +1341,7 @@ mod tests {
     #[test]
     fn codex_tiers_preserve_window_seconds_with_camel_case_serialization() {
         let tiers = codex_usage_response_to_tiers(CodexUsageResponse {
+            email: None,
             rate_limit: Some(CodexRateLimit {
                 primary_window: Some(CodexRateLimitWindow {
                     used_percent: Some(12.5),

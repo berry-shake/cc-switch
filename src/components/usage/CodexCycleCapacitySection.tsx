@@ -144,6 +144,8 @@ export function CodexCycleCapacitySection({
   return (
     <CodexCycleCapacityCard
       quota={quota}
+      accountEmail={activeSnapshot?.email}
+      lastRefreshedAt={activeSnapshot?.quota.queriedAt}
       usage={usageQuery.isSuccess ? usageQuery.data : null}
       analyticsUsage={analyticsUsage}
       modelPricing={pricingQuery.isSuccess ? pricingQuery.data : null}

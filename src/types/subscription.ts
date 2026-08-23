@@ -71,6 +71,8 @@ export type CodexCredentialSource = "file" | "keyring";
 
 export interface CodexQuotaSnapshot {
   quota: SubscriptionQuota;
+  /** 与本次官方额度响应属于同一账号；接口未返回时为 null。 */
+  email: string | null;
   credentialSource: CodexCredentialSource;
   /** SHA-256 派生的匿名账号域，不包含 account id 或 token。 */
   credentialScope: string;

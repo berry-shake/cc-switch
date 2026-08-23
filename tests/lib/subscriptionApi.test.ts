@@ -45,6 +45,7 @@ const quota: SubscriptionQuota = {
 
 const quotaSnapshot: CodexQuotaSnapshot = {
   quota,
+  email: "current@example.com",
   credentialSource: "file",
   credentialScope: "scope-a",
 };

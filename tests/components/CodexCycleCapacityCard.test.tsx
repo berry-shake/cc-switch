@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -128,6 +128,10 @@ describe("CodexCycleCapacityCard", () => {
       "aria-checked",
       "true",
     );
+    expect(screen.getByText("模型 · 速度 · Token 结构")).toHaveAttribute(
+      "title",
+      "按当前模型、速度及 Token 结构折算",
+    );
     expect(screen.getByText("$691.48")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("radio", { name: "官方接口" }));
@@ -135,6 +139,10 @@ describe("CodexCycleCapacityCard", () => {
     expect(screen.getByRole("radio", { name: "官方接口" })).toHaveAttribute(
       "aria-checked",
       "true",
+    );
+    expect(screen.getByText("官方模型 Token · 速度")).toHaveAttribute(
+      "aria-label",
+      "按官方用量接口的模型级 Token 与速度折算",
     );
     expect(screen.getByText("$4.00")).toBeInTheDocument();
     expect(screen.getByText("$13.33")).toBeInTheDocument();
@@ -196,6 +204,34 @@ describe("CodexCycleCapacityCard", () => {
 
     expect(screen.getByRole("button", { name: "刷新" })).toBeDisabled();
     expect(screen.getByText("刷新中...")).toBeInTheDocument();
+  });
+
+  it("shows the account email and the timestamp of the same quota refresh", () => {
+    render(
+      <CodexCycleCapacityCard
+        quota={quota}
+        accountEmail=" current@example.com "
+        lastRefreshedAt={queriedAt}
+        usage={usage}
+        nowMs={queriedAt}
+      />,
+    );
+
+    const identityLine = screen.getByTestId("codex-capacity-identity-line");
+    expect(within(identityLine).getByText("邮箱:")).toHaveClass("sr-only");
+    expect(
+      within(identityLine).getByText("current@example.com"),
+    ).toHaveAttribute("title", "current@example.com");
+    const timingLine = screen.getByTestId("codex-capacity-timing-line");
+    expect(within(timingLine).getByText("上次刷新")).toBeInTheDocument();
+    const formattedRefresh = new Intl.DateTimeFormat("en-US", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(new Date(queriedAt));
+    expect(within(timingLine).getByText(formattedRefresh)).toBeInTheDocument();
   });
 
   it("defaults to expanded and restores the persisted collapse state", () => {

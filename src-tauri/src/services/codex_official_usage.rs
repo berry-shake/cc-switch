@@ -8,7 +8,8 @@ use crate::services::codex_usage_analytics::{
     query_codex_usage_analytics_with_credentials, CodexAnalyticsUsage,
 };
 use crate::services::subscription::{
-    query_codex_quota, read_codex_request_credentials, QuotaTier, SubscriptionQuota,
+    query_codex_quota_with_metadata, read_codex_request_credentials, CodexQuotaQueryResult,
+    QuotaTier, SubscriptionQuota,
 };
 
 const LONG_CYCLE_MIN_SECONDS: i64 = 6 * 24 * 60 * 60;
@@ -17,6 +18,7 @@ const LONG_CYCLE_MIN_SECONDS: i64 = 6 * 24 * 60 * 60;
 #[serde(rename_all = "camelCase")]
 pub struct CodexQuotaSnapshot {
     pub quota: SubscriptionQuota,
+    pub email: Option<String>,
     pub credential_source: CodexCredentialSource,
     pub credential_scope: String,
 }
@@ -26,13 +28,16 @@ pub struct CodexQuotaSnapshot {
 pub struct CodexOfficialUsageSnapshot {
     pub quota: SubscriptionQuota,
     pub analytics: Option<CodexAnalyticsUsage>,
+    pub email: Option<String>,
     pub credential_source: CodexCredentialSource,
     pub credential_scope: String,
     pub queried_at: i64,
 }
 
-async fn query_quota(credentials: &CodexCredentialSnapshot) -> Result<SubscriptionQuota, String> {
-    query_codex_quota(
+async fn query_quota(
+    credentials: &CodexCredentialSnapshot,
+) -> Result<CodexQuotaQueryResult, String> {
+    query_codex_quota_with_metadata(
         &credentials.access_token,
         credentials.account_id.as_deref(),
         "codex",
@@ -93,9 +98,10 @@ fn analytics_range(quota: &SubscriptionQuota) -> Option<(String, String)> {
 
 pub async fn query_codex_quota_snapshot() -> Result<CodexQuotaSnapshot, String> {
     let credentials = read_codex_request_credentials()?;
-    let quota = query_quota(&credentials).await?;
+    let result = query_quota(&credentials).await?;
     Ok(CodexQuotaSnapshot {
-        quota,
+        quota: result.quota,
+        email: result.email,
         credential_source: credentials.source,
         credential_scope: credentials.account_scope,
     })
@@ -105,7 +111,8 @@ pub async fn query_codex_official_usage_snapshot() -> Result<CodexOfficialUsageS
     // Resolve once: both HTTP phases borrow this immutable snapshot even if the
     // user switches the CLI account while the refresh is in flight.
     let credentials = read_codex_request_credentials()?;
-    let quota = query_quota(&credentials).await?;
+    let result = query_quota(&credentials).await?;
+    let quota = result.quota;
     let analytics = match analytics_range(&quota) {
         Some((start_date, end_date)) => Some(
             query_codex_usage_analytics_with_credentials(&start_date, &end_date, &credentials)
@@ -120,6 +127,7 @@ pub async fn query_codex_official_usage_snapshot() -> Result<CodexOfficialUsageS
     Ok(CodexOfficialUsageSnapshot {
         quota,
         analytics,
+        email: result.email,
         credential_source: credentials.source,
         credential_scope: credentials.account_scope,
         queried_at,
