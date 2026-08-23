@@ -6,24 +6,39 @@ import {
 } from "@/lib/codexQuotaSamples";
 import type {
   CodexAnalyticsUsage,
+  CodexOfficialUsageSnapshot,
+  CodexQuotaSnapshot,
   SubscriptionQuota,
 } from "@/types/subscription";
 
+function recordCodexSnapshotSample<T extends CodexQuotaSnapshot>(
+  snapshot: T,
+): T {
+  const cycle = resolveCodexQuotaCycle(snapshot.quota);
+  if (cycle) {
+    recordCodexQuotaSample(
+      sampleCodexQuotaCycle(cycle, snapshot.credentialScope),
+    );
+  }
+  return snapshot;
+}
+
 export const subscriptionApi = {
-  getQuota: async (tool: string): Promise<SubscriptionQuota> => {
-    const quota = await invoke<SubscriptionQuota>("get_subscription_quota", {
+  getQuota: (tool: string): Promise<SubscriptionQuota> =>
+    invoke<SubscriptionQuota>("get_subscription_quota", {
       tool,
-    });
-
-    // 统一记录所有前端入口取得的 Codex CLI 长周期快照。记录失败只会让
-    // 近期趋势暂不可用，不能改变原额度请求的成功语义。
-    if (tool.trim().toLowerCase() === "codex") {
-      const cycle = resolveCodexQuotaCycle(quota);
-      if (cycle) recordCodexQuotaSample(sampleCodexQuotaCycle(cycle));
-    }
-
-    return quota;
-  },
+    }),
+  getCodexQuotaSnapshot: async (): Promise<CodexQuotaSnapshot> =>
+    recordCodexSnapshotSample(
+      await invoke<CodexQuotaSnapshot>("get_codex_quota_snapshot"),
+    ),
+  getCodexOfficialUsageSnapshot:
+    async (): Promise<CodexOfficialUsageSnapshot> =>
+      recordCodexSnapshotSample(
+        await invoke<CodexOfficialUsageSnapshot>(
+          "get_codex_official_usage_snapshot",
+        ),
+      ),
   getCodexOauthQuota: (accountId: string | null): Promise<SubscriptionQuota> =>
     invoke("get_codex_oauth_quota", { accountId }),
   getCodexUsageAnalytics: (

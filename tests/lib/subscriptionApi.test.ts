@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { SubscriptionQuota } from "@/types/subscription";
+import type {
+  CodexOfficialUsageSnapshot,
+  CodexQuotaSnapshot,
+  SubscriptionQuota,
+} from "@/types/subscription";
 
 const invokeMock = vi.hoisted(() => vi.fn());
 const recordQuotaSampleMock = vi.hoisted(() => vi.fn());
@@ -39,6 +43,12 @@ const quota: SubscriptionQuota = {
   queriedAt: QUERIED_AT,
 };
 
+const quotaSnapshot: CodexQuotaSnapshot = {
+  quota,
+  credentialSource: "file",
+  credentialScope: "scope-a",
+};
+
 describe("subscriptionApi Codex quota sampling", () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -53,7 +63,7 @@ describe("subscriptionApi Codex quota sampling", () => {
     vi.useRealTimers();
   });
 
-  it("records every successful Codex CLI long-cycle response", async () => {
+  it("keeps the generic quota endpoint free of unscoped sample writes", async () => {
     invokeMock.mockResolvedValue(quota);
 
     await expect(subscriptionApi.getQuota("codex")).resolves.toBe(quota);
@@ -61,6 +71,18 @@ describe("subscriptionApi Codex quota sampling", () => {
     expect(invokeMock).toHaveBeenCalledWith("get_subscription_quota", {
       tool: "codex",
     });
+    expect(sampleQuotaCycleMock).not.toHaveBeenCalled();
+    expect(recordQuotaSampleMock).not.toHaveBeenCalled();
+  });
+
+  it("records a long-cycle response under its anonymous credential scope", async () => {
+    invokeMock.mockResolvedValue(quotaSnapshot);
+
+    await expect(subscriptionApi.getCodexQuotaSnapshot()).resolves.toBe(
+      quotaSnapshot,
+    );
+
+    expect(invokeMock).toHaveBeenCalledWith("get_codex_quota_snapshot");
     expect(sampleQuotaCycleMock).toHaveBeenCalledWith(
       expect.objectContaining({
         startMs: RESET_AT - 7 * DAY_MS,
@@ -68,19 +90,20 @@ describe("subscriptionApi Codex quota sampling", () => {
         resetAtMs: RESET_AT,
         utilizationPercent: 30,
       }),
+      "scope-a",
     );
     expect(recordQuotaSampleMock).toHaveBeenCalledWith({
       capturedAtMs: QUERIED_AT,
     });
   });
 
-  it.each([
-    ["failed Codex response", "codex", { ...quota, success: false }],
-    ["non-Codex response", "claude", { ...quota, tool: "claude" }],
-  ])("does not record a %s", async (_label, tool, response) => {
-    invokeMock.mockResolvedValue(response);
+  it("does not record a failed scoped response", async () => {
+    invokeMock.mockResolvedValue({
+      ...quotaSnapshot,
+      quota: { ...quota, success: false },
+    });
 
-    await subscriptionApi.getQuota(tool);
+    await subscriptionApi.getCodexQuotaSnapshot();
 
     expect(sampleQuotaCycleMock).not.toHaveBeenCalled();
     expect(recordQuotaSampleMock).not.toHaveBeenCalled();
@@ -89,8 +112,32 @@ describe("subscriptionApi Codex quota sampling", () => {
   it("preserves a rejected quota request without writing a sample", async () => {
     invokeMock.mockRejectedValue(new Error("offline"));
 
-    await expect(subscriptionApi.getQuota("codex")).rejects.toThrow("offline");
+    await expect(subscriptionApi.getCodexQuotaSnapshot()).rejects.toThrow(
+      "offline",
+    );
     expect(recordQuotaSampleMock).not.toHaveBeenCalled();
+  });
+
+  it("records the quota embedded in an atomic official snapshot", async () => {
+    const official: CodexOfficialUsageSnapshot = {
+      ...quotaSnapshot,
+      analytics: { accountMode: "personal", days: [], queriedAt: QUERIED_AT },
+      queriedAt: QUERIED_AT,
+    };
+    invokeMock.mockResolvedValue(official);
+
+    await expect(subscriptionApi.getCodexOfficialUsageSnapshot()).resolves.toBe(
+      official,
+    );
+
+    expect(invokeMock).toHaveBeenCalledWith(
+      "get_codex_official_usage_snapshot",
+    );
+    expect(sampleQuotaCycleMock).toHaveBeenCalledWith(
+      expect.any(Object),
+      "scope-a",
+    );
+    expect(recordQuotaSampleMock).toHaveBeenCalledTimes(1);
   });
 
   it("forwards the UTC daily analytics range without exposing credentials", async () => {

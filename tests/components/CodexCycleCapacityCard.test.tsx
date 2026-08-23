@@ -363,6 +363,7 @@ describe("CodexCycleCapacityCard", () => {
     };
     const samples: CodexQuotaSample[] = [
       {
+        credentialScope: "scope-a",
         capturedAtMs: currentMs - recentSpanMs,
         cycleStartMs: startMs,
         resetAtMs: cycleResetMs,
@@ -434,6 +435,7 @@ describe("CodexCycleCapacityCard", () => {
         usage={usage}
         quotaSamples={[
           {
+            credentialScope: "scope-a",
             capturedAtMs: currentMs - 2 * hourMs,
             cycleStartMs: startMs,
             resetAtMs: cycleResetMs,

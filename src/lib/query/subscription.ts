@@ -1,5 +1,9 @@
 import { useRef } from "react";
-import { useQuery, type UseQueryResult } from "@tanstack/react-query";
+import {
+  useQuery,
+  type QueryClient,
+  type UseQueryResult,
+} from "@tanstack/react-query";
 import { subscriptionApi } from "@/lib/api/subscription";
 import type { AppId } from "@/lib/api/types";
 import type { ProviderMeta } from "@/types";
@@ -14,9 +18,33 @@ const REFETCH_INTERVAL = 5 * 60 * 1000; // 5 minutes
 export const subscriptionKeys = {
   all: ["subscription"] as const,
   quota: (appId: AppId) => [...subscriptionKeys.all, "quota", appId] as const,
+  codexQuotaSnapshot: () =>
+    [...subscriptionKeys.all, "codex-quota-snapshot"] as const,
+  codexOfficialSnapshot: () =>
+    [...subscriptionKeys.all, "codex-official-snapshot"] as const,
   codexAnalytics: (startDate: string, endDate: string) =>
     [...subscriptionKeys.all, "codex-analytics", startDate, endDate] as const,
 };
+
+/** 清空旧账号快照并立即重取当前仍在观察的 Codex 查询。 */
+export async function resetCodexSubscriptionQueries(
+  queryClient: QueryClient,
+): Promise<void> {
+  await Promise.all([
+    queryClient.resetQueries({
+      queryKey: subscriptionKeys.quota("codex"),
+      exact: true,
+    }),
+    queryClient.resetQueries({
+      queryKey: subscriptionKeys.codexQuotaSnapshot(),
+      exact: true,
+    }),
+    queryClient.resetQueries({
+      queryKey: subscriptionKeys.codexOfficialSnapshot(),
+      exact: true,
+    }),
+  ]);
+}
 
 /**
  * reject 且无可展示值时的失败占位：首次查询就失败（data 为 undefined），或

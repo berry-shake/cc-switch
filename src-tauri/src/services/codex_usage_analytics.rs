@@ -13,6 +13,8 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use crate::services::codex_auth_credentials::CodexCredentialSnapshot;
+
 const WORKSPACE_USAGE_URL: &str =
     "https://chatgpt.com/backend-api/wham/usage/daily-workspace-user-token-usage-breakdown";
 const PERSONAL_MODEL_USAGE_URL: &str =
@@ -348,13 +350,22 @@ pub async fn query_codex_usage_analytics(
     start_date: &str,
     end_date: &str,
 ) -> Result<CodexAnalyticsUsage, String> {
+    let credentials = crate::services::subscription::read_codex_request_credentials()?;
+    query_codex_usage_analytics_with_credentials(start_date, end_date, &credentials).await
+}
+
+pub(crate) async fn query_codex_usage_analytics_with_credentials(
+    start_date: &str,
+    end_date: &str,
+    credentials: &CodexCredentialSnapshot,
+) -> Result<CodexAnalyticsUsage, String> {
     validate_date_range(start_date, end_date)?;
-    let (token, account_id) = crate::services::subscription::read_codex_request_credentials()?;
-    let account_id = account_id.as_deref();
+    let token = credentials.access_token.as_str();
+    let account_id = credentials.account_id.as_deref();
 
     let (workspace_status, workspace_body) = fetch_daily_body(
         WORKSPACE_USAGE_URL,
-        &token,
+        token,
         account_id,
         start_date,
         end_date,
@@ -384,7 +395,7 @@ pub async fn query_codex_usage_analytics(
 
     let breakdown_request = fetch_daily_body(
         PERSONAL_MODEL_USAGE_URL,
-        &token,
+        token,
         account_id,
         start_date,
         end_date,
@@ -392,7 +403,7 @@ pub async fn query_codex_usage_analytics(
     );
     let totals_request = fetch_daily_body(
         PERSONAL_TOTALS_URL,
-        &token,
+        token,
         account_id,
         start_date,
         end_date,

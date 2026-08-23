@@ -1,11 +1,13 @@
 import type { CodexQuotaCycle } from "@/lib/codexCycleCapacity";
 
-const STORAGE_KEY = "cc-switch:codex-quota-samples:v1";
+// v1 没有账号归属，不能安全迁移；切换到 v2 后按匿名 credentialScope 隔离。
+const STORAGE_KEY = "cc-switch:codex-quota-samples:v2";
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MAX_SAMPLE_AGE_MS = 21 * DAY_MS;
 const MAX_SAMPLES = 1024;
 
 export interface CodexQuotaSample {
+  credentialScope: string;
   capturedAtMs: number;
   cycleStartMs: number;
   resetAtMs: number;
@@ -22,6 +24,8 @@ function isValidSample(value: unknown): value is CodexQuotaSample {
   const sample = value as Partial<CodexQuotaSample>;
   return (
     isFiniteNumber(sample.capturedAtMs) &&
+    typeof sample.credentialScope === "string" &&
+    sample.credentialScope.length > 0 &&
     isFiniteNumber(sample.cycleStartMs) &&
     isFiniteNumber(sample.resetAtMs) &&
     isFiniteNumber(sample.windowSeconds) &&
@@ -48,7 +52,7 @@ function resolveStorage(storage?: Storage | null): Storage | null {
  * 读取本机额度采样缓存。损坏、旧格式或不可访问的存储都按空缓存处理；
  * 该缓存仅用于近期趋势，不应影响周期容量主入口的可用性。
  */
-export function loadCodexQuotaSamples(
+function loadAllCodexQuotaSamples(
   storage?: Storage | null,
 ): CodexQuotaSample[] {
   const target = resolveStorage(storage);
@@ -67,10 +71,22 @@ export function loadCodexQuotaSamples(
   }
 }
 
+export function loadCodexQuotaSamples(
+  credentialScope: string,
+  storage?: Storage | null,
+): CodexQuotaSample[] {
+  if (!credentialScope) return [];
+  return loadAllCodexQuotaSamples(storage).filter(
+    (sample) => sample.credentialScope === credentialScope,
+  );
+}
+
 export function sampleCodexQuotaCycle(
   cycle: CodexQuotaCycle,
+  credentialScope: string,
 ): CodexQuotaSample {
   return {
+    credentialScope,
     capturedAtMs: cycle.endMs,
     cycleStartMs: cycle.startMs,
     resetAtMs: cycle.resetAtMs,
@@ -117,7 +133,11 @@ export function mergeCodexQuotaSample(
   const merged = samples
     .filter(isValidSample)
     .filter((sample) => sample.capturedAtMs >= cutoffMs)
-    .filter((sample) => sample.capturedAtMs !== incoming.capturedAtMs);
+    .filter(
+      (sample) =>
+        sample.credentialScope !== incoming.credentialScope ||
+        sample.capturedAtMs !== incoming.capturedAtMs,
+    );
   merged.push(incoming);
   merged.sort((a, b) => a.capturedAtMs - b.capturedAtMs);
   return merged.slice(-MAX_SAMPLES);
@@ -132,15 +152,21 @@ export function recordCodexQuotaSample(
   storage?: Storage | null,
 ): CodexQuotaSample[] {
   const target = resolveStorage(storage);
-  const merged = mergeCodexQuotaSample(loadCodexQuotaSamples(target), incoming);
-  if (!target) return merged;
+  const merged = mergeCodexQuotaSample(
+    loadAllCodexQuotaSamples(target),
+    incoming,
+  );
+  const scoped = merged.filter(
+    (sample) => sample.credentialScope === incoming.credentialScope,
+  );
+  if (!target) return scoped;
 
   try {
     target.setItem(STORAGE_KEY, JSON.stringify(merged));
   } catch {
     // 近期采样是可重建的辅助数据；存储不可写不应让主卡片失败。
   }
-  return merged;
+  return scoped;
 }
 
 export const codexQuotaSampleStorageKey = STORAGE_KEY;

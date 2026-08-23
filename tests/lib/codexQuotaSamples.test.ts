@@ -17,6 +17,7 @@ function sample(
   utilizationPercent = 30,
 ): CodexQuotaSample {
   return {
+    credentialScope: "scope-a",
     capturedAtMs,
     cycleStartMs: NOW - 2 * DAY_MS,
     resetAtMs: NOW + 5 * DAY_MS,
@@ -32,10 +33,10 @@ describe("Codex quota sample storage", () => {
 
   it("round-trips valid samples and ignores corrupt storage", () => {
     recordCodexQuotaSample(sample(NOW));
-    expect(loadCodexQuotaSamples()).toEqual([sample(NOW)]);
+    expect(loadCodexQuotaSamples("scope-a")).toEqual([sample(NOW)]);
 
     localStorage.setItem(codexQuotaSampleStorageKey, "not-json");
-    expect(loadCodexQuotaSamples()).toEqual([]);
+    expect(loadCodexQuotaSamples("scope-a")).toEqual([]);
   });
 
   it("replaces duplicate server timestamps and keeps chronological order", () => {
@@ -45,6 +46,24 @@ describe("Codex quota sample storage", () => {
     );
 
     expect(merged).toEqual([sample(NOW - 2 * 60_000, 20), sample(NOW, 30)]);
+  });
+
+  it("isolates samples from different credential scopes", () => {
+    recordCodexQuotaSample(sample(NOW));
+    recordCodexQuotaSample({
+      ...sample(NOW),
+      credentialScope: "scope-b",
+      utilizationPercent: 80,
+    });
+
+    expect(loadCodexQuotaSamples("scope-a")).toEqual([sample(NOW)]);
+    expect(loadCodexQuotaSamples("scope-b")).toEqual([
+      {
+        ...sample(NOW),
+        credentialScope: "scope-b",
+        utilizationPercent: 80,
+      },
+    ]);
   });
 
   it("drops invalid and older-than-21-day samples", () => {

@@ -14,6 +14,7 @@ import { openclawKeys } from "@/hooks/useOpenClaw";
 import { invalidateHermesProviderCaches } from "@/hooks/useHermes";
 import { proxyKeys } from "@/lib/query/proxy";
 import { usageKeys } from "@/lib/query/usage";
+import { resetCodexSubscriptionQueries } from "@/lib/query/subscription";
 import { invalidatePiProviderCaches } from "@/lib/query/pi";
 import { GROKBUILD_OFFICIAL_PROVIDER_ID } from "@/utils/providerCapabilities";
 
@@ -94,6 +95,10 @@ export const useAddProviderMutation = (appId: AppId) => {
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["providers", appId] });
+      if (appId === "codex") {
+        // 身份变化时先清空旧快照，避免 refetch 期间继续展示上一账号。
+        await resetCodexSubscriptionQueries(queryClient);
+      }
 
       if (appId === "opencode") {
         await queryClient.invalidateQueries({
@@ -311,6 +316,9 @@ export const useSwitchProviderMutation = (appId: AppId) => {
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["providers", appId] });
+      if (appId === "codex") {
+        await resetCodexSubscriptionQueries(queryClient);
+      }
       if (appId === "claude-desktop") {
         await queryClient.invalidateQueries({ queryKey: proxyKeys.status });
         await queryClient.invalidateQueries({

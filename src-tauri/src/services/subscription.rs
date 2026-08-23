@@ -9,6 +9,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use std::collections::HashMap;
 
 use crate::config;
+use crate::services::codex_auth_credentials::{
+    read_codex_credential_snapshot, CodexCredentialError, CodexCredentialSnapshot,
+};
 
 // ── 数据类型 ──────────────────────────────────────────────
 
@@ -464,19 +467,6 @@ async fn query_claude_quota(access_token: &str) -> Result<SubscriptionQuota, Str
 
 // ── Codex 凭据读取 ──────────────────────────────────────
 
-#[derive(Deserialize)]
-struct CodexAuthJson {
-    auth_mode: Option<String>,
-    tokens: Option<CodexTokens>,
-    last_refresh: Option<String>,
-}
-
-#[derive(Deserialize)]
-struct CodexTokens {
-    access_token: Option<String>,
-    account_id: Option<String>,
-}
-
 /// (access_token, account_id, status, message)
 type CodexCredentials = (
     Option<String>,
@@ -487,148 +477,49 @@ type CodexCredentials = (
 
 /// 读取 Codex OAuth 凭据
 ///
-/// 按优先级尝试以下来源：
-/// 1. macOS Keychain (service: "Codex Auth")
-/// 2. 凭据文件 ~/.codex/auth.json
-///
-/// 仅 auth_mode == "chatgpt" (OAuth) 时有效，API key 模式不支持用量查询。
+/// 存储来源遵循 Codex `cli_auth_credentials_store`：缺省为 `file`，
+/// `keyring` 严格读取当前 CODEX_HOME 对应项目，`auto` 才允许回退文件。
 fn read_codex_credentials() -> CodexCredentials {
-    #[cfg(target_os = "macos")]
-    {
-        if let Some(result) = read_codex_credentials_from_keychain() {
-            return result;
+    match read_codex_credential_snapshot() {
+        Ok(snapshot) => {
+            let status = if snapshot
+                .last_refresh
+                .as_deref()
+                .is_some_and(is_codex_token_stale)
+            {
+                CredentialStatus::Expired
+            } else {
+                CredentialStatus::Valid
+            };
+            let message = matches!(status, CredentialStatus::Expired)
+                .then(|| "Codex token may be stale (>8 days since last refresh)".to_string());
+            (
+                Some(snapshot.access_token),
+                snapshot.account_id,
+                status,
+                message,
+            )
+        }
+        Err(CodexCredentialError::NotFound(message)) => {
+            (None, None, CredentialStatus::NotFound, message)
+        }
+        Err(error @ (CodexCredentialError::Parse(_) | CodexCredentialError::Unsupported(_))) => {
+            (None, None, CredentialStatus::ParseError, error.message())
         }
     }
-
-    read_codex_credentials_from_file()
 }
 
 /// 为 Codex Web 用量类只读请求提供当前 CLI OAuth 凭据。
 ///
 /// `Expired` 仅表示本地刷新时间超过启发式阈值；与额度查询保持一致，仍允许
-/// 真实端点决定 token 是否有效。严格的 `auth_mode == "chatgpt"` 判断仍由
-/// `read_codex_credentials` 统一执行。
-pub(crate) fn read_codex_request_credentials() -> Result<(String, Option<String>), String> {
-    let (token, account_id, status, message) = read_codex_credentials();
-    match status {
-        CredentialStatus::Valid | CredentialStatus::Expired => token
-            .map(|token| (token, account_id))
-            .ok_or_else(|| "Codex OAuth access token is unavailable".to_string()),
-        CredentialStatus::NotFound | CredentialStatus::ParseError => Err(message
-            .unwrap_or_else(|| "Codex ChatGPT OAuth credentials are unavailable".to_string())),
-    }
-}
-
-/// 从 macOS Keychain 读取 Codex 凭据
-#[cfg(target_os = "macos")]
-fn read_codex_credentials_from_keychain() -> Option<CodexCredentials> {
-    let output = std::process::Command::new("security")
-        .args(["find-generic-password", "-s", "Codex Auth", "-w"])
-        .output()
-        .ok()?;
-
-    if !output.status.success() {
-        return None;
-    }
-
-    let json_str = String::from_utf8(output.stdout).ok()?;
-    let json_str = json_str.trim();
-    if json_str.is_empty() {
-        return None;
-    }
-
-    Some(parse_codex_credentials_json(json_str))
-}
-
-/// 从文件读取 Codex 凭据
-fn read_codex_credentials_from_file() -> CodexCredentials {
-    let auth_path = crate::codex_config::get_codex_auth_path();
-
-    if !auth_path.exists() {
-        return (None, None, CredentialStatus::NotFound, None);
-    }
-
-    let content = match std::fs::read_to_string(&auth_path) {
-        Ok(c) => c,
-        Err(e) => {
-            return (
-                None,
-                None,
-                CredentialStatus::ParseError,
-                Some(format!("Failed to read Codex auth file: {e}")),
-            );
-        }
-    };
-
-    parse_codex_credentials_json(&content)
-}
-
-/// 解析 Codex 凭据 JSON（Keychain 和文件共用）
-fn parse_codex_credentials_json(content: &str) -> CodexCredentials {
-    let auth: CodexAuthJson = match serde_json::from_str(content) {
-        Ok(a) => a,
-        Err(e) => {
-            return (
-                None,
-                None,
-                CredentialStatus::ParseError,
-                Some(format!("Failed to parse Codex auth JSON: {e}")),
-            );
-        }
-    };
-
-    // 仅 OAuth 模式有用量数据
-    if auth.auth_mode.as_deref() != Some("chatgpt") {
-        return (
-            None,
-            None,
-            CredentialStatus::NotFound,
-            Some("Codex not using OAuth mode".to_string()),
-        );
-    }
-
-    let tokens = match auth.tokens {
-        Some(t) => t,
-        None => {
-            return (
-                None,
-                None,
-                CredentialStatus::ParseError,
-                Some("No tokens in Codex auth".to_string()),
-            );
-        }
-    };
-
-    let access_token = match tokens.access_token {
-        Some(t) if !t.is_empty() => t,
-        _ => {
-            return (
-                None,
-                None,
-                CredentialStatus::ParseError,
-                Some("access_token is empty or missing".to_string()),
-            );
-        }
-    };
-
-    // 检查 token 是否可能过期（距上次刷新 > 8 天）
-    if let Some(ref last_refresh) = auth.last_refresh {
-        if is_codex_token_stale(last_refresh) {
-            return (
-                Some(access_token),
-                tokens.account_id,
-                CredentialStatus::Expired,
-                Some("Codex token may be stale (>8 days since last refresh)".to_string()),
-            );
-        }
-    }
-
-    (
-        Some(access_token),
-        tokens.account_id,
-        CredentialStatus::Valid,
-        None,
-    )
+/// 真实端点决定 token 是否有效。严格的 `auth_mode == "chatgpt"` 判断由
+/// 统一的凭据解析器执行。
+pub(crate) fn read_codex_request_credentials() -> Result<CodexCredentialSnapshot, String> {
+    read_codex_credential_snapshot().map_err(|error| {
+        error
+            .message()
+            .unwrap_or_else(|| "Codex ChatGPT OAuth credentials are unavailable".to_string())
+    })
 }
 
 /// 判断 Codex token 是否可能过期（Codex CLI 在 >8 天时自动刷新）
@@ -1392,63 +1283,6 @@ fn now_millis() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn codex_credentials_accept_chatgpt_auth_mode() {
-        let (token, account_id, status, message) = parse_codex_credentials_json(
-            r#"{
-                "auth_mode": "chatgpt",
-                "tokens": {
-                    "access_token": "legacy-token",
-                    "account_id": "legacy-account"
-                }
-            }"#,
-        );
-
-        assert_eq!(token.as_deref(), Some("legacy-token"));
-        assert_eq!(account_id.as_deref(), Some("legacy-account"));
-        assert!(matches!(status, CredentialStatus::Valid));
-        assert_eq!(message, None);
-    }
-
-    #[test]
-    fn codex_credentials_reject_oauth_tokens_when_auth_mode_is_omitted() {
-        let (token, account_id, status, message) = parse_codex_credentials_json(
-            r#"{
-                "type": "codex",
-                "OPENAI_API_KEY": null,
-                "tokens": {
-                    "access_token": "current-token",
-                    "account_id": "current-account",
-                    "refresh_token": "refresh-token",
-                    "id_token": "id-token"
-                }
-            }"#,
-        );
-
-        assert_eq!(token, None);
-        assert_eq!(account_id, None);
-        assert!(matches!(status, CredentialStatus::NotFound));
-        assert_eq!(message.as_deref(), Some("Codex not using OAuth mode"));
-    }
-
-    #[test]
-    fn codex_credentials_reject_explicit_non_oauth_mode_even_with_tokens() {
-        let (token, account_id, status, message) = parse_codex_credentials_json(
-            r#"{
-                "auth_mode": "apikey",
-                "tokens": {
-                    "access_token": "must-not-be-used",
-                    "account_id": "account"
-                }
-            }"#,
-        );
-
-        assert_eq!(token, None);
-        assert_eq!(account_id, None);
-        assert!(matches!(status, CredentialStatus::NotFound));
-        assert_eq!(message.as_deref(), Some("Codex not using OAuth mode"));
-    }
 
     #[test]
     fn window_seconds_map_to_expected_tier_names() {

@@ -66,3 +66,17 @@ export interface CodexAnalyticsUsage {
   days: CodexAnalyticsDailyUsage[];
   queriedAt: number;
 }
+
+export type CodexCredentialSource = "file" | "keyring";
+
+export interface CodexQuotaSnapshot {
+  quota: SubscriptionQuota;
+  credentialSource: CodexCredentialSource;
+  /** SHA-256 派生的匿名账号域，不包含 account id 或 token。 */
+  credentialScope: string;
+}
+
+export interface CodexOfficialUsageSnapshot extends CodexQuotaSnapshot {
+  analytics: CodexAnalyticsUsage | null;
+  queriedAt: number;
+}

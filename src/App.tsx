@@ -32,6 +32,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { Provider, VisibleApps } from "@/types";
 import type { EnvConflict } from "@/types/env";
 import { proxyKeys, useProvidersQuery, useSettingsQuery } from "@/lib/query";
+import { resetCodexSubscriptionQueries } from "@/lib/query/subscription";
 import {
   piApi,
   providersApi,
@@ -406,6 +407,9 @@ function App() {
           async (event: ProviderSwitchEvent) => {
             if (event.appType === activeApp) {
               await refetch();
+            }
+            if (event.appType === "codex") {
+              await resetCodexSubscriptionQueries(queryClient);
             }
             if (event.appType === "pi") {
               await invalidatePiProviderCaches(queryClient);
