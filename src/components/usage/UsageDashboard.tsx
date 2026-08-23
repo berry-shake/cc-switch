@@ -395,15 +395,15 @@ export function UsageDashboard({
         <Tabs defaultValue="logs" className="w-full">
           <div className="flex items-center justify-between mb-4">
             <TabsList className="bg-muted/50">
-              <TabsTrigger value="logs" className="gap-2">
+              <TabsTrigger value="logs" className="gap-2 transition-none">
                 <ListFilter className="h-4 w-4" />
                 {t("usage.requestLogs")}
               </TabsTrigger>
-              <TabsTrigger value="providers" className="gap-2">
+              <TabsTrigger value="providers" className="gap-2 transition-none">
                 <Activity className="h-4 w-4" />
                 {t("usage.providerStats")}
               </TabsTrigger>
-              <TabsTrigger value="models" className="gap-2">
+              <TabsTrigger value="models" className="gap-2 transition-none">
                 <BarChart3 className="h-4 w-4" />
                 {t("usage.modelStats")}
               </TabsTrigger>

@@ -133,6 +133,31 @@ describe("UsageDashboard", () => {
     expect(screen.getByTestId("select-5000")).toBeInTheDocument();
   });
 
+  it("switches statistics tabs without crossfading two active backgrounds", () => {
+    renderDashboard();
+
+    const logsTab = screen.getByRole("tab", { name: "usage.requestLogs" });
+    const providersTab = screen.getByRole("tab", {
+      name: "usage.providerStats",
+    });
+    const modelsTab = screen.getByRole("tab", { name: "usage.modelStats" });
+
+    for (const tab of [logsTab, providersTab, modelsTab]) {
+      expect(tab).toHaveClass("transition-none");
+      expect(tab).not.toHaveClass("transition-all");
+    }
+    expect(logsTab).toHaveAttribute("data-state", "active");
+
+    fireEvent.mouseDown(providersTab, { button: 0, ctrlKey: false });
+    expect(logsTab).toHaveAttribute("data-state", "inactive");
+    expect(providersTab).toHaveAttribute("data-state", "active");
+    expect(modelsTab).toHaveAttribute("data-state", "inactive");
+
+    fireEvent.mouseDown(modelsTab, { button: 0, ctrlKey: false });
+    expect(providersTab).toHaveAttribute("data-state", "inactive");
+    expect(modelsTab).toHaveAttribute("data-state", "active");
+  });
+
   it("filters usage queries to Pi", async () => {
     renderDashboard();
 
