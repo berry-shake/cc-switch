@@ -45,12 +45,7 @@ import type {
 } from "@/types/subscription";
 import type { ModelPricing, UsageSummary } from "@/types/usage";
 
-import {
-  fmtUsd,
-  formatTokensShort,
-  getLocaleFromLanguage,
-  getResolvedLang,
-} from "./format";
+import { fmtUsd, getLocaleFromLanguage, getResolvedLang } from "./format";
 import { CodexCycleForecastPanel } from "./CodexCycleForecastPanel";
 
 export interface CodexCycleCapacityCardProps {
@@ -130,10 +125,14 @@ function formatCycleDateTime(timestamp: number, locale: string): string {
   }).format(new Date(timestamp));
 }
 
-function formatEstimatedTokens(value: number, lang: string): string {
+function formatEstimatedTokens(value: number): string {
   // 消除 1.785 这类二进制浮点表示略小于十进制半值导致的视觉向下舍入。
   const stabilized = value + Math.max(1, Math.abs(value)) * Number.EPSILON * 4;
-  return formatTokensShort(stabilized, lang, 2);
+  if (!Number.isFinite(stabilized) || stabilized <= 0) return "0";
+  if (stabilized >= 1e9) return `${(stabilized / 1e9).toFixed(2)}B`;
+  if (stabilized >= 1e6) return `${(stabilized / 1e6).toFixed(2)}M`;
+  if (stabilized >= 1e3) return `${(stabilized / 1e3).toFixed(2)}K`;
+  return Math.round(stabilized).toLocaleString("en-US");
 }
 
 interface CapacityMetricProps {
@@ -567,20 +566,16 @@ export function CodexCycleCapacityCard({
                   />
                 </div>
 
-                <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 xl:grid-cols-3">
-                  <CapacityMetric
-                    label={t(
-                      "usage.cycleCapacity.remainingQuota",
-                      "剩余额度（估算）",
-                    )}
-                    value={formatPercent(estimate.remainingPercent)}
-                  />
+                <div
+                  className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 xl:grid-cols-3"
+                  data-testid="codex-capacity-metrics"
+                >
                   <CapacityMetric
                     label={t(
                       "usage.cycleCapacity.totalTokens",
-                      "完整周期 Token 等效容量（估算）",
+                      "完整周期 Token 等效容量",
                     )}
-                    value={formatEstimatedTokens(estimate.totalTokens, lang)}
+                    value={formatEstimatedTokens(estimate.totalTokens)}
                     title={Math.round(estimate.totalTokens).toLocaleString(
                       locale,
                     )}
@@ -588,36 +583,43 @@ export function CodexCycleCapacityCard({
                   />
                   <CapacityMetric
                     label={t(
-                      "usage.cycleCapacity.usedUsd",
-                      "当前累计估算费用（USD）",
+                      "usage.cycleCapacity.usedTokens",
+                      "已使用额度 Token 等效容量",
                     )}
-                    value={formatUsdEstimate(estimate.usedUsd)}
-                  />
-                  <CapacityMetric
-                    label={t(
-                      "usage.cycleCapacity.totalUsd",
-                      "完整周期美元等效容量（估算）",
+                    value={formatEstimatedTokens(estimate.usedTokens)}
+                    title={Math.round(estimate.usedTokens).toLocaleString(
+                      locale,
                     )}
-                    value={formatUsdEstimate(estimate.totalUsd)}
-                    emphasized
                   />
                   <CapacityMetric
                     label={t(
                       "usage.cycleCapacity.remainingTokens",
-                      "剩余额度 Token 等效容量（估算）",
+                      "剩余额度 Token 等效容量",
                     )}
-                    value={formatEstimatedTokens(
-                      estimate.remainingTokens,
-                      lang,
-                    )}
+                    value={formatEstimatedTokens(estimate.remainingTokens)}
                     title={Math.round(estimate.remainingTokens).toLocaleString(
                       locale,
                     )}
                   />
                   <CapacityMetric
                     label={t(
+                      "usage.cycleCapacity.totalUsd",
+                      "完整周期美元等效容量",
+                    )}
+                    value={formatUsdEstimate(estimate.totalUsd)}
+                    emphasized
+                  />
+                  <CapacityMetric
+                    label={t(
+                      "usage.cycleCapacity.usedUsd",
+                      "已使用额度美元等效容量",
+                    )}
+                    value={formatUsdEstimate(estimate.usedUsd)}
+                  />
+                  <CapacityMetric
+                    label={t(
                       "usage.cycleCapacity.remainingUsd",
-                      "剩余额度美元等效容量（估算）",
+                      "剩余额度美元等效容量",
                     )}
                     value={formatUsdEstimate(estimate.remainingUsd)}
                   />

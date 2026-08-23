@@ -285,7 +285,7 @@ describe("CodexCycleCapacityCard", () => {
     ).toBe("true");
   });
 
-  it("renders the ratio and six explicitly estimated capacity metrics", () => {
+  it("groups full, used, and remaining Token/USD capacity metrics in order", () => {
     render(
       <CodexCycleCapacityCard quota={quota} usage={usage} nowMs={queriedAt} />,
     );
@@ -295,24 +295,39 @@ describe("CodexCycleCapacityCard", () => {
       "30",
     );
     expect(screen.getByText("30%")).toBeInTheDocument();
-    expect(screen.getByText("70%")).toBeInTheDocument();
-    expect(screen.getByText("2.55B")).toBeInTheDocument();
-    expect(screen.getByText("1.79B")).toBeInTheDocument();
-    expect(screen.getByText("$691.48")).toBeInTheDocument();
-    expect(screen.getByText("$2304.93")).toBeInTheDocument();
-    expect(screen.getByText("$1613.45")).toBeInTheDocument();
-
-    const labels = [
-      "剩余额度（估算）",
-      "完整周期 Token 等效容量（估算）",
-      "当前累计估算费用（USD）",
-      "完整周期美元等效容量（估算）",
-      "剩余额度 Token 等效容量（估算）",
-      "剩余额度美元等效容量（估算）",
-    ];
-    for (const label of labels) {
-      expect(screen.getByText(label)).toBeInTheDocument();
+    const metrics = screen.getByTestId("codex-capacity-metrics");
+    const metricLabels = [...metrics.children].map(
+      (metric) => metric.firstElementChild?.textContent,
+    );
+    const metricValues = [...metrics.children].map(
+      (metric) => metric.lastElementChild?.textContent,
+    );
+    expect(metricLabels).toEqual([
+      "完整周期 Token 等效容量",
+      "已使用额度 Token 等效容量",
+      "剩余额度 Token 等效容量",
+      "完整周期美元等效容量",
+      "已使用额度美元等效容量",
+      "剩余额度美元等效容量",
+    ]);
+    expect(metricValues).toEqual([
+      "2.55B",
+      "765.00M",
+      "1.79B",
+      "$2304.93",
+      "$691.48",
+      "$1613.45",
+    ]);
+    for (const label of metricLabels) {
+      expect(label).not.toContain("估算");
     }
+
+    const exactTokenTitles = ["2,550,000,000", "765,000,000", "1,785,000,000"];
+    expect(
+      [...metrics.children]
+        .slice(0, 3)
+        .map((metric) => metric.lastElementChild?.getAttribute("title")),
+    ).toEqual(exactTokenTitles);
 
     expect(screen.getByTestId("codex-cycle-forecast")).toBeInTheDocument();
     expect(screen.getByText("当前状态")).toBeInTheDocument();
