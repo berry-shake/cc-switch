@@ -59,6 +59,31 @@ describe("usage token labels", () => {
     ]).toEqual(["输入成本", "缓存写入成本", "缓存读取成本", "输出成本"]);
   });
 
+  it("keeps Chinese used labels concise", () => {
+    expect([
+      zh.usage.used,
+      zh.usage.cycleCapacity.used,
+      zh.usage.cycleCapacity.usedTokens,
+      zh.usage.cycleCapacity.usedUsd,
+    ]).toEqual([
+      "已用：",
+      "已用",
+      "已用额度 Token 等效容量",
+      "已用额度美元等效容量",
+    ]);
+    expect([
+      zhTW.usage.used,
+      zhTW.usage.cycleCapacity.used,
+      zhTW.usage.cycleCapacity.usedTokens,
+      zhTW.usage.cycleCapacity.usedUsd,
+    ]).toEqual([
+      "已用：",
+      "已用",
+      "已用額度 Token 等效容量",
+      "已用額度美元等效容量",
+    ]);
+  });
+
   it("keeps Codex cycle forecast keys and interpolation variables aligned", () => {
     const reference = flattenTranslationStrings(en.usage.cycleCapacity);
 

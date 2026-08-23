@@ -290,7 +290,7 @@ describe("CodexCycleCapacityCard", () => {
       <CodexCycleCapacityCard quota={quota} usage={usage} nowMs={queriedAt} />,
     );
 
-    expect(screen.getByRole("progressbar", { name: "已使用" })).toHaveAttribute(
+    expect(screen.getByRole("progressbar", { name: "已用" })).toHaveAttribute(
       "aria-valuenow",
       "30",
     );
@@ -304,10 +304,10 @@ describe("CodexCycleCapacityCard", () => {
     );
     expect(metricLabels).toEqual([
       "完整周期 Token 等效容量",
-      "已使用额度 Token 等效容量",
+      "已用额度 Token 等效容量",
       "剩余额度 Token 等效容量",
       "完整周期美元等效容量",
-      "已使用额度美元等效容量",
+      "已用额度美元等效容量",
       "剩余额度美元等效容量",
     ]);
     expect(metricValues).toEqual([

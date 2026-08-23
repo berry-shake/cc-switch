@@ -307,7 +307,7 @@ export function CodexCycleCapacityCard({
     samples: forecastSamples,
   });
 
-  const usedLabel = t("usage.cycleCapacity.used", "已使用");
+  const usedLabel = t("usage.cycleCapacity.used", "已用");
   const estimateLabel = t("usage.cycleCapacity.estimate", "等效估算");
   const titleLabel = t(
     "usage.cycleCapacity.title",
@@ -584,7 +584,7 @@ export function CodexCycleCapacityCard({
                   <CapacityMetric
                     label={t(
                       "usage.cycleCapacity.usedTokens",
-                      "已使用额度 Token 等效容量",
+                      "已用额度 Token 等效容量",
                     )}
                     value={formatEstimatedTokens(estimate.usedTokens)}
                     title={Math.round(estimate.usedTokens).toLocaleString(
@@ -612,7 +612,7 @@ export function CodexCycleCapacityCard({
                   <CapacityMetric
                     label={t(
                       "usage.cycleCapacity.usedUsd",
-                      "已使用额度美元等效容量",
+                      "已用额度美元等效容量",
                     )}
                     value={formatUsdEstimate(estimate.usedUsd)}
                   />
