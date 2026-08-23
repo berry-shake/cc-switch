@@ -51,6 +51,7 @@ vi.mock("@/components/usage/CodexCycleCapacityCard", () => ({
     accountEmail,
     lastRefreshedAt,
     calculationMode,
+    onCalculationModeChange,
     onRefreshAnalytics,
   }: {
     quota: SubscriptionQuota;
@@ -60,6 +61,7 @@ vi.mock("@/components/usage/CodexCycleCapacityCard", () => ({
     lastRefreshedAt?: number | null;
     quotaSamples?: readonly unknown[];
     calculationMode?: "local" | "analytics";
+    onCalculationModeChange?: (mode: "local" | "analytics") => void;
     onRefreshAnalytics?: () => void | Promise<void>;
   }) => (
     <div data-testid="capacity-entry">
@@ -71,6 +73,12 @@ vi.mock("@/components/usage/CodexCycleCapacityCard", () => ({
       <span data-testid="last-refreshed-at">
         {lastRefreshedAt ?? "no-refresh"}
       </span>
+      <button onClick={() => onCalculationModeChange?.("local")}>
+        switch-local
+      </button>
+      <button onClick={() => onCalculationModeChange?.("analytics")}>
+        switch-official
+      </button>
       <button onClick={() => void onRefreshAnalytics?.()}>
         refresh-official
       </button>
@@ -159,12 +167,16 @@ function installQueries({
   official = officialSnapshot,
   localSuccess = true,
   officialSuccess = true,
+  officialStale = false,
+  officialFetching = false,
   usageSuccess = true,
 }: {
   local?: CodexQuotaSnapshot;
   official?: CodexOfficialUsageSnapshot;
   localSuccess?: boolean;
   officialSuccess?: boolean;
+  officialStale?: boolean;
+  officialFetching?: boolean;
   usageSuccess?: boolean;
 } = {}) {
   useQueryMock.mockImplementation((options: QueryOptions) => {
@@ -182,7 +194,8 @@ function installQueries({
       return {
         isSuccess: officialSuccess,
         isError: !officialSuccess,
-        isFetching: false,
+        isFetching: officialFetching,
+        isStale: officialStale,
         data: official,
         refetch: officialRefetchMock,
       };
@@ -287,6 +300,44 @@ describe("CodexCycleCapacitySection", () => {
       expect(pricingRefetchMock).toHaveBeenCalledTimes(1);
     });
     expect(localRefetchMock).not.toHaveBeenCalled();
+  });
+
+  it("reuses a fresh official snapshot when switching from local mode", () => {
+    installQueries();
+    render(<CodexCycleCapacitySection enabled />);
+
+    fireEvent.click(screen.getByText("switch-official"));
+
+    expect(screen.getByTestId("calculation-mode")).toHaveTextContent(
+      "analytics",
+    );
+    expect(officialRefetchMock).not.toHaveBeenCalled();
+    expect(pricingRefetchMock).not.toHaveBeenCalled();
+  });
+
+  it("refreshes a stale official snapshot when switching from local mode", async () => {
+    installQueries({ officialStale: true });
+    render(<CodexCycleCapacitySection enabled />);
+
+    fireEvent.click(screen.getByText("switch-official"));
+
+    await waitFor(() => {
+      expect(officialRefetchMock).toHaveBeenCalledTimes(1);
+      expect(pricingRefetchMock).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("does not duplicate a stale official refresh already in flight", () => {
+    installQueries({ officialStale: true, officialFetching: true });
+    render(<CodexCycleCapacitySection enabled />);
+
+    fireEvent.click(screen.getByText("switch-official"));
+
+    expect(screen.getByTestId("calculation-mode")).toHaveTextContent(
+      "analytics",
+    );
+    expect(officialRefetchMock).not.toHaveBeenCalled();
+    expect(pricingRefetchMock).not.toHaveBeenCalled();
   });
 
   it("does not combine analytics from another credential scope", () => {

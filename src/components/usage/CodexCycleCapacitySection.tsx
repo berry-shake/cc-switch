@@ -127,9 +127,16 @@ export function CodexCycleCapacitySection({
   const handleCalculationModeChange = useCallback(
     (mode: CodexCycleCapacityCalculationMode) => {
       setCalculationMode(mode);
-      if (mode === "analytics") void refreshAnalytics();
+      if (
+        mode === "analytics" &&
+        // 同时覆盖一小时自然过期和账号切换触发的显式失效。
+        officialQuery.isStale &&
+        !officialQuery.isFetching
+      ) {
+        void refreshAnalytics();
+      }
     },
-    [refreshAnalytics],
+    [officialQuery.isFetching, officialQuery.isStale, refreshAnalytics],
   );
 
   const hasLocalUsage = usageQuery.isSuccess;
