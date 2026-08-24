@@ -301,20 +301,21 @@ export function CodexCycleCapacityCard({
     onCalculationModeChange || (localEstimate && analyticsEstimate),
   );
 
-  const forecast = estimate
-    ? forecastCodexCycle({
-        cycleStartMs: estimate.startMs,
-        resetAtMs: estimate.resetAtMs,
-        queriedAtMs: estimate.endMs,
-        utilizationPercent: estimate.utilizationPercent,
-        samples: getCodexQuotaSamplesForCycle(quotaSamples, estimate).map(
-          (sample) => ({
-            timestampMs: sample.capturedAtMs,
-            utilizationPercent: sample.utilizationPercent,
-          }),
-        ),
-      })
-    : null;
+  const forecast =
+    cycleWindow?.utilizationPercent != null
+      ? forecastCodexCycle({
+          cycleStartMs: cycleWindow.startMs,
+          resetAtMs: cycleWindow.resetAtMs,
+          queriedAtMs: cycleWindow.endMs,
+          utilizationPercent: cycleWindow.utilizationPercent,
+          samples: getCodexQuotaSamplesForCycle(quotaSamples, cycleWindow).map(
+            (sample) => ({
+              timestampMs: sample.capturedAtMs,
+              utilizationPercent: sample.utilizationPercent,
+            }),
+          ),
+        })
+      : null;
 
   const usedLabel = t("usage.cycleCapacity.used", "已用");
   const estimateLabel = t("usage.cycleCapacity.estimate", "等效估算");
@@ -769,10 +770,14 @@ export function CodexCycleCapacityCard({
               </div>
             </div>
 
-            {forecast ? (
+            {cycleWindow ? (
               <CodexCycleForecastPanel
                 forecast={forecast}
-                resetAtMs={estimate!.resetAtMs}
+                cycleStartMs={cycleWindow.startMs}
+                queriedAtMs={cycleWindow.endMs}
+                resetAtMs={cycleWindow.resetAtMs}
+                waitingTitle={waitingTitle}
+                waitingDescription={waitingDescription}
                 locale={locale}
                 lang={lang}
                 t={t}

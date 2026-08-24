@@ -10,6 +10,7 @@ import type {
 import { cn } from "@/lib/utils";
 
 const EXHAUSTION_TIME_EPSILON_MS = 1_000;
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 function formatPercent(value: number): string {
   const rounded = Math.round(value);
@@ -288,19 +289,244 @@ function formatExhaustion(
   return formatDateTime(exhaustion.atMs, locale);
 }
 
-export function CodexCycleForecastPanel({
-  forecast,
+function CodexCycleForecastWaitingPanel({
+  cycleStartMs,
+  queriedAtMs,
   resetAtMs,
+  waitingTitle,
+  waitingDescription,
   locale,
   lang,
   t,
 }: {
-  forecast: CodexCycleForecast;
+  cycleStartMs: number;
+  queriedAtMs: number;
   resetAtMs: number;
+  waitingTitle: string;
+  waitingDescription: string;
   locale: string;
   lang: string;
   t: TFunction;
 }) {
+  const cycleDurationMs = Math.max(1, resetAtMs - cycleStartMs);
+  const elapsedMs = Math.min(
+    cycleDurationMs,
+    Math.max(0, queriedAtMs - cycleStartMs),
+  );
+  const remainingMs = Math.max(0, resetAtMs - queriedAtMs);
+  const cycleTimeProgressPercent = (elapsedMs / cycleDurationMs) * 100;
+  const sustainableRatePercentPerDay = 100 / (cycleDurationMs / DAY_MS);
+  const perDay = t("usage.cycleCapacity.perDay", "%/天");
+  const waitingMetricValue = t(
+    "usage.cycleCapacity.empty.metricValue",
+    "待估算",
+  );
+  const durationUnits = {
+    day: t("usage.cycleCapacity.duration.day", "天"),
+    hour: t("usage.cycleCapacity.duration.hour", "小时"),
+    minute: t("usage.cycleCapacity.duration.minute", "分钟"),
+  };
+  const elapsed = formatDuration(elapsedMs, lang, durationUnits);
+  const remaining = formatDuration(remainingMs, lang, durationUnits);
+  const timeProgressValue = t("usage.cycleCapacity.timeProgressValue", {
+    defaultValue: "{{progress}} · 已过 {{elapsed}}",
+    progress: formatPercent(cycleTimeProgressPercent),
+    elapsed,
+  });
+
+  return (
+    <section
+      className="mt-5 border-t border-border/50 pt-5"
+      data-testid="codex-cycle-forecast"
+      data-state="waiting-utilization"
+    >
+      <div className="mb-4 flex flex-wrap items-center gap-3">
+        <div className="flex items-center gap-3">
+          <div className="rounded-xl bg-muted/70 p-2.5 text-muted-foreground">
+            <Activity className="h-5 w-5" />
+          </div>
+          <h4 className="text-base font-semibold tracking-tight">
+            {t("usage.cycleCapacity.currentStatus", "当前状态")}
+          </h4>
+        </div>
+        <Badge
+          variant="outline"
+          className="inline-flex items-center rounded-full border border-border/60 bg-muted/50 px-3 py-1.5 text-xs font-semibold text-muted-foreground shadow-sm"
+          data-status="waiting_utilization"
+          role="status"
+          aria-live="polite"
+        >
+          {waitingTitle}
+        </Badge>
+      </div>
+
+      <dl
+        className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3"
+        data-testid="codex-cycle-forecast-overview"
+      >
+        <ForecastMetric
+          metricId="actual-vs-baseline"
+          label={t(
+            "usage.cycleCapacity.actualVsBaseline",
+            "实际用量 / 基准用量（同期）",
+          )}
+          value={waitingMetricValue}
+          primary
+        />
+        <ForecastMetric
+          metricId="time-progress"
+          label={t("usage.cycleCapacity.timeProgress", "周期时间进度")}
+          value={timeProgressValue}
+          primary
+          progressPercent={cycleTimeProgressPercent}
+        />
+        <ForecastMetric
+          metricId="cumulative-vs-sustainable-rate"
+          label={t(
+            "usage.cycleCapacity.cumulativeVsSustainableRate",
+            "累计平均速率 / 可持续速率",
+          )}
+          value={`${waitingMetricValue} / ${formatRate(
+            sustainableRatePercentPerDay,
+            perDay,
+          )}`}
+          primary
+          className="sm:col-span-2 xl:col-span-1"
+        />
+      </dl>
+
+      <div className="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,2fr)_minmax(260px,1fr)]">
+        <div
+          className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2"
+          data-testid="codex-cycle-forecast-models"
+        >
+          <div
+            className="min-w-0 rounded-xl border border-border/50 bg-background/45 p-4 shadow-sm"
+            data-testid="codex-cycle-forecast-recent-model"
+          >
+            <div
+              className="mb-4 rounded-lg border border-border/40 bg-muted/30 px-3 py-2 text-xs font-medium text-muted-foreground"
+              data-testid="codex-cycle-forecast-waiting-utilization"
+              role="status"
+              aria-live="polite"
+            >
+              {waitingDescription}
+            </div>
+            <dl className="grid grid-cols-1 gap-4">
+              <ForecastDetail
+                metricId="recent-rate"
+                label={t(
+                  "usage.cycleCapacity.recentRate",
+                  "近期消耗速率（采样区间）",
+                )}
+                value={waitingMetricValue}
+                valueClassName="font-medium text-muted-foreground"
+              />
+              <ForecastDetail
+                metricId="projected-final-utilization"
+                label={t(
+                  "usage.cycleCapacity.projectedFinalUtilization",
+                  "近期速率模型期末预计用量",
+                )}
+                value={waitingMetricValue}
+                valueClassName="font-medium text-muted-foreground"
+              />
+            </dl>
+          </div>
+
+          <div
+            className="min-w-0 rounded-xl border border-border/50 bg-background/45 p-4 shadow-sm"
+            data-testid="codex-cycle-forecast-exhaustion-models"
+          >
+            <dl className="grid grid-cols-1 gap-4">
+              <ForecastDetail
+                metricId="cumulative-exhaustion-at"
+                label={t(
+                  "usage.cycleCapacity.cumulativeExhaustionAt",
+                  "累计平均模型预计耗尽时间",
+                )}
+                value={waitingMetricValue}
+                valueClassName="font-medium text-muted-foreground"
+              />
+              <ForecastDetail
+                metricId="recent-exhaustion-at"
+                label={t(
+                  "usage.cycleCapacity.recentExhaustionAt",
+                  "近期速率模型预计耗尽时间",
+                )}
+                value={waitingMetricValue}
+                valueClassName="font-medium text-muted-foreground"
+              />
+            </dl>
+          </div>
+        </div>
+
+        <div
+          className="min-w-0 rounded-xl border border-border/50 bg-background/45 p-4 shadow-sm"
+          data-testid="codex-cycle-forecast-reset"
+        >
+          <dl className="grid h-full grid-cols-1 gap-4">
+            <ForecastDetail
+              metricId="scheduled-reset-at"
+              label={t(
+                "usage.cycleCapacity.scheduledResetAt",
+                "周期计划重置时间",
+              )}
+              value={formatDateTime(resetAtMs, locale)}
+              valueClassName="text-base"
+            />
+            <ForecastDetail
+              metricId="remaining-to-reset"
+              label={t(
+                "usage.cycleCapacity.remainingToReset",
+                "预测时点至重置的剩余时间",
+              )}
+              value={remaining}
+              valueClassName="text-base"
+            />
+          </dl>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+export function CodexCycleForecastPanel({
+  forecast,
+  cycleStartMs,
+  queriedAtMs,
+  resetAtMs,
+  waitingTitle,
+  waitingDescription,
+  locale,
+  lang,
+  t,
+}: {
+  forecast: CodexCycleForecast | null;
+  cycleStartMs: number;
+  queriedAtMs: number;
+  resetAtMs: number;
+  waitingTitle: string;
+  waitingDescription: string;
+  locale: string;
+  lang: string;
+  t: TFunction;
+}) {
+  if (!forecast) {
+    return (
+      <CodexCycleForecastWaitingPanel
+        cycleStartMs={cycleStartMs}
+        queriedAtMs={queriedAtMs}
+        resetAtMs={resetAtMs}
+        waitingTitle={waitingTitle}
+        waitingDescription={waitingDescription}
+        locale={locale}
+        lang={lang}
+        t={t}
+      />
+    );
+  }
+
   const status = statusPresentation(forecast.statusLevel, t);
   const perDay = t("usage.cycleCapacity.perDay", "%/天");
   const durationUnits = {

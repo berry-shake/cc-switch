@@ -569,10 +569,63 @@ describe("CodexCycleCapacityCard", () => {
     );
     expect(screen.getByText("等待本地用量同步")).toBeInTheDocument();
     expect(screen.getAllByText("待估算")).toHaveLength(6);
+    const forecast = screen.getByTestId("codex-cycle-forecast");
+    expect(within(forecast).getByText("当前状态")).toBeInTheDocument();
+    expect(within(forecast).getByText("低于匀速基准")).toHaveAttribute(
+      "data-status",
+      "below_pace",
+    );
     expect(
-      screen.queryByTestId("codex-cycle-forecast"),
-    ).not.toBeInTheDocument();
+      within(forecast).getByText("30% / 57.1%（低于基准）"),
+    ).toBeInTheDocument();
+    expect(within(forecast).getByText("周期计划重置时间")).toBeInTheDocument();
   });
+
+  it.each([
+    {
+      missingBasis: "official Token usage",
+      analyticsUsage: { ...analyticsUsage, days: [] },
+      modelPricing,
+    },
+    {
+      missingBasis: "model pricing",
+      analyticsUsage,
+      modelPricing: [] as ModelPricing[],
+    },
+  ])(
+    "keeps the utilization forecast while waiting for $missingBasis",
+    ({ analyticsUsage: pendingUsage, modelPricing: pendingPricing }) => {
+      render(
+        <CodexCycleCapacityCard
+          quota={quota}
+          usage={usage}
+          analyticsUsage={pendingUsage}
+          modelPricing={pendingPricing}
+          calculationMode="analytics"
+          onCalculationModeChange={vi.fn()}
+          onRefreshAnalytics={vi.fn()}
+          nowMs={queriedAt}
+        />,
+      );
+
+      expect(
+        screen.getByTestId("codex-capacity-waiting-state"),
+      ).toHaveAttribute("data-reason", "analytics");
+      expect(screen.getAllByText("待估算")).toHaveLength(6);
+
+      const forecast = screen.getByTestId("codex-cycle-forecast");
+      expect(within(forecast).getByText("当前状态")).toBeInTheDocument();
+      expect(
+        within(forecast).getByText("57.1% · 已过 4天"),
+      ).toBeInTheDocument();
+      expect(
+        within(forecast).getByText("7.5%/天 / 14.3%/天"),
+      ).toBeInTheDocument();
+      expect(
+        within(forecast).getByText("采样中（至少需要 1 小时）"),
+      ).toBeInTheDocument();
+    },
+  );
 
   it("shows a real 0% cycle and keeps official refresh available", () => {
     const refreshAnalytics = vi.fn();
@@ -611,9 +664,20 @@ describe("CodexCycleCapacityCard", () => {
       screen.getByText(/首笔用量同步后，将自动计算 Token 和美元等效容量/),
     ).toBeInTheDocument();
     expect(screen.getAllByText("待估算")).toHaveLength(6);
+    const forecast = screen.getByTestId("codex-cycle-forecast");
+    expect(within(forecast).getByText("当前状态")).toBeInTheDocument();
+    expect(within(forecast).getByText("低于匀速基准")).toHaveAttribute(
+      "data-status",
+      "below_pace",
+    );
     expect(
-      screen.queryByTestId("codex-cycle-forecast"),
-    ).not.toBeInTheDocument();
+      within(forecast).getByRole("progressbar", {
+        name: "实际用量 / 基准用量（同期）",
+      }),
+    ).toHaveAttribute("aria-valuenow", "0");
+    expect(
+      within(forecast).getByText("0.0%/天 / 14.3%/天"),
+    ).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "刷新" }));
     expect(refreshAnalytics).toHaveBeenCalledTimes(1);
@@ -648,8 +712,29 @@ describe("CodexCycleCapacityCard", () => {
       "data-reason",
       "utilization",
     );
-    expect(screen.getByText("等待额度比例")).toBeInTheDocument();
-    expect(screen.getByText(/不会把缺失值当成 0%/)).toBeInTheDocument();
+    expect(
+      within(screen.getByTestId("codex-capacity-waiting-state")).getByText(
+        "等待额度比例",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      within(screen.getByTestId("codex-capacity-waiting-state")).getByText(
+        /不会把缺失值当成 0%/,
+      ),
+    ).toBeInTheDocument();
+
+    const forecast = screen.getByTestId("codex-cycle-forecast");
+    expect(within(forecast).getByText("当前状态")).toBeInTheDocument();
+    expect(within(forecast).getByText("周期时间进度")).toBeInTheDocument();
+    expect(within(forecast).getByText("周期计划重置时间")).toBeInTheDocument();
+    expect(
+      within(forecast).getByText("预测时点至重置的剩余时间"),
+    ).toBeInTheDocument();
+    expect(
+      within(forecast).queryByRole("progressbar", {
+        name: "实际用量 / 基准用量（同期）",
+      }),
+    ).not.toBeInTheDocument();
   });
 
   it("does not silently fall back to local data when official usage is empty", () => {
