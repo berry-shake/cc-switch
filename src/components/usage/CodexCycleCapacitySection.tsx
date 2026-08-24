@@ -30,8 +30,8 @@ export interface CodexCycleCapacitySectionProps {
  * 本机 JSONL 用量属于当前 Codex CLI 账号，因此额度也只从同一份
  * `~/.codex/auth.json` 凭据查询，不与 cc-switch 托管的其他 OAuth 账号混算。
  * 这里故意直接读取原始 react-query 状态，不使用订阅卡片的 keep-last-good：
- * 最新请求 reject、HTTP 错误映射为 success=false，或返回缺失长周期数据时，
- * 整个入口都会消失。
+ * 最新请求 reject 或 HTTP 错误映射为 success=false 时，入口保持隐藏；接口
+ * 成功但周期刚重置、比例尚未同步或用量暂为空时，则保留卡片并显示等待状态。
  */
 export function CodexCycleCapacitySection({
   enabled,
@@ -80,7 +80,7 @@ export function CodexCycleCapacitySection({
       : localQuotaQuery.isSuccess
         ? localQuotaQuery.data
         : null;
-  const quota = activeSnapshot?.quota.success ? activeSnapshot.quota : null;
+  const quota = activeSnapshot?.quota ?? null;
   const cycle = useMemo(() => resolveCodexQuotaCycle(quota), [quota]);
   const startDate = cycle ? Math.floor(cycle.startMs / 1000) : undefined;
   const endDate = cycle ? Math.floor(cycle.endMs / 1000) : undefined;
@@ -139,18 +139,17 @@ export function CodexCycleCapacitySection({
     [officialQuery.isFetching, officialQuery.isStale, refreshAnalytics],
   );
 
-  const hasLocalUsage = usageQuery.isSuccess;
   const analyticsUsage =
     officialQuery.isSuccess &&
     officialQuery.data.credentialScope === activeSnapshot?.credentialScope
       ? officialQuery.data.analytics
       : null;
-  const hasAnalyticsUsage = analyticsUsage != null && pricingQuery.isSuccess;
-  if (!enabled || !cycle || (!hasLocalUsage && !hasAnalyticsUsage)) return null;
+  if (!enabled || !activeSnapshot || !quota?.success) return null;
 
   return (
     <CodexCycleCapacityCard
       quota={quota}
+      quotaWindows={activeSnapshot.quotaWindows}
       accountEmail={activeSnapshot?.email}
       lastRefreshedAt={activeSnapshot?.quota.queriedAt}
       usage={usageQuery.isSuccess ? usageQuery.data : null}

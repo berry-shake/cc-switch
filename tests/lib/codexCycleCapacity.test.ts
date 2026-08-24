@@ -4,6 +4,7 @@ import {
   deriveCodexCycleCapacity,
   estimateCodexCycleCapacity,
   resolveCodexQuotaCycle,
+  resolveCodexQuotaCycleWindow,
 } from "@/lib/codexCycleCapacity";
 import type { SubscriptionQuota } from "@/types/subscription";
 import type { UsageSummary } from "@/types/usage";
@@ -73,19 +74,6 @@ describe("resolveCodexQuotaCycle", () => {
     ["failed response", makeQuota({ success: false })],
     ["wrong tool", makeQuota({ tool: "claude" })],
     [
-      "zero utilization",
-      makeQuota({
-        tiers: [
-          {
-            name: "seven_day",
-            windowSeconds: SEVEN_DAYS,
-            utilization: 0,
-            resetsAt: new Date(RESET_AT).toISOString(),
-          },
-        ],
-      }),
-    ],
-    [
       "missing window length",
       makeQuota({
         tiers: [
@@ -112,6 +100,52 @@ describe("resolveCodexQuotaCycle", () => {
     ],
   ])("rejects %s", (_label, quota) => {
     expect(resolveCodexQuotaCycle(quota, QUERIED_AT)).toBeNull();
+  });
+
+  it("preserves a fresh zero-usage cycle without making it estimable", () => {
+    const zeroQuota = makeQuota({
+      tiers: [
+        {
+          name: "seven_day",
+          windowSeconds: SEVEN_DAYS,
+          utilization: 0,
+          resetsAt: new Date(RESET_AT).toISOString(),
+        },
+      ],
+    });
+    const cycle = resolveCodexQuotaCycle(zeroQuota, QUERIED_AT);
+
+    expect(cycle).toMatchObject({
+      utilizationPercent: 0,
+      usedRatio: 0,
+      startMs: RESET_AT - SEVEN_DAYS * 1000,
+      endMs: QUERIED_AT,
+      resetAtMs: RESET_AT,
+    });
+    expect(estimateCodexCycleCapacity(cycle, usage)).toBeNull();
+  });
+
+  it("preserves a long cycle whose used percentage has not synced", () => {
+    const quotaWithoutTier = makeQuota({ tiers: [] });
+    const cycle = resolveCodexQuotaCycleWindow(
+      quotaWithoutTier,
+      [
+        {
+          usedPercent: null,
+          windowSeconds: SEVEN_DAYS,
+          resetsAt: new Date(RESET_AT).toISOString(),
+        },
+      ],
+      QUERIED_AT,
+    );
+
+    expect(cycle).toEqual({
+      windowSeconds: SEVEN_DAYS,
+      utilizationPercent: null,
+      startMs: RESET_AT - SEVEN_DAYS * 1000,
+      endMs: QUERIED_AT,
+      resetAtMs: RESET_AT,
+    });
   });
 
   it("rejects a cached cycle after its reset time", () => {

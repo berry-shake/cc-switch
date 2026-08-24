@@ -558,9 +558,23 @@ struct CodexUsageResponse {
     rate_limit: Option<CodexRateLimit>,
 }
 
+/// Codex 原始额度窗口的非敏感快照。
+///
+/// `QuotaTier` 被多个供应商和订阅 UI 共用，其 `utilization` 必须是确定数值；
+/// Codex 在周期刚重置时可能暂不返回 `used_percent`，因此通过专属快照旁路
+/// 保留窗口长度和重置时间，避免把“字段缺失”错误伪装成真实的 0%。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CodexQuotaWindow {
+    pub used_percent: Option<f64>,
+    pub window_seconds: Option<i64>,
+    pub resets_at: Option<String>,
+}
+
 pub(crate) struct CodexQuotaQueryResult {
     pub quota: SubscriptionQuota,
     pub email: Option<String>,
+    pub quota_windows: Vec<CodexQuotaWindow>,
 }
 
 /// 根据窗口秒数映射到 tier 名称（与 Claude 的命名兼容以复用前端 i18n）
@@ -643,6 +657,7 @@ pub(crate) async fn query_codex_quota_with_metadata(
                 format!("{expired_message} (HTTP {status})"),
             ),
             email: None,
+            quota_windows: vec![],
         });
     }
 
@@ -655,6 +670,7 @@ pub(crate) async fn query_codex_quota_with_metadata(
                 format!("API error (HTTP {status}): {body}"),
             ),
             email: None,
+            quota_windows: vec![],
         });
     }
 
@@ -672,6 +688,7 @@ pub(crate) async fn query_codex_quota_with_metadata(
                     format!("Failed to parse API response: {e}"),
                 ),
                 email: None,
+                quota_windows: vec![],
             });
         }
     };
@@ -682,7 +699,8 @@ pub(crate) async fn query_codex_quota_with_metadata(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_owned);
-    let tiers = codex_usage_response_to_tiers(body);
+    let quota_windows = codex_usage_response_to_windows(&body);
+    let tiers = codex_usage_response_to_tiers(&body);
 
     Ok(CodexQuotaQueryResult {
         quota: SubscriptionQuota {
@@ -696,30 +714,54 @@ pub(crate) async fn query_codex_quota_with_metadata(
             queried_at: Some(now_millis()),
         },
         email,
+        quota_windows,
     })
 }
 
-fn codex_usage_response_to_tiers(body: CodexUsageResponse) -> Vec<QuotaTier> {
+fn codex_rate_limit_windows(
+    body: &CodexUsageResponse,
+) -> impl Iterator<Item = &CodexRateLimitWindow> {
+    body.rate_limit.as_ref().into_iter().flat_map(|rate_limit| {
+        [
+            rate_limit.primary_window.as_ref(),
+            rate_limit.secondary_window.as_ref(),
+        ]
+        .into_iter()
+        .flatten()
+    })
+}
+
+fn codex_usage_response_to_windows(body: &CodexUsageResponse) -> Vec<CodexQuotaWindow> {
+    codex_rate_limit_windows(body)
+        .filter(|window| {
+            window.used_percent.is_some()
+                || window.limit_window_seconds.is_some()
+                || window.reset_at.is_some()
+        })
+        .map(|window| CodexQuotaWindow {
+            used_percent: window.used_percent,
+            window_seconds: window.limit_window_seconds,
+            resets_at: window.reset_at.and_then(unix_ts_to_iso),
+        })
+        .collect()
+}
+
+fn codex_usage_response_to_tiers(body: &CodexUsageResponse) -> Vec<QuotaTier> {
     let mut tiers = Vec::new();
 
-    if let Some(rate_limit) = body.rate_limit {
-        for window in [rate_limit.primary_window, rate_limit.secondary_window]
-            .into_iter()
-            .flatten()
-        {
-            if let Some(used) = window.used_percent {
-                let window_seconds = window.limit_window_seconds;
-                tiers.push(QuotaTier {
-                    name: window_seconds
-                        .map(window_seconds_to_tier_name)
-                        .unwrap_or_else(|| "unknown".to_string()),
-                    window_seconds,
-                    utilization: used,
-                    resets_at: window.reset_at.and_then(unix_ts_to_iso),
-                    used_value_usd: None,
-                    max_value_usd: None,
-                });
-            }
+    for window in codex_rate_limit_windows(body) {
+        if let Some(used) = window.used_percent {
+            let window_seconds = window.limit_window_seconds;
+            tiers.push(QuotaTier {
+                name: window_seconds
+                    .map(window_seconds_to_tier_name)
+                    .unwrap_or_else(|| "unknown".to_string()),
+                window_seconds,
+                utilization: used,
+                resets_at: window.reset_at.and_then(unix_ts_to_iso),
+                used_value_usd: None,
+                max_value_usd: None,
+            });
         }
     }
 
@@ -1340,7 +1382,7 @@ mod tests {
 
     #[test]
     fn codex_tiers_preserve_window_seconds_with_camel_case_serialization() {
-        let tiers = codex_usage_response_to_tiers(CodexUsageResponse {
+        let response = CodexUsageResponse {
             email: None,
             rate_limit: Some(CodexRateLimit {
                 primary_window: Some(CodexRateLimitWindow {
@@ -1354,7 +1396,8 @@ mod tests {
                     reset_at: Some(1_700_604_800),
                 }),
             }),
-        });
+        };
+        let tiers = codex_usage_response_to_tiers(&response);
 
         assert_eq!(tiers.len(), 2);
         assert_eq!(tiers[0].name, TIER_FIVE_HOUR);
@@ -1376,5 +1419,57 @@ mod tests {
         };
         let serialized = serde_json::to_value(non_codex_tier).expect("serialize quota tier");
         assert!(serialized.get("windowSeconds").is_none());
+    }
+
+    #[test]
+    fn codex_windows_preserve_missing_used_percent_without_faking_zero() {
+        let response = CodexUsageResponse {
+            email: None,
+            rate_limit: Some(CodexRateLimit {
+                primary_window: Some(CodexRateLimitWindow {
+                    used_percent: None,
+                    limit_window_seconds: Some(604_800),
+                    reset_at: Some(1_700_604_800),
+                }),
+                secondary_window: None,
+            }),
+        };
+
+        assert!(codex_usage_response_to_tiers(&response).is_empty());
+
+        let windows = codex_usage_response_to_windows(&response);
+        assert_eq!(windows.len(), 1);
+        assert_eq!(windows[0].used_percent, None);
+        assert_eq!(windows[0].window_seconds, Some(604_800));
+        assert!(windows[0].resets_at.is_some());
+
+        let serialized = serde_json::to_value(&windows[0]).expect("serialize quota window");
+        assert!(serialized["usedPercent"].is_null());
+        assert_eq!(serialized["windowSeconds"], serde_json::json!(604_800));
+        assert!(serialized.get("used_percent").is_none());
+    }
+
+    #[test]
+    fn codex_windows_keep_explicit_zero_distinct_from_missing_percent() {
+        let response = CodexUsageResponse {
+            email: None,
+            rate_limit: Some(CodexRateLimit {
+                primary_window: Some(CodexRateLimitWindow {
+                    used_percent: Some(0.0),
+                    limit_window_seconds: Some(604_800),
+                    reset_at: Some(1_700_604_800),
+                }),
+                secondary_window: None,
+            }),
+        };
+
+        let tiers = codex_usage_response_to_tiers(&response);
+        let windows = codex_usage_response_to_windows(&response);
+        assert_eq!(tiers.len(), 1);
+        assert_eq!(tiers[0].utilization, 0.0);
+        assert_eq!(windows[0].used_percent, Some(0.0));
+
+        let serialized = serde_json::to_value(&windows[0]).expect("serialize quota window");
+        assert_eq!(serialized["usedPercent"], serde_json::json!(0.0));
     }
 }

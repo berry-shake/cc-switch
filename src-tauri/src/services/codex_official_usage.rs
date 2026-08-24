@@ -9,7 +9,7 @@ use crate::services::codex_usage_analytics::{
 };
 use crate::services::subscription::{
     query_codex_quota_with_metadata, read_codex_request_credentials, CodexQuotaQueryResult,
-    QuotaTier, SubscriptionQuota,
+    CodexQuotaWindow, QuotaTier, SubscriptionQuota,
 };
 
 const LONG_CYCLE_MIN_SECONDS: i64 = 6 * 24 * 60 * 60;
@@ -18,6 +18,7 @@ const LONG_CYCLE_MIN_SECONDS: i64 = 6 * 24 * 60 * 60;
 #[serde(rename_all = "camelCase")]
 pub struct CodexQuotaSnapshot {
     pub quota: SubscriptionQuota,
+    pub quota_windows: Vec<CodexQuotaWindow>,
     pub email: Option<String>,
     pub credential_source: CodexCredentialSource,
     pub credential_scope: String,
@@ -27,6 +28,7 @@ pub struct CodexQuotaSnapshot {
 #[serde(rename_all = "camelCase")]
 pub struct CodexOfficialUsageSnapshot {
     pub quota: SubscriptionQuota,
+    pub quota_windows: Vec<CodexQuotaWindow>,
     pub analytics: Option<CodexAnalyticsUsage>,
     pub email: Option<String>,
     pub credential_source: CodexCredentialSource,
@@ -101,6 +103,7 @@ pub async fn query_codex_quota_snapshot() -> Result<CodexQuotaSnapshot, String> 
     let result = query_quota(&credentials).await?;
     Ok(CodexQuotaSnapshot {
         quota: result.quota,
+        quota_windows: result.quota_windows,
         email: result.email,
         credential_source: credentials.source,
         credential_scope: credentials.account_scope,
@@ -126,6 +129,7 @@ pub async fn query_codex_official_usage_snapshot() -> Result<CodexOfficialUsageS
 
     Ok(CodexOfficialUsageSnapshot {
         quota,
+        quota_windows: result.quota_windows,
         analytics,
         email: result.email,
         credential_source: credentials.source,
@@ -177,6 +181,19 @@ mod tests {
     fn refuses_analytics_when_quota_has_no_current_long_cycle() {
         let mut value = quota();
         value.tiers[0].window_seconds = Some(18_000);
+        assert_eq!(analytics_range(&value), None);
+    }
+
+    #[test]
+    fn refuses_analytics_for_a_fresh_zero_usage_cycle() {
+        let mut value = quota();
+        value.queried_at = Some(
+            DateTime::parse_from_rfc3339("2026-08-24T12:00:00Z")
+                .unwrap()
+                .timestamp_millis(),
+        );
+        value.tiers[0].utilization = 0.0;
+
         assert_eq!(analytics_range(&value), None);
     }
 }

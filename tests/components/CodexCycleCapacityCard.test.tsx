@@ -553,8 +553,8 @@ describe("CodexCycleCapacityCard", () => {
     expect(container).toBeEmptyDOMElement();
   });
 
-  it("renders nothing when there is no priced local usage", () => {
-    const { container } = render(
+  it("keeps the card visible while local usage is not yet estimable", () => {
+    render(
       <CodexCycleCapacityCard
         quota={quota}
         usage={{ ...usage, totalCost: "0" }}
@@ -562,6 +562,123 @@ describe("CodexCycleCapacityCard", () => {
       />,
     );
 
-    expect(container).toBeEmptyDOMElement();
+    expect(screen.getByTestId("codex-cycle-capacity-card")).toBeInTheDocument();
+    expect(screen.getByTestId("codex-capacity-waiting-state")).toHaveAttribute(
+      "data-reason",
+      "local",
+    );
+    expect(screen.getByText("等待本地用量同步")).toBeInTheDocument();
+    expect(screen.getAllByText("待估算")).toHaveLength(6);
+    expect(
+      screen.queryByTestId("codex-cycle-forecast"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows a real 0% cycle and keeps official refresh available", () => {
+    const refreshAnalytics = vi.fn();
+    const zeroQuota: SubscriptionQuota = {
+      ...quota,
+      tiers: [
+        {
+          ...quota.tiers[0],
+          utilization: 0,
+        },
+      ],
+    };
+
+    render(
+      <CodexCycleCapacityCard
+        quota={zeroQuota}
+        usage={null}
+        calculationMode="analytics"
+        onCalculationModeChange={vi.fn()}
+        onRefreshAnalytics={refreshAnalytics}
+        nowMs={queriedAt}
+      />,
+    );
+
+    expect(screen.getByRole("progressbar", { name: "已用" })).toHaveAttribute(
+      "aria-valuenow",
+      "0",
+    );
+    expect(screen.getByText("0%")).toBeInTheDocument();
+    expect(screen.getByTestId("codex-capacity-waiting-state")).toHaveAttribute(
+      "data-reason",
+      "firstUsage",
+    );
+    expect(screen.getByText("新周期已开始")).toBeInTheDocument();
+    expect(
+      screen.getByText(/首笔用量同步后，将自动计算 Token 和美元等效容量/),
+    ).toBeInTheDocument();
+    expect(screen.getAllByText("待估算")).toHaveLength(6);
+    expect(
+      screen.queryByTestId("codex-cycle-forecast"),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "刷新" }));
+    expect(refreshAnalytics).toHaveBeenCalledTimes(1);
+  });
+
+  it("distinguishes a missing used percentage from a real 0%", () => {
+    render(
+      <CodexCycleCapacityCard
+        quota={{ ...quota, tiers: [] }}
+        quotaWindows={[
+          {
+            usedPercent: null,
+            windowSeconds: 7 * 24 * 60 * 60,
+            resetsAt: new Date(resetAt).toISOString(),
+          },
+        ]}
+        usage={null}
+        calculationMode="analytics"
+        onCalculationModeChange={vi.fn()}
+        onRefreshAnalytics={vi.fn()}
+        nowMs={queriedAt}
+      />,
+    );
+
+    expect(
+      screen.queryByRole("progressbar", { name: "已用" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("status", { name: "等待可估算用量" }),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId("codex-capacity-waiting-state")).toHaveAttribute(
+      "data-reason",
+      "utilization",
+    );
+    expect(screen.getByText("等待额度比例")).toBeInTheDocument();
+    expect(screen.getByText(/不会把缺失值当成 0%/)).toBeInTheDocument();
+  });
+
+  it("does not silently fall back to local data when official usage is empty", () => {
+    const refreshAnalytics = vi.fn();
+    render(
+      <CodexCycleCapacityCard
+        quota={quota}
+        usage={usage}
+        analyticsUsage={{ ...analyticsUsage, days: [] }}
+        modelPricing={modelPricing}
+        calculationMode="analytics"
+        onCalculationModeChange={vi.fn()}
+        onRefreshAnalytics={refreshAnalytics}
+        nowMs={queriedAt}
+      />,
+    );
+
+    expect(screen.getByRole("radio", { name: "官方接口" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    expect(screen.getByTestId("codex-capacity-waiting-state")).toHaveAttribute(
+      "data-reason",
+      "analytics",
+    );
+    expect(screen.getByText("等待官方用量同步")).toBeInTheDocument();
+    expect(screen.queryByText("$691.48")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "刷新" }));
+    expect(refreshAnalytics).toHaveBeenCalledTimes(1);
   });
 });

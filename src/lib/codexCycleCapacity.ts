@@ -1,4 +1,4 @@
-import type { SubscriptionQuota } from "@/types/subscription";
+import type { CodexQuotaWindow, SubscriptionQuota } from "@/types/subscription";
 import type { UsageSummary } from "@/types/usage";
 
 const DAY_SECONDS = 24 * 60 * 60;
@@ -11,17 +11,22 @@ export const CODEX_LONG_CYCLE_MIN_SECONDS = 6 * DAY_SECONDS;
 
 export type CodexQuotaCycleTier = SubscriptionQuota["tiers"][number];
 
-export interface CodexQuotaCycle {
-  tier: CodexQuotaCycleTier;
+export interface CodexQuotaCycleWindow {
   windowSeconds: number;
-  utilizationPercent: number;
-  usedRatio: number;
+  /** null 表示服务端保留了周期，但尚未同步 used_percent。 */
+  utilizationPercent: number | null;
   /** 本地同期汇总的查询起点。 */
   startMs: number;
   /** 本地同期汇总的查询终点，与官方 utilization 的采样时刻一致。 */
   endMs: number;
   /** 完整周期的服务端重置时刻，仅用于周期展示和有效性校验。 */
   resetAtMs: number;
+}
+
+export interface CodexQuotaCycle extends CodexQuotaCycleWindow {
+  tier: CodexQuotaCycleTier;
+  utilizationPercent: number;
+  usedRatio: number;
 }
 
 export interface CodexCycleCapacityEstimate extends CodexQuotaCycle {
@@ -41,6 +46,10 @@ export interface CodexCycleCapacityUsageBasis {
 
 function isFinitePositive(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && value > 0;
+}
+
+function isFiniteNonNegative(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0;
 }
 
 function parsePositiveCost(value: string): number | null {
@@ -75,8 +84,7 @@ export function resolveCodexQuotaCycle(
       return (
         isFinitePositive(tier.windowSeconds) &&
         tier.windowSeconds >= CODEX_LONG_CYCLE_MIN_SECONDS &&
-        Number.isFinite(tier.utilization) &&
-        tier.utilization > 0 &&
+        isFiniteNonNegative(tier.utilization) &&
         tier.utilization <= 100 &&
         Number.isFinite(resetAtMs) &&
         resetAtMs > queriedAtMs &&
@@ -100,6 +108,61 @@ export function resolveCodexQuotaCycle(
     startMs: cycleEndMs - tier.windowSeconds * 1000,
     endMs: queriedAtMs,
     resetAtMs: cycleEndMs,
+  };
+}
+
+/**
+ * 解析可展示的当前长周期。
+ *
+ * 常规 `QuotaTier` 能区分真实 0%，而 Codex 专属原始窗口还能保留
+ * `used_percent` 缺失的状态。这个函数只判断周期是否存在，不承诺当前已能
+ * 进行容量外推。
+ */
+export function resolveCodexQuotaCycleWindow(
+  quota: SubscriptionQuota | null | undefined,
+  quotaWindows: readonly CodexQuotaWindow[] | null | undefined,
+  nowMs: number = Date.now(),
+): CodexQuotaCycleWindow | null {
+  const cycle = resolveCodexQuotaCycle(quota, nowMs);
+  if (cycle) return cycle;
+
+  if (
+    !quota?.success ||
+    !quota.tool.toLowerCase().startsWith("codex") ||
+    !isFinitePositive(quota.queriedAt) ||
+    !Number.isFinite(nowMs)
+  ) {
+    return null;
+  }
+
+  const queriedAtMs = quota.queriedAt;
+  const candidates = (quotaWindows ?? [])
+    .filter((window) => {
+      const resetAtMs = window.resetsAt ? Date.parse(window.resetsAt) : NaN;
+      const utilization = window.usedPercent;
+      return (
+        isFinitePositive(window.windowSeconds) &&
+        window.windowSeconds >= CODEX_LONG_CYCLE_MIN_SECONDS &&
+        (utilization == null ||
+          (isFiniteNonNegative(utilization) && utilization <= 100)) &&
+        Number.isFinite(resetAtMs) &&
+        resetAtMs > queriedAtMs &&
+        resetAtMs > nowMs &&
+        resetAtMs - window.windowSeconds * 1000 <= queriedAtMs
+      );
+    })
+    .sort((a, b) => (b.windowSeconds ?? 0) - (a.windowSeconds ?? 0));
+
+  const window = candidates[0];
+  if (!window?.windowSeconds || !window.resetsAt) return null;
+
+  const resetAtMs = Date.parse(window.resetsAt);
+  return {
+    windowSeconds: window.windowSeconds,
+    utilizationPercent: window.usedPercent,
+    startMs: resetAtMs - window.windowSeconds * 1000,
+    endMs: queriedAtMs,
+    resetAtMs,
   };
 }
 
@@ -136,7 +199,7 @@ export function estimateCodexCycleCapacityFromBasis(
   cycle: CodexQuotaCycle | null | undefined,
   basis: CodexCycleCapacityUsageBasis | null | undefined,
 ): CodexCycleCapacityEstimate | null {
-  if (!cycle || !basis) return null;
+  if (!cycle || !basis || !isFinitePositive(cycle.usedRatio)) return null;
 
   const { usedTokens, usedUsd } = basis;
   if (!isFinitePositive(usedTokens) || !isFinitePositive(usedUsd)) return null;

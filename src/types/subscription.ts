@@ -69,8 +69,20 @@ export interface CodexAnalyticsUsage {
 
 export type CodexCredentialSource = "file" | "keyring";
 
+/**
+ * Codex 额度接口返回的原始非敏感窗口元数据。
+ * `usedPercent=null` 表示服务端尚未同步该字段，不能当成真实的 0%。
+ */
+export interface CodexQuotaWindow {
+  usedPercent: number | null;
+  windowSeconds: number | null;
+  resetsAt: string | null;
+}
+
 export interface CodexQuotaSnapshot {
   quota: SubscriptionQuota;
+  /** 即使 usedPercent 缺失，也保留周期长度与重置时间。 */
+  quotaWindows?: CodexQuotaWindow[];
   /** 与本次官方额度响应属于同一账号；接口未返回时为 null。 */
   email: string | null;
   credentialSource: CodexCredentialSource;

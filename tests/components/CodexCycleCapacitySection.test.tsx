@@ -45,6 +45,7 @@ vi.mock("@/lib/codexQuotaSamples", () => ({
 vi.mock("@/components/usage/CodexCycleCapacityCard", () => ({
   CodexCycleCapacityCard: ({
     quota,
+    quotaWindows,
     usage,
     quotaSamples,
     analyticsUsage,
@@ -55,6 +56,7 @@ vi.mock("@/components/usage/CodexCycleCapacityCard", () => ({
     onRefreshAnalytics,
   }: {
     quota: SubscriptionQuota;
+    quotaWindows?: readonly unknown[];
     usage: UsageSummary | null;
     analyticsUsage?: { accountMode: string } | null;
     accountEmail?: string | null;
@@ -68,6 +70,7 @@ vi.mock("@/components/usage/CodexCycleCapacityCard", () => ({
       {quota.tool}:{usage?.realTotalTokens ?? "no-local"}:
       {analyticsUsage?.accountMode ?? "no-analytics"}
       <span data-testid="sample-count">{quotaSamples?.length ?? 0}</span>
+      <span data-testid="window-count">{quotaWindows?.length ?? 0}</span>
       <span data-testid="calculation-mode">{calculationMode}</span>
       <span data-testid="account-email">{accountEmail ?? "no-email"}</span>
       <span data-testid="last-refreshed-at">
@@ -110,6 +113,13 @@ const quota: SubscriptionQuota = {
 
 const localSnapshot: CodexQuotaSnapshot = {
   quota,
+  quotaWindows: [
+    {
+      usedPercent: 30,
+      windowSeconds: WINDOW_SECONDS,
+      resetsAt: new Date(RESET_AT).toISOString(),
+    },
+  ],
   email: "local@example.com",
   credentialSource: "file",
   credentialScope: "scope-a",
@@ -349,6 +359,76 @@ describe("CodexCycleCapacitySection", () => {
     expect(screen.getByTestId("capacity-entry")).toHaveTextContent(
       "codex:100:no-analytics",
     );
+  });
+
+  it("renders a successful fresh 0% cycle instead of hiding the section", () => {
+    window.localStorage.setItem(
+      CODEX_CYCLE_CAPACITY_MODE_STORAGE_KEY,
+      "analytics",
+    );
+    const zeroQuota: SubscriptionQuota = {
+      ...quota,
+      tiers: [{ ...quota.tiers[0], utilization: 0 }],
+    };
+    installQueries({
+      official: {
+        ...officialSnapshot,
+        quota: zeroQuota,
+        quotaWindows: [
+          {
+            usedPercent: 0,
+            windowSeconds: WINDOW_SECONDS,
+            resetsAt: new Date(RESET_AT).toISOString(),
+          },
+        ],
+        analytics: null,
+      },
+    });
+
+    render(<CodexCycleCapacitySection enabled />);
+
+    expect(screen.getByTestId("capacity-entry")).toBeInTheDocument();
+    expect(screen.getByTestId("window-count")).toHaveTextContent("1");
+    expect(screen.getByTestId("calculation-mode")).toHaveTextContent(
+      "analytics",
+    );
+  });
+
+  it("renders a successful snapshot with a cycle whose percentage is missing", () => {
+    window.localStorage.setItem(
+      CODEX_CYCLE_CAPACITY_MODE_STORAGE_KEY,
+      "analytics",
+    );
+    installQueries({
+      official: {
+        ...officialSnapshot,
+        quota: { ...quota, tiers: [] },
+        quotaWindows: [
+          {
+            usedPercent: null,
+            windowSeconds: WINDOW_SECONDS,
+            resetsAt: new Date(RESET_AT).toISOString(),
+          },
+        ],
+        analytics: null,
+      },
+    });
+
+    render(<CodexCycleCapacitySection enabled />);
+
+    expect(screen.getByTestId("capacity-entry")).toBeInTheDocument();
+    expect(screen.getByTestId("window-count")).toHaveTextContent("1");
+    expect(loadQuotaSamplesMock).not.toHaveBeenCalled();
+
+    const options = useQueryMock.mock.calls.map(
+      ([value]) => value as QueryOptions,
+    );
+    expect(options.find((value) => queryKind(value) === "usage")?.enabled).toBe(
+      false,
+    );
+    expect(
+      options.find((value) => queryKind(value) === "pricing")?.enabled,
+    ).toBe(false);
   });
 
   it("hides stale official data when the atomic refresh rejects", () => {
