@@ -10,7 +10,7 @@ use chrono::NaiveDate;
 use reqwest::{RequestBuilder, StatusCode};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::services::codex_auth_credentials::CodexCredentialSnapshot;
@@ -86,6 +86,10 @@ pub struct CodexAnalyticsDailyUsage {
     pub date: String,
     pub totals: CodexAnalyticsTokenCounts,
     pub models: Vec<CodexAnalyticsModelUsage>,
+    /// 个人账号该日有正向模型额度，但总 Token 日报尚无正向记录。
+    pub missing_token_data: bool,
+    /// 个人账号该日有正向总 Token，但模型/速度额度明细尚无正向记录。
+    pub missing_model_breakdown: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -221,6 +225,8 @@ fn build_workspace_days(body: &str) -> Result<Vec<CodexAnalyticsDailyUsage>, Str
                     date: row.date.chars().take(10).collect(),
                     totals,
                     models: row.models.into_iter().map(to_public_model).collect(),
+                    missing_token_data: false,
+                    missing_model_breakdown: false,
                 }
             })
             .collect()
@@ -234,29 +240,60 @@ fn build_personal_days(
     let breakdown_by_date: HashMap<String, Vec<RawModelUsage>> =
         extract_daily_rows(breakdown_body)?
             .into_iter()
-            .map(|row| (row.date.chars().take(10).collect(), row.models))
-            .collect();
-
-    extract_daily_rows(totals_body).map(|rows| {
-        rows.into_iter()
-            .filter(|row| !row.date.trim().is_empty())
-            .map(|row| {
-                let date: String = row.date.chars().take(10).collect();
-                let models = breakdown_by_date
-                    .get(&date)
-                    .cloned()
-                    .unwrap_or_default()
-                    .into_iter()
-                    .map(to_public_model)
-                    .collect();
-                CodexAnalyticsDailyUsage {
-                    date,
-                    totals: CodexAnalyticsTokenCounts::from_raw(&row.totals),
-                    models,
-                }
+            .filter_map(|row| {
+                let date: String = row.date.trim().chars().take(10).collect();
+                (!date.is_empty()).then_some((date, row.models))
             })
-            .collect()
-    })
+            .collect();
+    let totals_by_date: HashMap<String, RawTokenCounts> = extract_daily_rows(totals_body)?
+        .into_iter()
+        .filter_map(|row| {
+            let date: String = row.date.trim().chars().take(10).collect();
+            (!date.is_empty()).then_some((date, row.totals))
+        })
+        .collect();
+    let dates: BTreeSet<String> = breakdown_by_date
+        .keys()
+        .chain(totals_by_date.keys())
+        .cloned()
+        .collect();
+
+    Ok(dates
+        .into_iter()
+        .filter_map(|date| {
+            let totals = totals_by_date.get(&date);
+            let raw_models = breakdown_by_date.get(&date);
+            let has_token_usage = totals
+                .map(|tokens| tokens.effective_total() > 0)
+                .unwrap_or(false);
+            let has_model_usage = raw_models
+                .map(|models| {
+                    models
+                        .iter()
+                        .any(|model| model.credits.is_finite() && model.credits > 0.0)
+                })
+                .unwrap_or(false);
+            if !has_token_usage && !has_model_usage {
+                return None;
+            }
+
+            let models = raw_models
+                .cloned()
+                .unwrap_or_default()
+                .into_iter()
+                .map(to_public_model)
+                .collect();
+            Some(CodexAnalyticsDailyUsage {
+                date: date.clone(),
+                totals: totals
+                    .map(CodexAnalyticsTokenCounts::from_raw)
+                    .unwrap_or_default(),
+                models,
+                missing_token_data: !has_token_usage && has_model_usage,
+                missing_model_breakdown: has_token_usage && !has_model_usage,
+            })
+        })
+        .collect())
 }
 
 fn with_auth_headers(
@@ -461,6 +498,8 @@ mod tests {
         assert_eq!(days[0].totals.cache_write_input_tokens, 30);
         assert_eq!(days[0].totals.output_tokens, 40);
         assert_eq!(days[0].totals.total_tokens, 370);
+        assert!(!days[0].missing_token_data);
+        assert!(!days[0].missing_model_breakdown);
     }
 
     #[test]
@@ -494,6 +533,69 @@ mod tests {
         assert_eq!(days[0].models.len(), 2);
         assert_eq!(days[0].models[0].credits, 8.0);
         assert_eq!(days[0].models[1].speed, "standard");
+        assert!(!days[0].missing_token_data);
+        assert!(!days[0].missing_model_breakdown);
+    }
+
+    #[test]
+    fn personal_payload_preserves_dates_missing_from_either_daily_endpoint() {
+        let days = build_personal_days(
+            r#"{
+                "data": [
+                    {
+                        "date": "2026-08-22",
+                        "totals": {
+                            "uncached_text_input_tokens": 1000,
+                            "text_total_tokens": 1000
+                        }
+                    },
+                    {
+                        "date": "2026-08-24",
+                        "totals": {
+                            "text_output_tokens": 200,
+                            "text_total_tokens": 200
+                        }
+                    }
+                ]
+            }"#,
+            r#"{
+                "data": [
+                    {
+                        "date": "2026-08-22",
+                        "models": [
+                            {"model": "gpt-5.6-sol", "speed": "standard", "credits": 1}
+                        ]
+                    },
+                    {
+                        "date": "2026-08-23",
+                        "models": [
+                            {"model": "gpt-5.6-luna", "speed": "fast", "credits": 2}
+                        ]
+                    }
+                ]
+            }"#,
+        )
+        .expect("parse personal payload union");
+
+        assert_eq!(
+            days.iter().map(|day| day.date.as_str()).collect::<Vec<_>>(),
+            vec!["2026-08-22", "2026-08-23", "2026-08-24"]
+        );
+
+        assert_eq!(days[0].totals.total_tokens, 1000);
+        assert_eq!(days[0].models.len(), 1);
+        assert!(!days[0].missing_token_data);
+        assert!(!days[0].missing_model_breakdown);
+
+        assert_eq!(days[1].totals.total_tokens, 0);
+        assert_eq!(days[1].models.len(), 1);
+        assert!(days[1].missing_token_data);
+        assert!(!days[1].missing_model_breakdown);
+
+        assert_eq!(days[2].totals.total_tokens, 200);
+        assert!(days[2].models.is_empty());
+        assert!(!days[2].missing_token_data);
+        assert!(days[2].missing_model_breakdown);
     }
 
     #[test]

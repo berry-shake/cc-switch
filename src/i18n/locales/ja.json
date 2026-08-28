@@ -1821,6 +1821,12 @@
       "analyticsWorkspaceDisclaimer": "公式使用量 API が返すモデル別日次統計を、報告された使用済み割合から USD/Token 等価値へ外挿した推定です。日次バケットには同期遅延があり、サイクル途中でリセットされた場合は初日が過大になる可能性があります。公式請求額や固定 Token 上限ではありません。",
       "analyticsWaitingDisclaimer": "公式サイクルまたは使用量が同期中の可能性があります。使用済み割合と価格計算可能な使用量の両方が有効になるまで、容量は外挿しません。",
       "unknownPricing": "* 付きの金額は、公開価格を識別できたモデルのみを集計しています。",
+      "analyticsMissingTokenTitle": "公式 Token 日次集計を同期中",
+      "analyticsMissingTokenDescription": "次の日付はモデルのクレジット情報がありますが、日次 Token 合計がありません：{{dates}}。現在の Token/USD 容量は同期済みの日付のみを使用するため、過小になる可能性があります。通常は 1～2 日以内に追いつきます。",
+      "analyticsMissingModelTitle": "モデルと速度の詳細を同期中",
+      "analyticsMissingModelDescription": "次の日付は日次 Token 合計がありますが、モデル・速度別クレジット情報がありません：{{dates}}。Token 合計は保持されますが、USD とモデル配分は不完全な可能性があります。",
+      "analyticsPartialStartTitle": "サイクル開始日を正確に分割できません",
+      "analyticsPartialStartDescription": "現在のサイクルは公式統計日 {{date}} の途中から始まり、API はその日のリセット前後の使用量を分割できません。リセット前の使用量を含むため、Token/USD 容量が過大になる可能性があります。",
       "empty": {
         "cycleTitle": "サイクルデータを待機中",
         "cycleDescription": "公式 API はまだ有効な長期サイクルを返していません。リセット直後の可能性があります。自動再試行を待つか、手動で更新できます。",

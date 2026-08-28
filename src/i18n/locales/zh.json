@@ -1821,6 +1821,12 @@
       "analyticsWorkspaceDisclaimer": "这是官方用量接口返回的模型级日统计按已用比例反推的 USD/Token 等效值。日桶存在同步延迟，周期中途重置时起始日可能偏高；结果不代表官方账单或固定 Token 上限。",
       "analyticsWaitingDisclaimer": "官方周期或用量可能仍在同步；在已用比例和可定价用量同时有效前不会进行容量外推。",
       "unknownPricing": "带 * 的金额只累计已识别公开价格的模型。",
+      "analyticsMissingTokenTitle": "官方 Token 日报待同步",
+      "analyticsMissingTokenDescription": "以下日期已有模型额度记录，但缺少总 Token 日报：{{dates}}。当前 Token/USD 容量仅基于已同步日期，可能偏低，通常会在 1～2 天内补齐。",
+      "analyticsMissingModelTitle": "模型/速度明细待同步",
+      "analyticsMissingModelDescription": "以下日期已有总 Token 日报，但缺少模型/速度额度明细：{{dates}}。Token 总量仍保留，USD 与模型分配可能不完整。",
+      "analyticsPartialStartTitle": "周期起始日无法精确切分",
+      "analyticsPartialStartDescription": "当前周期从官方统计日 {{date}} 中途开始，接口无法拆分该日重置前后的用量；Token/USD 容量可能因包含重置前用量而偏高。",
       "empty": {
         "cycleTitle": "等待周期数据",
         "cycleDescription": "官方接口暂未返回有效长周期，可能刚完成重置；稍后会自动重试，也可以手动刷新。",

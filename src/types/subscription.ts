@@ -55,6 +55,10 @@ export interface CodexAnalyticsDailyUsage {
   date: string;
   totals: CodexAnalyticsTokenCounts;
   models: CodexAnalyticsModelUsage[];
+  /** 该日有正向模型额度，但总 Token 日报尚无正向记录。 */
+  missingTokenData: boolean;
+  /** 该日有正向总 Token，但模型/速度额度明细尚无正向记录。 */
+  missingModelBreakdown: boolean;
 }
 
 /**

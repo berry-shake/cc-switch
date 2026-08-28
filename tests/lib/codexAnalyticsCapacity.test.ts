@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildCodexAnalyticsUsageBasis,
   deriveCodexAnalyticsCycleCapacity,
+  inspectCodexAnalyticsCycleData,
 } from "@/lib/codexAnalyticsCapacity";
 import { resolveCodexQuotaCycle } from "@/lib/codexCycleCapacity";
 import type {
@@ -80,6 +81,8 @@ describe("codexAnalyticsCapacity", () => {
       days: [
         {
           date: "2026-08-22",
+          missingTokenData: false,
+          missingModelBreakdown: false,
           totals: tokens(1_000_000, 2_000_000, 100_000, 500_000),
           models: [
             {
@@ -116,6 +119,8 @@ describe("codexAnalyticsCapacity", () => {
       days: [
         {
           date: "2026-08-22",
+          missingTokenData: false,
+          missingModelBreakdown: false,
           totals: tokens(1_000_000, 1_000_000, 0, 1_000_000),
           models: [
             {
@@ -156,6 +161,8 @@ describe("codexAnalyticsCapacity", () => {
       days: [
         {
           date: "2026-08-17",
+          missingTokenData: false,
+          missingModelBreakdown: false,
           totals: tokens(9_000_000, 0, 0, 0),
           models: [
             {
@@ -168,6 +175,8 @@ describe("codexAnalyticsCapacity", () => {
         },
         {
           date: "2026-08-18",
+          missingTokenData: false,
+          missingModelBreakdown: false,
           totals: tokens(1_000_000, 0, 0, 0),
           models: [
             {
@@ -199,6 +208,44 @@ describe("codexAnalyticsCapacity", () => {
     expect(basis?.hasEstimatedAllocation).toBe(true);
   });
 
+  it("reports missing daily sources and a mid-day UTC cycle boundary", () => {
+    const cycle = resolveCodexQuotaCycle(quota, queriedAt);
+    const analytics: CodexAnalyticsUsage = {
+      accountMode: "personal",
+      queriedAt,
+      days: [
+        {
+          date: "2026-08-18",
+          missingTokenData: false,
+          missingModelBreakdown: false,
+          totals: tokens(1_000_000, 0, 0, 0),
+          models: [],
+        },
+        {
+          date: "2026-08-19",
+          missingTokenData: true,
+          missingModelBreakdown: false,
+          totals: tokens(0, 0, 0, 0),
+          models: [],
+        },
+        {
+          date: "2026-08-20",
+          missingTokenData: false,
+          missingModelBreakdown: true,
+          totals: tokens(1_000_000, 0, 0, 0),
+          models: [],
+        },
+      ],
+    };
+
+    expect(inspectCodexAnalyticsCycleData(cycle, analytics)).toEqual({
+      includedDays: 3,
+      missingTokenDates: ["2026-08-19"],
+      missingModelBreakdownDates: ["2026-08-20"],
+      partialStartDate: "2026-08-18",
+    });
+  });
+
   it("returns null when the web data has no priceable usage", () => {
     const analytics: CodexAnalyticsUsage = {
       accountMode: "workspace",
@@ -206,6 +253,8 @@ describe("codexAnalyticsCapacity", () => {
       days: [
         {
           date: "2026-08-22",
+          missingTokenData: false,
+          missingModelBreakdown: false,
           totals: tokens(1_000_000, 0, 0, 0),
           models: [
             {

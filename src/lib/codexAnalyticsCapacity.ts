@@ -3,6 +3,7 @@ import {
   resolveCodexQuotaCycle,
   type CodexCycleCapacityEstimate,
   type CodexQuotaCycle,
+  type CodexQuotaCycleWindow,
 } from "@/lib/codexCycleCapacity";
 import type {
   CodexAnalyticsAccountMode,
@@ -15,6 +16,7 @@ import type {
 import type { ModelPricing } from "@/types/usage";
 
 const EPSILON = 1e-9;
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 interface ModelPrice {
   uncachedInput: number;
@@ -37,6 +39,16 @@ export interface CodexAnalyticsUsageBasis {
 export interface CodexAnalyticsCycleCapacityEstimate
   extends CodexCycleCapacityEstimate,
     CodexAnalyticsUsageBasis {}
+
+export interface CodexAnalyticsCycleDataQuality {
+  includedDays: number;
+  /** 已有模型额度明细、但总 Token 日报尚未同步的 UTC 日期。 */
+  missingTokenDates: string[];
+  /** 已有总 Token 日报、但模型/速度额度明细尚未同步的 UTC 日期。 */
+  missingModelBreakdownDates: string[];
+  /** 周期从该 UTC 日期中途开始；日级统计无法排除重置前用量。 */
+  partialStartDate: string | null;
+}
 
 interface TokenParts {
   uncachedInput: number;
@@ -338,7 +350,7 @@ function utcDateKey(timestampMs: number): string {
 
 function currentCycleDays(
   days: readonly CodexAnalyticsDailyUsage[],
-  cycle: CodexQuotaCycle,
+  cycle: Pick<CodexQuotaCycleWindow, "startMs" | "endMs" | "resetAtMs">,
 ): CodexAnalyticsDailyUsage[] {
   const startDate = utcDateKey(cycle.startMs);
   const endDate = utcDateKey(Math.min(cycle.endMs, cycle.resetAtMs));
@@ -346,6 +358,38 @@ function currentCycleDays(
     const date = day.date.slice(0, 10);
     return date >= startDate && date <= endDate;
   });
+}
+
+/**
+ * 检查当前官方日统计是否完整，并标记无法按精确时刻切分的周期起始日。
+ * 这里沿用容量计算的 UTC 日期口径，避免提示与实际纳入的日桶不一致。
+ */
+export function inspectCodexAnalyticsCycleData(
+  cycle:
+    | Pick<CodexQuotaCycleWindow, "startMs" | "endMs" | "resetAtMs">
+    | null
+    | undefined,
+  analytics: CodexAnalyticsUsage | null | undefined,
+): CodexAnalyticsCycleDataQuality | null {
+  if (!cycle || !analytics) return null;
+
+  const days = currentCycleDays(analytics.days, cycle);
+  const startDate = utcDateKey(cycle.startMs);
+  const startsMidUtcDay = cycle.startMs % DAY_MS !== 0;
+  const includesStartDate = days.some(
+    (day) => day.date.slice(0, 10) === startDate,
+  );
+
+  return {
+    includedDays: days.length,
+    missingTokenDates: days
+      .filter((day) => day.missingTokenData)
+      .map((day) => day.date.slice(0, 10)),
+    missingModelBreakdownDates: days
+      .filter((day) => day.missingModelBreakdown)
+      .map((day) => day.date.slice(0, 10)),
+    partialStartDate: startsMidUtcDay && includesStartDate ? startDate : null,
+  };
 }
 
 export function buildCodexAnalyticsUsageBasis(

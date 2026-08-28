@@ -1,6 +1,7 @@
 import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
+  AlertTriangle,
   CalendarClock,
   ChevronDown,
   CircleDollarSign,
@@ -24,6 +25,7 @@ import {
 } from "@/lib/codexCycleCapacity";
 import {
   deriveCodexAnalyticsCycleCapacity,
+  inspectCodexAnalyticsCycleData,
   type CodexAnalyticsCycleCapacityEstimate,
 } from "@/lib/codexAnalyticsCapacity";
 import { forecastCodexCycle } from "@/lib/codexCycleForecast";
@@ -175,6 +177,32 @@ function CapacityMetric({
   );
 }
 
+function AnalyticsDataQualityNotice({
+  kind,
+  title,
+  description,
+}: {
+  kind: "missing-token" | "missing-model" | "partial-start";
+  title: string;
+  description: string;
+}) {
+  return (
+    <div
+      className="flex items-start gap-2.5 rounded-xl border border-amber-500/25 bg-amber-500/[0.07] px-3.5 py-3 text-amber-950 dark:text-amber-100"
+      role="status"
+      data-testid={`codex-analytics-${kind}-notice`}
+    >
+      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+      <div className="min-w-0">
+        <div className="text-xs font-semibold">{title}</div>
+        <div className="mt-0.5 text-[11px] leading-relaxed text-amber-900/75 dark:text-amber-100/75">
+          {description}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function CapacityRing({
   utilizationPercent,
   gradientId,
@@ -292,6 +320,10 @@ export function CodexCycleCapacityCard({
   const effectiveMode: CodexCycleCapacityCalculationMode = selectedMode;
   const estimate =
     effectiveMode === "analytics" ? analyticsEstimate : localEstimate;
+  const analyticsDataQuality =
+    effectiveMode === "analytics"
+      ? inspectCodexAnalyticsCycleData(cycleWindow, analyticsUsage)
+      : null;
 
   if (!quota?.success) return null;
 
@@ -635,6 +667,71 @@ export function CodexCycleCapacityCard({
           </div>
 
           <CollapsibleContent>
+            {analyticsDataQuality &&
+            (analyticsDataQuality.missingTokenDates.length > 0 ||
+              analyticsDataQuality.missingModelBreakdownDates.length > 0 ||
+              analyticsDataQuality.partialStartDate) ? (
+              <div
+                className="mt-4 space-y-2"
+                data-testid="codex-analytics-data-quality"
+              >
+                {analyticsDataQuality.missingTokenDates.length > 0 ? (
+                  <AnalyticsDataQualityNotice
+                    kind="missing-token"
+                    title={t(
+                      "usage.cycleCapacity.analyticsMissingTokenTitle",
+                      "官方 Token 日报待同步",
+                    )}
+                    description={t(
+                      "usage.cycleCapacity.analyticsMissingTokenDescription",
+                      {
+                        defaultValue:
+                          "以下日期已有模型额度记录，但缺少总 Token 日报：{{dates}}。当前 Token/USD 容量仅基于已同步日期，可能偏低，通常会在 1～2 天内补齐。",
+                        dates:
+                          analyticsDataQuality.missingTokenDates.join(", "),
+                      },
+                    )}
+                  />
+                ) : null}
+                {analyticsDataQuality.missingModelBreakdownDates.length > 0 ? (
+                  <AnalyticsDataQualityNotice
+                    kind="missing-model"
+                    title={t(
+                      "usage.cycleCapacity.analyticsMissingModelTitle",
+                      "模型/速度明细待同步",
+                    )}
+                    description={t(
+                      "usage.cycleCapacity.analyticsMissingModelDescription",
+                      {
+                        defaultValue:
+                          "以下日期已有总 Token 日报，但缺少模型/速度额度明细：{{dates}}。Token 总量仍保留，USD 与模型分配可能不完整。",
+                        dates:
+                          analyticsDataQuality.missingModelBreakdownDates.join(
+                            ", ",
+                          ),
+                      },
+                    )}
+                  />
+                ) : null}
+                {analyticsDataQuality.partialStartDate ? (
+                  <AnalyticsDataQualityNotice
+                    kind="partial-start"
+                    title={t(
+                      "usage.cycleCapacity.analyticsPartialStartTitle",
+                      "周期起始日无法精确切分",
+                    )}
+                    description={t(
+                      "usage.cycleCapacity.analyticsPartialStartDescription",
+                      {
+                        defaultValue:
+                          "当前周期从官方统计日 {{date}} 中途开始，接口无法拆分该日重置前后的用量；Token/USD 容量可能因包含重置前用量而偏高。",
+                        date: analyticsDataQuality.partialStartDate,
+                      },
+                    )}
+                  />
+                ) : null}
+              </div>
+            ) : null}
             <div className="mt-4 grid gap-5 lg:grid-cols-[190px_minmax(0,1fr)] lg:items-center">
               <CapacityRing
                 utilizationPercent={utilizationPercent}

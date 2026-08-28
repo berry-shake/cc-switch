@@ -1821,6 +1821,12 @@
       "analyticsWorkspaceDisclaimer": "This extrapolates daily model-level statistics returned by the official usage API from the reported used percentage into USD/token-equivalent values. Daily buckets may be delayed and the first day can be overstated when a cycle resets mid-day; this is neither an official bill nor a fixed token limit.",
       "analyticsWaitingDisclaimer": "The official cycle or usage may still be syncing. Capacity is not extrapolated until both the used percentage and priceable usage are valid.",
       "unknownPricing": "Amounts marked * include only models with recognized public pricing.",
+      "analyticsMissingTokenTitle": "Official token totals are still syncing",
+      "analyticsMissingTokenDescription": "Model credit data is available for these dates, but daily token totals are missing: {{dates}}. Token/USD capacity currently uses only synced dates and may be understated; the totals usually catch up within 1–2 days.",
+      "analyticsMissingModelTitle": "Model and speed details are still syncing",
+      "analyticsMissingModelDescription": "Daily token totals are available for these dates, but model/speed credit details are missing: {{dates}}. Token totals are preserved, while USD and model allocation may be incomplete.",
+      "analyticsPartialStartTitle": "The cycle start day cannot be split precisely",
+      "analyticsPartialStartDescription": "The current cycle started partway through the official statistics day {{date}}, and the API cannot split usage before and after that day's reset. Token/USD capacity may be overstated by pre-reset usage.",
       "empty": {
         "cycleTitle": "Waiting for cycle data",
         "cycleDescription": "The official API has not returned a valid long cycle yet, possibly because it just reset. The app will retry automatically, or you can refresh manually.",

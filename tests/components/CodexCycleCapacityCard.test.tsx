@@ -70,6 +70,8 @@ const analyticsUsage: CodexAnalyticsUsage = {
   days: [
     {
       date: "2026-08-22",
+      missingTokenData: false,
+      missingModelBreakdown: false,
       totals: {
         uncachedInputTokens: 1_000_000,
         cachedInputTokens: 0,
@@ -91,6 +93,78 @@ const analyticsUsage: CodexAnalyticsUsage = {
           },
         },
       ],
+    },
+  ],
+};
+
+const personalAnalyticsWithGaps: CodexAnalyticsUsage = {
+  accountMode: "personal",
+  queriedAt,
+  days: [
+    {
+      date: "2026-08-18",
+      missingTokenData: false,
+      missingModelBreakdown: false,
+      totals: {
+        uncachedInputTokens: 1_000_000,
+        cachedInputTokens: 0,
+        cacheWriteInputTokens: 0,
+        outputTokens: 0,
+        totalTokens: 1_000_000,
+      },
+      models: [
+        {
+          model: "gpt-5.6-sol",
+          speed: "standard",
+          credits: 1,
+          tokens: {
+            uncachedInputTokens: 0,
+            cachedInputTokens: 0,
+            cacheWriteInputTokens: 0,
+            outputTokens: 0,
+            totalTokens: 0,
+          },
+        },
+      ],
+    },
+    {
+      date: "2026-08-19",
+      missingTokenData: true,
+      missingModelBreakdown: false,
+      totals: {
+        uncachedInputTokens: 0,
+        cachedInputTokens: 0,
+        cacheWriteInputTokens: 0,
+        outputTokens: 0,
+        totalTokens: 0,
+      },
+      models: [
+        {
+          model: "gpt-5.6-sol",
+          speed: "standard",
+          credits: 1,
+          tokens: {
+            uncachedInputTokens: 0,
+            cachedInputTokens: 0,
+            cacheWriteInputTokens: 0,
+            outputTokens: 0,
+            totalTokens: 0,
+          },
+        },
+      ],
+    },
+    {
+      date: "2026-08-20",
+      missingTokenData: false,
+      missingModelBreakdown: true,
+      totals: {
+        uncachedInputTokens: 500_000,
+        cachedInputTokens: 0,
+        cacheWriteInputTokens: 0,
+        outputTokens: 0,
+        totalTokens: 500_000,
+      },
+      models: [],
     },
   ],
 };
@@ -204,6 +278,38 @@ describe("CodexCycleCapacityCard", () => {
 
     expect(screen.getByRole("button", { name: "刷新" })).toBeDisabled();
     expect(screen.getByText("刷新中...")).toBeInTheDocument();
+  });
+
+  it("surfaces delayed daily sources and the partial cycle start day", () => {
+    render(
+      <CodexCycleCapacityCard
+        quota={quota}
+        usage={usage}
+        analyticsUsage={personalAnalyticsWithGaps}
+        modelPricing={modelPricing}
+        calculationMode="analytics"
+        onCalculationModeChange={vi.fn()}
+        nowMs={queriedAt}
+      />,
+    );
+
+    const quality = screen.getByTestId("codex-analytics-data-quality");
+    expect(
+      within(quality).getByTestId("codex-analytics-missing-token-notice"),
+    ).toHaveTextContent(
+      "以下日期已有模型额度记录，但缺少总 Token 日报：2026-08-19",
+    );
+    expect(
+      within(quality).getByTestId("codex-analytics-missing-model-notice"),
+    ).toHaveTextContent(
+      "以下日期已有总 Token 日报，但缺少模型/速度额度明细：2026-08-20",
+    );
+    expect(
+      within(quality).getByTestId("codex-analytics-partial-start-notice"),
+    ).toHaveTextContent(
+      "当前周期从官方统计日 2026-08-18 中途开始，接口无法拆分该日重置前后的用量",
+    );
+    expect(screen.getByTestId("codex-cycle-forecast")).toBeInTheDocument();
   });
 
   it("shows the account email and the timestamp of the same quota refresh", () => {

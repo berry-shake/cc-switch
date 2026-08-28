@@ -1822,6 +1822,12 @@
       "analyticsWorkspaceDisclaimer": "這是官方用量介面回傳的模型級每日統計依已用比例反推的 USD/Token 等效值。日桶存在同步延遲，週期中途重置時起始日可能偏高；結果不代表官方帳單或固定 Token 上限。",
       "analyticsWaitingDisclaimer": "官方週期或用量可能仍在同步；在已用比例與可計價用量同時有效前，不會進行容量外推。",
       "unknownPricing": "帶 * 的金額只累計已識別公開價格的模型。",
+      "analyticsMissingTokenTitle": "官方 Token 日報待同步",
+      "analyticsMissingTokenDescription": "以下日期已有模型額度記錄，但缺少總 Token 日報：{{dates}}。目前 Token/USD 容量僅依已同步日期計算，可能偏低，通常會在 1～2 天內補齊。",
+      "analyticsMissingModelTitle": "模型/速度明細待同步",
+      "analyticsMissingModelDescription": "以下日期已有總 Token 日報，但缺少模型/速度額度明細：{{dates}}。Token 總量仍會保留，USD 與模型分配可能不完整。",
+      "analyticsPartialStartTitle": "週期起始日無法精確切分",
+      "analyticsPartialStartDescription": "目前週期從官方統計日 {{date}} 中途開始，介面無法拆分該日重置前後的用量；Token/USD 容量可能因包含重置前用量而偏高。",
       "empty": {
         "cycleTitle": "等待週期資料",
         "cycleDescription": "官方介面尚未回傳有效長週期，可能剛完成重置；稍後會自動重試，也可以手動重新整理。",
