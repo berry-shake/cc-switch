@@ -266,7 +266,9 @@ describe("CodexCycleCapacitySection", () => {
     const officialOptions = options.find(
       (value) => queryKind(value) === "official",
     )!;
-    expect(localOptions.refetchInterval).toBe(5 * 60 * 1000);
+    // 两种模式打同一个额度端点，本地模式不得比官方模式更频繁。
+    expect(localOptions.refetchInterval).toBe(60 * 60 * 1000);
+    expect(localOptions.staleTime).toBe(60 * 60 * 1000);
     expect(localOptions.refetchOnWindowFocus).toBe(true);
     expect(officialOptions.refetchInterval).toBe(false);
 

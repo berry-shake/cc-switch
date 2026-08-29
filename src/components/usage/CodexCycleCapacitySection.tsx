@@ -14,8 +14,9 @@ import { usageKeys } from "@/lib/query/usage";
 
 import { CodexCycleCapacityCard } from "./CodexCycleCapacityCard";
 
-const QUOTA_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
-const OFFICIAL_REFRESH_INTERVAL_MS = 60 * 60 * 1000;
+// 本地与官方两种模式打的是同一个 ChatGPT 额度端点，共用同一刷新节奏，
+// 避免本地模式以更高频率重复消耗官方接口。
+const QUOTA_REFRESH_INTERVAL_MS = 60 * 60 * 1000;
 const DEFAULT_USAGE_REFRESH_INTERVAL_MS = 30 * 1000;
 
 export interface CodexCycleCapacitySectionProps {
@@ -46,7 +47,7 @@ export function CodexCycleCapacitySection({
     queryFn: subscriptionApi.getCodexQuotaSnapshot,
     enabled: enabled && calculationMode === "local",
     retry: 1,
-    staleTime: 60_000,
+    staleTime: QUOTA_REFRESH_INTERVAL_MS,
     refetchInterval:
       autoRefresh && calculationMode === "local"
         ? QUOTA_REFRESH_INTERVAL_MS
@@ -61,10 +62,10 @@ export function CodexCycleCapacitySection({
     // 本地模式也预取一次，用来判断官方模式是否可用；只在选中官方模式时轮询。
     enabled,
     retry: 1,
-    staleTime: OFFICIAL_REFRESH_INTERVAL_MS,
+    staleTime: QUOTA_REFRESH_INTERVAL_MS,
     refetchInterval:
       autoRefresh && calculationMode === "analytics"
-        ? OFFICIAL_REFRESH_INTERVAL_MS
+        ? QUOTA_REFRESH_INTERVAL_MS
         : false,
     refetchIntervalInBackground: false,
     refetchOnWindowFocus: false,

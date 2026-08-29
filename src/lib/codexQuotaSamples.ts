@@ -118,7 +118,7 @@ export function getCodexQuotaSamplesForCycle(
 /**
  * 合并一次成功额度快照。相同服务端采样时刻会被替换，避免 React StrictMode
  * 或页面重复挂载产生重复点；缓存只保留最近 21 天和最多 1024 个点，
- * 即使按 5 分钟轮询也能覆盖超过 48 小时。
+ * 按当前 1 小时的额度轮询节奏足以覆盖整个长周期。
  */
 export function mergeCodexQuotaSample(
   samples: readonly CodexQuotaSample[],
