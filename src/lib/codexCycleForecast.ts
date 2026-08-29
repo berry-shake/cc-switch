@@ -3,6 +3,14 @@ const DAY_MS = 24 * HOUR_MS;
 
 export const CODEX_RECENT_FORECAST_MIN_SPAN_MS = HOUR_MS;
 export const CODEX_RECENT_FORECAST_MAX_SPAN_MS = DAY_MS;
+/**
+ * 累计速率至少需要这么长的已过时间才有意义。
+ *
+ * 周期刚重置时任何一次用量除以极短的已过时间都会被放大成假警报（例如重置后
+ * 半小时用掉 2%，七天周期会外推成 96%/天）。与近期速率的最小观察窗取同一
+ * 阈值：在此之前两种速率一起标记为不可用，而不是给出一个必然虚高的数字。
+ */
+export const CODEX_FORECAST_MIN_ELAPSED_MS = HOUR_MS;
 
 const PERCENT_EPSILON = 1e-9;
 
@@ -24,6 +32,7 @@ export interface CodexCycleForecastInput {
 }
 
 export type CodexForecastStatusLevel =
+  | "warming_up"
   | "below_pace"
   | "on_pace"
   | "above_pace"
@@ -34,6 +43,8 @@ export type CodexForecastRecentUnavailableReason =
   | "insufficient_samples"
   | "insufficient_span"
   | "utilization_regression";
+
+export type CodexForecastCumulativeUnavailableReason = "insufficient_elapsed";
 
 export type CodexForecastExhaustion =
   | {
@@ -59,17 +70,19 @@ export interface CodexCycleForecast {
   cycleTimeProgressPercent: number;
   /** 按整个周期匀速使用时，当前时刻对应的线性基准用量。 */
   baselineUtilizationPercent: number;
-  /** 当前实际用量 / 同期线性基准用量。 */
+  /** 当前实际用量 / 同期线性基准用量。周期刚开始时分母极小，仅供参考。 */
   paceRatio: number;
   currentUtilizationPercent: number;
   /** 整个周期均匀消耗 100% 时允许的平均日速率。 */
   sustainableRatePercentPerDay: number;
-  cumulativeRatePercentPerDay: number;
+  /** 已过时间不足 [CODEX_FORECAST_MIN_ELAPSED_MS] 时为 null。 */
+  cumulativeRatePercentPerDay: number | null;
   recentRatePercentPerDay: number | null;
   cumulativeExhaustion: CodexForecastExhaustion;
   recentExhaustion: CodexForecastExhaustion;
   /** 累计速率延续到周期结束时的原始用量预测，允许超过 100%。 */
-  cumulativeProjectedUtilizationAtReset: number;
+  cumulativeProjectedUtilizationAtReset: number | null;
+  cumulativeUnavailableReason: CodexForecastCumulativeUnavailableReason | null;
   /** 近期速率延续到周期结束时的原始用量预测，允许超过 100%。 */
   recentProjectedUtilizationAtReset: number | null;
   recentWindowStartMs: number | null;
@@ -222,11 +235,12 @@ function exhaustionFromRate(
   resetAtMs: number,
   unavailable = false,
 ): CodexForecastExhaustion {
-  if (unavailable || ratePercentPerDay == null) {
-    return { kind: "unavailable", atMs: null, withinCycle: null };
-  }
+  // 已经用满时耗尽时刻就是当下，与速率是否可用无关。
   if (currentUtilizationPercent >= 100 - PERCENT_EPSILON) {
     return { kind: "at", atMs: queriedAtMs, withinCycle: true };
+  }
+  if (unavailable || ratePercentPerDay == null) {
+    return { kind: "unavailable", atMs: null, withinCycle: null };
   }
   if (ratePercentPerDay <= PERCENT_EPSILON) {
     return { kind: "never", atMs: null, withinCycle: false };
@@ -251,8 +265,11 @@ function projectedUtilizationAtReset(
 function statusFromPace(
   currentUtilizationPercent: number,
   paceRatio: number,
+  hasReliablePace: boolean,
 ): CodexForecastStatusLevel {
   if (currentUtilizationPercent >= 100 - PERCENT_EPSILON) return "exhausted";
+  // 周期开头基准本身趋近于 0，任何用量都会算出极端倍率，只报"样本不足"。
+  if (!hasReliablePace) return "warming_up";
   if (paceRatio < 0.85) return "below_pace";
   if (paceRatio <= 1.15) return "on_pace";
   if (paceRatio <= 1.35) return "above_pace";
@@ -262,7 +279,8 @@ function statusFromPace(
 /**
  * 根据一次当前额度和同周期历史采样计算消耗趋势。
  *
- * - 累计速率严格使用 `current utilization / 周期已过时间`；
+ * - 累计速率严格使用 `current utilization / 周期已过时间`，已过时间不足 1h
+ *   时视为样本不足，速率、期末预测与耗尽时间一律置空，状态记为 warming_up；
  * - 近期速率使用最后一个单调段中、近 24h 内跨度至少 1h 的最长观察窗；
  * - 期末预测保留原始百分比（可超过 100%），便于显示真实超额趋势；
  * - 状态只比较当前实际用量与同期线性基准，不受近期预测波动影响；
@@ -297,7 +315,10 @@ export function forecastCodexCycle(
   const elapsedDays = elapsedMs / DAY_MS;
   const cycleDays = cycleDurationMs / DAY_MS;
   const sustainableRatePercentPerDay = 100 / cycleDays;
-  const cumulativeRatePercentPerDay = currentUtilizationPercent / elapsedDays;
+  const hasReliableCumulativeRate = elapsedMs >= CODEX_FORECAST_MIN_ELAPSED_MS;
+  const cumulativeRatePercentPerDay = hasReliableCumulativeRate
+    ? currentUtilizationPercent / elapsedDays
+    : null;
   const paceRatio = currentUtilizationPercent / cycleTimeProgressPercent;
 
   const history = normalizeSamples(
@@ -310,11 +331,14 @@ export function forecastCodexCycle(
     utilizationPercent: currentUtilizationPercent,
   });
 
-  const cumulativeProjection = projectedUtilizationAtReset(
-    currentUtilizationPercent,
-    cumulativeRatePercentPerDay,
-    remainingMs,
-  );
+  const cumulativeProjection =
+    cumulativeRatePercentPerDay == null
+      ? null
+      : projectedUtilizationAtReset(
+          currentUtilizationPercent,
+          cumulativeRatePercentPerDay,
+          remainingMs,
+        );
   const recentProjection =
     recent.ratePercentPerDay == null
       ? null
@@ -349,11 +373,18 @@ export function forecastCodexCycle(
       recent.unavailableReason != null,
     ),
     cumulativeProjectedUtilizationAtReset: cumulativeProjection,
+    cumulativeUnavailableReason: hasReliableCumulativeRate
+      ? null
+      : "insufficient_elapsed",
     recentProjectedUtilizationAtReset: recentProjection,
     recentWindowStartMs: recent.windowStartMs,
     recentWindowEndMs: recent.windowEndMs,
     recentWindowSpanMs: recent.windowSpanMs,
     recentUnavailableReason: recent.unavailableReason,
-    statusLevel: statusFromPace(currentUtilizationPercent, paceRatio),
+    statusLevel: statusFromPace(
+      currentUtilizationPercent,
+      paceRatio,
+      hasReliableCumulativeRate,
+    ),
   };
 }

@@ -1844,6 +1844,7 @@
       },
       "currentStatus": "目前狀態",
       "status": {
+        "warmingUp": "週期剛開始，樣本不足",
         "belowPace": "低於勻速基準",
         "onPace": "接近勻速基準",
         "abovePace": "高於勻速基準",
@@ -1851,6 +1852,7 @@
         "exhausted": "額度已耗盡"
       },
       "comparison": {
+        "warmingUp": "暫不判斷",
         "belowPace": "低於基準",
         "onPace": "基本一致",
         "abovePace": "用量偏高",

@@ -1843,6 +1843,7 @@
       },
       "currentStatus": "現在の状態",
       "status": {
+        "warmingUp": "サイクル開始直後でサンプル不足",
         "belowPace": "均等ペースを下回る",
         "onPace": "均等ペースに近い",
         "abovePace": "均等ペースを上回る",
@@ -1850,6 +1851,7 @@
         "exhausted": "クォータを使い切りました"
       },
       "comparison": {
+        "warmingUp": "判定保留",
         "belowPace": "基準を下回る",
         "onPace": "ほぼ一致",
         "abovePace": "使用量が多い",

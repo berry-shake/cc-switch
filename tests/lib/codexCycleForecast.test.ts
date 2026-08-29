@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  CODEX_FORECAST_MIN_ELAPSED_MS,
   forecastCodexCycle,
   type CodexCycleForecastInput,
 } from "@/lib/codexCycleForecast";
@@ -125,6 +126,52 @@ describe("forecastCodexCycle cumulative forecast", () => {
       withinCycle: true,
     });
     expect(result?.recentExhaustion.atMs).toBeCloseTo(RESET_MS, -2);
+  });
+});
+
+describe("forecastCodexCycle warm-up", () => {
+  const warmUpQueriedMs = START_MS + 30 * 60 * 1000;
+
+  it("suppresses the cumulative rate before an hour of the cycle elapses", () => {
+    const result = forecastCodexCycle(
+      makeInput({ queriedAtMs: warmUpQueriedMs, utilizationPercent: 2 }),
+    );
+
+    expect(result?.cumulativeRatePercentPerDay).toBeNull();
+    expect(result?.cumulativeProjectedUtilizationAtReset).toBeNull();
+    expect(result?.cumulativeUnavailableReason).toBe("insufficient_elapsed");
+    expect(result?.cumulativeExhaustion.kind).toBe("unavailable");
+    expect(result?.recentExhaustion.kind).toBe("unavailable");
+    expect(result?.statusLevel).toBe("warming_up");
+    // 时间轴本身仍然有效，只有速率类推断被抑制。
+    expect(result?.elapsedMs).toBe(30 * 60 * 1000);
+    expect(result?.currentUtilizationPercent).toBe(2);
+  });
+
+  it("resumes the cumulative rate at the minimum elapsed span", () => {
+    const result = forecastCodexCycle(
+      makeInput({
+        queriedAtMs: START_MS + CODEX_FORECAST_MIN_ELAPSED_MS,
+        utilizationPercent: 2,
+      }),
+    );
+
+    expect(result?.cumulativeRatePercentPerDay).toBeCloseTo(48);
+    expect(result?.cumulativeUnavailableReason).toBeNull();
+    expect(result?.statusLevel).toBe("far_above_pace");
+  });
+
+  it("still reports exhaustion during warm-up when the quota is already spent", () => {
+    const result = forecastCodexCycle(
+      makeInput({ queriedAtMs: warmUpQueriedMs, utilizationPercent: 100 }),
+    );
+
+    expect(result?.statusLevel).toBe("exhausted");
+    expect(result?.cumulativeExhaustion).toEqual({
+      kind: "at",
+      atMs: warmUpQueriedMs,
+      withinCycle: true,
+    });
   });
 });
 

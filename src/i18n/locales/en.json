@@ -1843,6 +1843,7 @@
       },
       "currentStatus": "Current status",
       "status": {
+        "warmingUp": "Cycle just started, not enough samples",
         "belowPace": "Below even-pace baseline",
         "onPace": "Close to even-pace baseline",
         "abovePace": "Above even-pace baseline",
@@ -1850,6 +1851,7 @@
         "exhausted": "Quota exhausted"
       },
       "comparison": {
+        "warmingUp": "not judged yet",
         "belowPace": "below baseline",
         "onPace": "roughly aligned",
         "abovePace": "usage elevated",

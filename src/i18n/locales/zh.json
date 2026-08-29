@@ -1843,6 +1843,7 @@
       },
       "currentStatus": "当前状态",
       "status": {
+        "warmingUp": "周期刚开始，样本不足",
         "belowPace": "低于匀速基准",
         "onPace": "接近匀速基准",
         "abovePace": "高于匀速基准",
@@ -1850,6 +1851,7 @@
         "exhausted": "额度已耗尽"
       },
       "comparison": {
+        "warmingUp": "暂不判断",
         "belowPace": "低于基准",
         "onPace": "基本一致",
         "abovePace": "用量偏高",

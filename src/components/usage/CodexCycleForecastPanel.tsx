@@ -211,6 +211,17 @@ function statusPresentation(
   metricTone: ForecastMetricTone;
 } {
   switch (status) {
+    case "warming_up":
+      return {
+        label: t(
+          "usage.cycleCapacity.status.warmingUp",
+          "周期刚开始，样本不足",
+        ),
+        comparison: t("usage.cycleCapacity.comparison.warmingUp", "暂不判断"),
+        className: "border-border/60 bg-muted/40 text-muted-foreground",
+        iconClassName: "bg-muted/60 text-muted-foreground",
+        metricTone: "neutral",
+      };
     case "below_pace":
       return {
         label: t("usage.cycleCapacity.status.belowPace", "低于匀速基准"),
@@ -556,10 +567,18 @@ export function CodexCycleForecastPanel({
     baseline: formatPercent(forecast.baselineUtilizationPercent),
     comparison: status.comparison,
   });
-  const cumulativeVsSustainableValue = `${formatRate(
-    forecast.cumulativeRatePercentPerDay,
+  const sustainableRate = formatRate(
+    forecast.sustainableRatePercentPerDay,
     perDay,
-  )} / ${formatRate(forecast.sustainableRatePercentPerDay, perDay)}`;
+  );
+  // 已过时间不足 1 小时时累计速率必然虚高，与近期速率一样留空而不是显示。
+  const cumulativeVsSustainableValue =
+    forecast.cumulativeRatePercentPerDay == null
+      ? `— / ${sustainableRate}`
+      : `${formatRate(
+          forecast.cumulativeRatePercentPerDay,
+          perDay,
+        )} / ${sustainableRate}`;
   const recentPredictionUnavailable =
     forecast.recentRatePercentPerDay == null || recentSpan == null;
   const recentRateValue =
@@ -714,6 +733,10 @@ export function CodexCycleForecastPanel({
                   forecast.cumulativeExhaustion,
                   locale,
                   t,
+                )}
+                valueClassName={cn(
+                  forecast.cumulativeExhaustion.kind === "unavailable" &&
+                    "font-medium text-muted-foreground",
                 )}
               />
               <ForecastDetail
