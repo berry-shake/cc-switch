@@ -1731,6 +1731,7 @@
     "rebuildCodex": {
       "title": "Codex Usage Maintenance",
       "description": "Rebuild Codex session usage from local rollout logs",
+      "legacyHint": "Upgrading from an older version no longer clears Codex session usage — history is always preserved as-is. If forked sessions look duplicated or misaligned after an upgrade, rebuild here to realign them.",
       "warning": "The database is backed up first. History whose source JSONL has been deleted cannot be re-imported.",
       "action": "Rebuild Codex Usage",
       "confirmTitle": "Rebuild Codex usage?",

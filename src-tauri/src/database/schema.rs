@@ -535,7 +535,10 @@ impl Database {
                         Self::set_user_version(conn, 15)?;
                     }
                     15 => {
-                        log::info!("迁移数据库从 v15 到 v16（保留 Codex 历史用量）");
+                        log::info!(
+                            "迁移数据库从 v15 到 v16（保留 Codex 历史用量；\
+                             如需按 fork 历史重新对齐，请在用量页手动重建）"
+                        );
                         Self::migrate_v15_to_v16(conn)?;
                         Self::set_user_version(conn, 16)?;
                     }
@@ -1559,6 +1562,10 @@ impl Database {
     /// schema migration must not erase details, rollups, or cursors in the hope
     /// that startup sync can recreate them. Explicit maintenance uses the safe
     /// staged rebuild path instead.
+    ///
+    /// Rows written before fork-history alignment therefore survive the upgrade
+    /// as-is. The usage page's maintenance card tells users to rebuild when
+    /// forked sessions look duplicated; nothing realigns them automatically.
     fn migrate_v15_to_v16(_conn: &Connection) -> Result<(), AppError> {
         Ok(())
     }

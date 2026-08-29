@@ -1731,6 +1731,7 @@
     "rebuildCodex": {
       "title": "Codex 用量维护",
       "description": "从本地 rollout 日志重新构建 Codex 会话用量",
+      "legacyHint": "从旧版本升级时不会再自动清空 Codex 会话用量，历史一律原样保留。如果升级后 fork 会话的用量看起来重复或对不上，在这里重建一次即可对齐。",
       "warning": "重建前会自动备份数据库。若源 JSONL 已删除，对应历史将无法重新导入。",
       "action": "重建 Codex 用量",
       "confirmTitle": "确认重建 Codex 用量",
