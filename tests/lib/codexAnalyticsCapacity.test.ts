@@ -239,10 +239,42 @@ describe("codexAnalyticsCapacity", () => {
     };
 
     expect(inspectCodexAnalyticsCycleData(cycle, analytics)).toEqual({
-      includedDays: 3,
       missingTokenDates: ["2026-08-19"],
       missingModelBreakdownDates: ["2026-08-20"],
       partialStartDate: "2026-08-18",
+      // 起始日占已统计 Token 的一半，其中 08:00 之前的 1/3 可能属于上一周期。
+      partialStartOverstatementRatio: expect.closeTo(1 / 6, 6),
+    });
+  });
+
+  it("stays quiet when the cycle boundary can only distort a negligible share", () => {
+    const cycle = resolveCodexQuotaCycle(quota, queriedAt);
+    const analytics: CodexAnalyticsUsage = {
+      accountMode: "personal",
+      queriedAt,
+      days: [
+        {
+          date: "2026-08-18",
+          missingTokenData: false,
+          missingModelBreakdown: false,
+          totals: tokens(10_000, 0, 0, 0),
+          models: [],
+        },
+        {
+          date: "2026-08-21",
+          missingTokenData: false,
+          missingModelBreakdown: false,
+          totals: tokens(4_000_000, 0, 0, 0),
+          models: [],
+        },
+      ],
+    };
+
+    expect(inspectCodexAnalyticsCycleData(cycle, analytics)).toEqual({
+      missingTokenDates: [],
+      missingModelBreakdownDates: [],
+      partialStartDate: null,
+      partialStartOverstatementRatio: 0,
     });
   });
 

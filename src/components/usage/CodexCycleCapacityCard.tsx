@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/collapsible";
 import {
   deriveCodexCycleCapacity,
+  resolveCodexQuotaCycle,
   resolveCodexQuotaCycleWindow,
 } from "@/lib/codexCycleCapacity";
 import {
@@ -320,9 +321,14 @@ export function CodexCycleCapacityCard({
   const effectiveMode: CodexCycleCapacityCalculationMode = selectedMode;
   const estimate =
     effectiveMode === "analytics" ? analyticsEstimate : localEstimate;
+  // 必须用容量外推同款周期：cycleWindow 在 used_percent 缺失时会回退到原始
+  // 额度窗口，而那种情况下根本不会外推容量，提示也就无从谈起。
   const analyticsDataQuality =
     effectiveMode === "analytics"
-      ? inspectCodexAnalyticsCycleData(cycleWindow, analyticsUsage)
+      ? inspectCodexAnalyticsCycleData(
+          resolveCodexQuotaCycle(quota, nowMs),
+          analyticsUsage,
+        )
       : null;
 
   if (!quota?.success) return null;
@@ -724,8 +730,12 @@ export function CodexCycleCapacityCard({
                       "usage.cycleCapacity.analyticsPartialStartDescription",
                       {
                         defaultValue:
-                          "当前周期从官方统计日 {{date}} 中途开始，接口无法拆分该日重置前后的用量；Token/USD 容量可能因包含重置前用量而偏高。",
+                          "当前周期从官方统计日 {{date}} 中途开始，接口无法拆分该日重置前后的用量；按该日用量估算，Token/USD 容量可能因此偏高约 {{share}}。",
                         date: analyticsDataQuality.partialStartDate,
+                        share: `${Math.round(
+                          analyticsDataQuality.partialStartOverstatementRatio *
+                            100,
+                        )}%`,
                       },
                     )}
                   />

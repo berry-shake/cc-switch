@@ -1826,7 +1826,7 @@
       "analyticsMissingModelTitle": "模型/速度明细待同步",
       "analyticsMissingModelDescription": "以下日期已有总 Token 日报，但缺少模型/速度额度明细：{{dates}}。Token 总量仍保留，USD 与模型分配可能不完整。",
       "analyticsPartialStartTitle": "周期起始日无法精确切分",
-      "analyticsPartialStartDescription": "当前周期从官方统计日 {{date}} 中途开始，接口无法拆分该日重置前后的用量；Token/USD 容量可能因包含重置前用量而偏高。",
+      "analyticsPartialStartDescription": "当前周期从官方统计日 {{date}} 中途开始，接口无法拆分该日重置前后的用量；按该日用量估算，Token/USD 容量可能因此偏高约 {{share}}。",
       "empty": {
         "cycleTitle": "等待周期数据",
         "cycleDescription": "官方接口暂未返回有效长周期，可能刚完成重置；稍后会自动重试，也可以手动刷新。",

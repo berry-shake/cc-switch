@@ -41,13 +41,14 @@ export interface CodexAnalyticsCycleCapacityEstimate
     CodexAnalyticsUsageBasis {}
 
 export interface CodexAnalyticsCycleDataQuality {
-  includedDays: number;
   /** 已有模型额度明细、但总 Token 日报尚未同步的 UTC 日期。 */
   missingTokenDates: string[];
   /** 已有总 Token 日报、但模型/速度额度明细尚未同步的 UTC 日期。 */
   missingModelBreakdownDates: string[];
-  /** 周期从该 UTC 日期中途开始；日级统计无法排除重置前用量。 */
+  /** 周期从该 UTC 日期中途开始，且误差不可忽略时才给出；否则为 null。 */
   partialStartDate: string | null;
+  /** 起始日可能混入的重置前用量占已统计 Token 的比例；无起始日误差时为 0。 */
+  partialStartOverstatementRatio: number;
 }
 
 interface TokenParts {
@@ -361,8 +362,40 @@ function currentCycleDays(
 }
 
 /**
+ * 起始日误差低于该比例时不提示：面板底部的免责声明已经覆盖了这一类系统性
+ * 偏差，只有真正会影响读数的边界日才值得单独占一条告警。
+ */
+const PARTIAL_START_MIN_OVERSTATEMENT_RATIO = 0.05;
+
+/**
+ * 估算起始日可能混入的重置前用量占已统计 Token 的比例。
+ *
+ * 接口只给到日粒度，无法知道当天用量落在重置前还是重置后；这里按当天用量在
+ * 日内均匀分布估算，取「重置时刻之前那部分时长」的占比作为期望误差。
+ */
+function partialStartOverstatement(
+  days: readonly CodexAnalyticsDailyUsage[],
+  cycleStartMs: number,
+): number {
+  const preStartFraction = (cycleStartMs % DAY_MS) / DAY_MS;
+  if (preStartFraction <= 0) return 0;
+
+  const startDate = utcDateKey(cycleStartMs);
+  let startDayTokens = 0;
+  let includedTokens = 0;
+  for (const day of days) {
+    const dayTokens = tokenTotal(day.totals);
+    includedTokens += dayTokens;
+    if (day.date.slice(0, 10) === startDate) startDayTokens += dayTokens;
+  }
+  if (includedTokens <= EPSILON) return 0;
+  return (startDayTokens * preStartFraction) / includedTokens;
+}
+
+/**
  * 检查当前官方日统计是否完整，并标记无法按精确时刻切分的周期起始日。
- * 这里沿用容量计算的 UTC 日期口径，避免提示与实际纳入的日桶不一致。
+ * 这里沿用容量计算的 UTC 日期口径，避免提示与实际纳入的日桶不一致；
+ * 调用方应传入与容量外推同一个周期，否则提示会描述另一段时间。
  */
 export function inspectCodexAnalyticsCycleData(
   cycle:
@@ -374,21 +407,19 @@ export function inspectCodexAnalyticsCycleData(
   if (!cycle || !analytics) return null;
 
   const days = currentCycleDays(analytics.days, cycle);
-  const startDate = utcDateKey(cycle.startMs);
-  const startsMidUtcDay = cycle.startMs % DAY_MS !== 0;
-  const includesStartDate = days.some(
-    (day) => day.date.slice(0, 10) === startDate,
-  );
+  const overstatementRatio = partialStartOverstatement(days, cycle.startMs);
+  const isMaterial =
+    overstatementRatio >= PARTIAL_START_MIN_OVERSTATEMENT_RATIO;
 
   return {
-    includedDays: days.length,
     missingTokenDates: days
       .filter((day) => day.missingTokenData)
       .map((day) => day.date.slice(0, 10)),
     missingModelBreakdownDates: days
       .filter((day) => day.missingModelBreakdown)
       .map((day) => day.date.slice(0, 10)),
-    partialStartDate: startsMidUtcDay && includesStartDate ? startDate : null,
+    partialStartDate: isMaterial ? utcDateKey(cycle.startMs) : null,
+    partialStartOverstatementRatio: isMaterial ? overstatementRatio : 0,
   };
 }
 

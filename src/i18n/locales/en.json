@@ -1826,7 +1826,7 @@
       "analyticsMissingModelTitle": "Model and speed details are still syncing",
       "analyticsMissingModelDescription": "Daily token totals are available for these dates, but model/speed credit details are missing: {{dates}}. Token totals are preserved, while USD and model allocation may be incomplete.",
       "analyticsPartialStartTitle": "The cycle start day cannot be split precisely",
-      "analyticsPartialStartDescription": "The current cycle started partway through the official statistics day {{date}}, and the API cannot split usage before and after that day's reset. Token/USD capacity may be overstated by pre-reset usage.",
+      "analyticsPartialStartDescription": "The current cycle started partway through the official statistics day {{date}}, and the API cannot split usage before and after that day's reset. Based on that day's usage, Token/USD capacity may be overstated by about {{share}}.",
       "empty": {
         "cycleTitle": "Waiting for cycle data",
         "cycleDescription": "The official API has not returned a valid long cycle yet, possibly because it just reset. The app will retry automatically, or you can refresh manually.",

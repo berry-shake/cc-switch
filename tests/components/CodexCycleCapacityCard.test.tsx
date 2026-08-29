@@ -309,7 +309,41 @@ describe("CodexCycleCapacityCard", () => {
     ).toHaveTextContent(
       "当前周期从官方统计日 2026-08-18 中途开始，接口无法拆分该日重置前后的用量",
     );
+    // 起始日占 2/3 的已统计 Token，其中 1/3 落在重置之前。
+    expect(
+      within(quality).getByTestId("codex-analytics-partial-start-notice"),
+    ).toHaveTextContent("偏高约 22%");
     expect(screen.getByTestId("codex-cycle-forecast")).toBeInTheDocument();
+  });
+
+  it("hides analytics data notices when no capacity cycle is resolved", () => {
+    render(
+      <CodexCycleCapacityCard
+        quota={{ ...quota, tiers: [] }}
+        quotaWindows={[
+          {
+            usedPercent: null,
+            windowSeconds: 7 * 24 * 60 * 60,
+            resetsAt: new Date(resetAt).toISOString(),
+          },
+        ]}
+        usage={usage}
+        analyticsUsage={personalAnalyticsWithGaps}
+        modelPricing={modelPricing}
+        calculationMode="analytics"
+        onCalculationModeChange={vi.fn()}
+        nowMs={queriedAt}
+      />,
+    );
+
+    // 额度比例缺失时根本不会外推容量，提示不能声称容量偏高或偏低。
+    expect(screen.getByTestId("codex-capacity-waiting-state")).toHaveAttribute(
+      "data-reason",
+      "utilization",
+    );
+    expect(
+      screen.queryByTestId("codex-analytics-data-quality"),
+    ).not.toBeInTheDocument();
   });
 
   it("shows the account email and the timestamp of the same quota refresh", () => {

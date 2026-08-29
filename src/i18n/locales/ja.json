@@ -1826,7 +1826,7 @@
       "analyticsMissingModelTitle": "モデルと速度の詳細を同期中",
       "analyticsMissingModelDescription": "次の日付は日次 Token 合計がありますが、モデル・速度別クレジット情報がありません：{{dates}}。Token 合計は保持されますが、USD とモデル配分は不完全な可能性があります。",
       "analyticsPartialStartTitle": "サイクル開始日を正確に分割できません",
-      "analyticsPartialStartDescription": "現在のサイクルは公式統計日 {{date}} の途中から始まり、API はその日のリセット前後の使用量を分割できません。リセット前の使用量を含むため、Token/USD 容量が過大になる可能性があります。",
+      "analyticsPartialStartDescription": "現在のサイクルは公式統計日 {{date}} の途中から始まり、API はその日のリセット前後の使用量を分割できません。その日の使用量から見て、Token/USD 容量は約 {{share}} 過大になる可能性があります。",
       "empty": {
         "cycleTitle": "サイクルデータを待機中",
         "cycleDescription": "公式 API はまだ有効な長期サイクルを返していません。リセット直後の可能性があります。自動再試行を待つか、手動で更新できます。",
