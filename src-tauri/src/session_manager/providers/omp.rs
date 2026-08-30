@@ -78,6 +78,7 @@ mod tests {
         fs::write(
             &path,
             concat!(
+                "{\"type\":\"title\",\"v\":1,\"title\":\"OMP live title\",\"source\":\"auto\",\"updatedAt\":\"2026-03-01T00:00:02Z\",\"pad\":\"   \"}\n",
                 "{\"type\":\"session\",\"version\":3,\"id\":\"session-omp\",\"timestamp\":\"2026-03-01T00:00:00Z\",\"cwd\":\"/tmp/project\"}\n",
                 "{\"type\":\"message\",\"id\":\"entry-1\",\"parentId\":null,\"timestamp\":\"2026-03-01T00:00:01Z\",\"message\":{\"role\":\"user\",\"content\":\"hello OMP\"}}\n"
             ),
@@ -87,9 +88,13 @@ mod tests {
         let sessions = scan_sessions();
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].provider_id, "omp");
+        assert_eq!(sessions[0].title.as_deref(), Some("OMP live title"));
         assert!(sessions[0]
             .resume_command
             .as_deref()
             .is_some_and(|command| command.starts_with("omp --session ")));
+        let messages = load_messages(&path).expect("load OMP messages");
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].content, "hello OMP");
     }
 }

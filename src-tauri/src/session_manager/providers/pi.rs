@@ -244,7 +244,7 @@ pub(super) fn scan_project_sessions(
     collect_jsonl_files(root, SessionLayout::ProjectDirectories, &mut files, true);
     files
         .into_iter()
-        .filter_map(|path| match parse_session(&path) {
+        .filter_map(|path| match parse_session_with_title_slot(&path, true) {
             Ok(mut session) => {
                 session.provider_id = provider_id.to_string();
                 if let Some(source_path) = session.source_path.as_deref() {
@@ -271,7 +271,7 @@ pub(super) fn load_project_messages(
     path: &Path,
     app_name: &str,
 ) -> Result<Vec<SessionMessage>, String> {
-    load_messages_with_layout(root, path, SessionLayout::ProjectDirectories)
+    load_messages_with_layout_and_title_slot(root, path, SessionLayout::ProjectDirectories, true)
         .map_err(|error| error.replace("Pi", app_name))
 }
 
@@ -281,8 +281,14 @@ pub(super) fn delete_project_session(
     session_id: &str,
     app_name: &str,
 ) -> Result<bool, String> {
-    delete_session_with_layout(root, path, session_id, SessionLayout::ProjectDirectories)
-        .map_err(|error| error.replace("Pi", app_name))
+    delete_session_with_layout_and_title_slot(
+        root,
+        path,
+        session_id,
+        SessionLayout::ProjectDirectories,
+        true,
+    )
+    .map_err(|error| error.replace("Pi", app_name))
 }
 
 fn scan_sessions_in_root(root: &Path, layout: SessionLayout) -> Vec<SessionMeta> {
@@ -317,8 +323,17 @@ fn load_messages_with_layout(
     path: &Path,
     layout: SessionLayout,
 ) -> Result<Vec<SessionMessage>, String> {
+    load_messages_with_layout_and_title_slot(root, path, layout, false)
+}
+
+fn load_messages_with_layout_and_title_slot(
+    root: &Path,
+    path: &Path,
+    layout: SessionLayout,
+    allow_title_slot: bool,
+) -> Result<Vec<SessionMessage>, String> {
     let (_, source) = validate_source_under_root(root, path, layout)?;
-    let tree = read_tree(&source)?;
+    let tree = read_tree_with_title_slot(&source, allow_title_slot)?;
     read_active_messages(&source, &tree)
 }
 
@@ -333,11 +348,21 @@ fn delete_session_with_layout(
     session_id: &str,
     layout: SessionLayout,
 ) -> Result<bool, String> {
+    delete_session_with_layout_and_title_slot(root, path, session_id, layout, false)
+}
+
+fn delete_session_with_layout_and_title_slot(
+    root: &Path,
+    path: &Path,
+    session_id: &str,
+    layout: SessionLayout,
+    allow_title_slot: bool,
+) -> Result<bool, String> {
     if !is_valid_tree_id(session_id) {
         return Err("Invalid Pi session ID".to_string());
     }
     let (_, source) = validate_source_under_root(root, path, layout)?;
-    let tree = read_tree(&source)?;
+    let tree = read_tree_with_title_slot(&source, allow_title_slot)?;
     if tree.header.id != session_id {
         return Err(format!(
             "Pi session ID mismatch: expected {session_id}, found {}",
@@ -376,6 +401,13 @@ fn layout_for_current_root(root: &Path) -> Result<SessionLayout, String> {
 }
 
 fn parse_session(path: &Path) -> Result<SessionMeta, String> {
+    parse_session_with_title_slot(path, false)
+}
+
+fn parse_session_with_title_slot(
+    path: &Path,
+    allow_title_slot: bool,
+) -> Result<SessionMeta, String> {
     let source = path
         .canonicalize()
         .map_err(|error| format!("Failed to resolve Pi session {}: {error}", path.display()))?;
@@ -385,7 +417,7 @@ fn parse_session(path: &Path) -> Result<SessionMeta, String> {
         .to_string();
     let SessionTree {
         header, summary, ..
-    } = read_tree(&source)?;
+    } = read_tree_with_title_slot(&source, allow_title_slot)?;
     let title = summary.explicit_name.flatten().or_else(|| {
         summary
             .first_user_message
@@ -415,7 +447,7 @@ fn parse_session(path: &Path) -> Result<SessionMeta, String> {
     })
 }
 
-fn read_tree(path: &Path) -> Result<SessionTree, String> {
+fn read_tree_with_title_slot(path: &Path, allow_title_slot: bool) -> Result<SessionTree, String> {
     validate_file_size(path)?;
     let reader = BufReader::new(
         File::open(path).map_err(|error| format!("Failed to open Pi session: {error}"))?,
@@ -426,6 +458,7 @@ fn read_tree(path: &Path) -> Result<SessionTree, String> {
     let mut legacy_previous_id = None;
     let mut entry_index = 0usize;
     let mut summary = SessionSummary::default();
+    let mut saw_title_slot = false;
     for line in reader.lines() {
         let line = line.map_err(|error| format!("Failed to read Pi session: {error}"))?;
         if line.trim().is_empty() {
@@ -435,6 +468,18 @@ fn read_tree(path: &Path) -> Result<SessionTree, String> {
             continue;
         };
         if header.is_none() {
+            if allow_title_slot && !saw_title_slot && is_session_title_slot(&value) {
+                saw_title_slot = true;
+                summary.explicit_name = Some(
+                    value
+                        .get("title")
+                        .and_then(Value::as_str)
+                        .map(str::trim)
+                        .filter(|title| !title.is_empty())
+                        .map(str::to_string),
+                );
+                continue;
+            }
             header = Some(parse_header(&value)?);
             continue;
         }
@@ -617,6 +662,20 @@ fn push_system(messages: &mut Vec<SessionMessage>, content: &str, ts: Option<i64
             ts,
         });
     }
+}
+
+/// OMP v18 stores a mutable fixed-width title slot before its logical header.
+/// Recognition stays strict and opt-in so native Pi keeps requiring a header
+/// as its first valid JSON entry.
+fn is_session_title_slot(value: &Value) -> bool {
+    value.get("type").and_then(Value::as_str) == Some("title")
+        && value.get("v").and_then(Value::as_u64) == Some(1)
+        && value.get("title").is_some_and(Value::is_string)
+        && value.get("updatedAt").is_some_and(Value::is_string)
+        && value.get("pad").is_some_and(Value::is_string)
+        && value.get("source").map_or(true, |source| {
+            matches!(source.as_str(), Some("auto" | "user"))
+        })
 }
 
 fn parse_header(value: &Value) -> Result<SessionHeader, String> {
@@ -879,6 +938,23 @@ mod tests {
 
         let session = parse_session(&path).expect("parse future session");
         assert_eq!(session.summary.as_deref(), Some("future"));
+    }
+
+    #[test]
+    fn native_pi_rejects_omp_title_slot_before_header() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let path = temp.path().join("pi.jsonl");
+        fs::write(
+            &path,
+            concat!(
+                "{\"type\":\"title\",\"v\":1,\"title\":\"OMP only\",\"source\":\"auto\",\"updatedAt\":\"2026-08-30T14:38:51.655Z\",\"pad\":\"   \"}\n",
+                "{\"type\":\"session\",\"version\":3,\"id\":\"session-1\",\"cwd\":\"/work\"}\n"
+            ),
+        )
+        .expect("session");
+
+        let error = parse_session(&path).expect_err("Pi must keep header-first semantics");
+        assert!(error.contains("first valid JSON entry"));
     }
 
     #[test]
