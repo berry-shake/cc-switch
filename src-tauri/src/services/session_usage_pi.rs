@@ -27,6 +27,7 @@ struct NativeUsageContext {
     provider_placeholder: &'static str,
     app_name: &'static str,
     log_tag: &'static str,
+    has_title_slot: bool,
 }
 
 const PI_CONTEXT: NativeUsageContext = NativeUsageContext {
@@ -35,6 +36,7 @@ const PI_CONTEXT: NativeUsageContext = NativeUsageContext {
     provider_placeholder: "_pi_session",
     app_name: "Pi",
     log_tag: "PI-SYNC",
+    has_title_slot: false,
 };
 const OMP_CONTEXT: NativeUsageContext = NativeUsageContext {
     app_type: "omp",
@@ -42,6 +44,7 @@ const OMP_CONTEXT: NativeUsageContext = NativeUsageContext {
     provider_placeholder: "_omp_session",
     app_name: "OMP",
     log_tag: "OMP-SYNC",
+    has_title_slot: true,
 };
 #[cfg(test)]
 const DATA_SOURCE: &str = PI_CONTEXT.data_source;
@@ -172,6 +175,10 @@ fn sync_pi_files(db: &Database, files: &[PathBuf]) -> SessionSyncResult {
     sync_native_files(db, files, PI_CONTEXT)
 }
 
+#[cfg(test)]
+fn sync_omp_files(db: &Database, files: &[PathBuf]) -> SessionSyncResult {
+    sync_native_files(db, files, OMP_CONTEXT)
+}
 fn sync_native_files(
     db: &Database,
     files: &[PathBuf],
@@ -392,6 +399,20 @@ fn pi_tail_fingerprint(tail: &[u8]) -> u32 {
     u32::from_be_bytes(digest[..4].try_into().unwrap_or_default())
 }
 
+/// OMP v18 stores a mutable, fixed-width title slot before the logical
+/// session header. Keep this recognition strict and context-gated so Pi still
+/// enforces its header-first format.
+fn is_session_title_slot(value: &Value) -> bool {
+    value.get("type").and_then(Value::as_str) == Some("title")
+        && value.get("v").and_then(Value::as_u64) == Some(1)
+        && value.get("title").is_some_and(Value::is_string)
+        && value.get("updatedAt").is_some_and(Value::is_string)
+        && value.get("pad").is_some_and(Value::is_string)
+        && value.get("source").map_or(true, |source| {
+            matches!(source.as_str(), Some("auto" | "user"))
+        })
+}
+
 fn parse_native_file(
     file_path: &Path,
     start_after_line: i64,
@@ -470,6 +491,13 @@ fn parse_native_file(
             continue;
         };
 
+        if session_id.is_none()
+            && context.has_title_slot
+            && line_number == 1
+            && is_session_title_slot(&value)
+        {
+            continue;
+        }
         if session_id.is_none() {
             if value.get("type").and_then(Value::as_str) != Some("session") {
                 return Err(AppError::Config(format!(
@@ -1056,6 +1084,62 @@ mod tests {
                 "lookup does not constrain the complete identity {expected}: {plan:?}"
             );
         }
+        Ok(())
+    }
+
+    #[test]
+    fn imports_omp_v18_title_slot_sessions_without_relaxing_pi() -> Result<(), AppError> {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let path = session_path(temp.path(), "omp-title-slot");
+        let assistant = assistant_line("omp-assistant", "2026-08-30T14:39:00.573Z", 8738);
+        write_lines(
+            &path,
+            &[
+                r#"{"type":"title","v":1,"title":"OMP fixture","source":"auto","updatedAt":"2026-08-30T14:38:51.655Z","pad":"   "}"#,
+                r#"{"type":"session","version":3,"id":"session-omp","timestamp":"2026-08-30T14:36:28.662Z","cwd":"/work"}"#,
+                &assistant,
+            ],
+        );
+
+        let pi_db = Database::memory()?;
+        let pi_result = sync_pi_files(&pi_db, std::slice::from_ref(&path));
+        assert_eq!(pi_result.imported, 0);
+        assert_eq!(pi_result.errors.len(), 1);
+
+        let omp_db = Database::memory()?;
+        let omp_result = sync_omp_files(&omp_db, std::slice::from_ref(&path));
+        assert_eq!(omp_result.imported, 1);
+        assert!(omp_result.errors.is_empty());
+
+        let conn = lock_conn!(omp_db.conn);
+        let imported: (String, String, String, String, i64, i64, String) = conn.query_row(
+            "SELECT app_type, data_source, provider_id, model, input_tokens, created_at, session_id
+             FROM proxy_request_logs WHERE data_source = 'omp_session'",
+            [],
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                    row.get(6)?,
+                ))
+            },
+        )?;
+        assert_eq!(
+            imported,
+            (
+                "omp".to_string(),
+                "omp_session".to_string(),
+                "fixture-provider".to_string(),
+                "fixture-model".to_string(),
+                8738,
+                1_788_100_740,
+                "session-omp".to_string(),
+            )
+        );
         Ok(())
     }
 
