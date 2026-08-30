@@ -1304,6 +1304,53 @@ describe("PiProviderForm", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("preserves OMP model.thinking while removing Pi-only thinking maps", async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const thinking = {
+      mode: "effort",
+      efforts: ["minimal", "high"],
+      defaultLevel: "high",
+      supportsDisplay: true,
+    };
+    render(
+      <PiProviderForm
+        appId="omp"
+        providerId="omp-provider"
+        submitLabel="Save OMP provider"
+        onSubmit={onSubmit}
+        onCancel={() => {}}
+        initialData={{
+          name: "OMP provider",
+          settingsConfig: {
+            baseUrl: "https://api.example.com/v1",
+            api: "openai-codex-responses",
+            models: [
+              {
+                ...completeModel("gpt-5.6-sol"),
+                reasoning: true,
+                thinking,
+                thinkingLevelMap: { high: "vendor-high" },
+              },
+            ],
+          },
+        }}
+      />,
+    );
+
+    expect(
+      screen.queryByText("pi.form.thinkingLevelsLabel"),
+    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Save OMP provider" }));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    const submitted = onSubmit.mock.calls[0][0];
+    const config = JSON.parse(submitted.settingsConfig);
+    expect(config.api).toBe("openai-codex-responses");
+    expect(config.models[0].thinking).toEqual(thinking);
+    expect(config.models[0]).not.toHaveProperty("thinkingLevelMap");
+    expect(submitted.icon).toBe("omp");
+  });
+
   it("keeps a preset thinking map when the user changes the API", async () => {
     const user = userEvent.setup();
     render(

@@ -48,6 +48,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { isTextEditableTarget } from "@/utils/domUtils";
 import { usePiCurrentState } from "@/lib/query/pi";
+import { useOmpCurrentState } from "@/lib/query/omp";
 import { isProxyAppId } from "@/config/appConfig";
 
 interface ProviderListProps {
@@ -207,19 +208,20 @@ export function ProviderList({
     enabled: appId === "claude-desktop",
     refetchInterval: appId === "claude-desktop" ? 5000 : false,
   });
-  const {
-    data: piCurrentState,
-    isSuccess: isPiCurrentStateSuccess,
-    isError: isPiCurrentStateError,
-    error: piCurrentStateError,
-  } = usePiCurrentState(appId === "pi");
-  const isPiAuthoritativeStateReady = appId !== "pi" || isPiCurrentStateSuccess;
-  const isPiProviderInConfig = useCallback(
+  const isNativeModelApp = appId === "pi" || appId === "omp";
+  const piStateQuery = usePiCurrentState(appId === "pi");
+  const ompStateQuery = useOmpCurrentState(appId === "omp");
+  const nativeStateQuery = appId === "omp" ? ompStateQuery : piStateQuery;
+  const isNativeAuthoritativeStateReady =
+    !isNativeModelApp || nativeStateQuery.isSuccess;
+  const isNativeProviderInConfig = useCallback(
     (provider: Provider): boolean => {
-      if (!isPiAuthoritativeStateReady) return false;
-      return piCurrentState?.enabledProviderIds.includes(provider.id) ?? false;
+      if (!isNativeAuthoritativeStateReady) return false;
+      return (
+        nativeStateQuery.data?.enabledProviderIds.includes(provider.id) ?? false
+      );
     },
-    [isPiAuthoritativeStateReady, piCurrentState],
+    [isNativeAuthoritativeStateReady, nativeStateQuery.data],
   );
 
   // 连通性检查不发真实请求、无封号/计费风险，直接执行（无需确认弹窗）。
@@ -374,25 +376,25 @@ export function ProviderList({
     return messages;
   }, [appId, claudeDesktopStatus, t]);
 
-  const piStateErrorMessages = [
-    isPiCurrentStateError ? extractErrorMessage(piCurrentStateError) : "",
+  const nativeStateErrorMessages = [
+    nativeStateQuery.isError ? extractErrorMessage(nativeStateQuery.error) : "",
   ].filter(Boolean);
-  const piStateErrorNotice =
-    appId === "pi" && piStateErrorMessages.length > 0 ? (
+  const nativeStateErrorNotice =
+    isNativeModelApp && nativeStateErrorMessages.length > 0 ? (
       <div
         role="alert"
         className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-900 dark:text-amber-200"
       >
         <div className="flex items-center gap-2 font-medium">
           <AlertTriangle className="h-4 w-4 shrink-0" />
-          {t("pi.current.readFailed", {
-            defaultValue: "无法读取 Pi 当前配置",
+          {t(`${appId}.current.readFailed`, {
+            defaultValue: `无法读取 ${appId === "omp" ? "OMP" : "Pi"} 当前配置`,
           })}
         </div>
         <p className="mt-1 text-xs leading-relaxed">
-          {t("pi.current.stateUnavailableHint")}
-          {piStateErrorMessages.length > 0
-            ? ` ${piStateErrorMessages.join(" · ")}`
+          {t(`${appId}.current.stateUnavailableHint`)}
+          {nativeStateErrorMessages.length > 0
+            ? ` ${nativeStateErrorMessages.join(" · ")}`
             : ""}
         </p>
       </div>
@@ -414,11 +416,13 @@ export function ProviderList({
   if (sortedProviders.length === 0) {
     return (
       <div className="mt-4 space-y-4">
-        {piStateErrorNotice}
+        {nativeStateErrorNotice}
         <ProviderEmptyState
           appId={appId}
-          onCreate={appId === "pi" ? undefined : onCreate}
-          onImport={appId === "pi" ? undefined : () => importMutation.mutate()}
+          onCreate={isNativeModelApp ? undefined : onCreate}
+          onImport={
+            isNativeModelApp ? undefined : () => importMutation.mutate()
+          }
         />
       </div>
     );
@@ -443,16 +447,15 @@ export function ProviderList({
               isOmoSlim && provider.id === (currentOmoSlimId || "");
             const isHermesCurrent =
               appId === "hermes" && hermesCurrentProviderId === provider.id;
-            const isCurrent =
-              appId === "pi"
-                ? false
-                : isOmo
-                  ? isOmoCurrent
-                  : isOmoSlim
-                    ? isOmoSlimCurrent
-                    : appId === "hermes"
-                      ? isHermesCurrent
-                      : provider.id === currentProviderId;
+            const isCurrent = isNativeModelApp
+              ? false
+              : isOmo
+                ? isOmoCurrent
+                : isOmoSlim
+                  ? isOmoSlimCurrent
+                  : appId === "hermes"
+                    ? isHermesCurrent
+                    : provider.id === currentProviderId;
             return (
               <SortableProviderCard
                 key={provider.id}
@@ -460,8 +463,8 @@ export function ProviderList({
                 isCurrent={isCurrent}
                 appId={appId}
                 isInConfig={
-                  appId === "pi"
-                    ? isPiProviderInConfig(provider)
+                  isNativeModelApp
+                    ? isNativeProviderInConfig(provider)
                     : isProviderInConfig(provider.id)
                 }
                 isOmo={isOmo}
@@ -497,7 +500,7 @@ export function ProviderList({
                     : isProviderDefaultModel(provider.id)
                 }
                 isRemovalProtected={
-                  appId === "pi"
+                  isNativeModelApp
                     ? false
                     : appId === "hermes"
                       ? isHermesCurrent
@@ -506,7 +509,7 @@ export function ProviderList({
                         : false
                 }
                 isStateChangeProtected={
-                  appId === "pi" && !isPiAuthoritativeStateReady
+                  isNativeModelApp && !isNativeAuthoritativeStateReady
                 }
                 onSetAsDefault={
                   onSetAsDefault
@@ -523,7 +526,7 @@ export function ProviderList({
 
   return (
     <div className="mt-4 space-y-4">
-      {piStateErrorNotice}
+      {nativeStateErrorNotice}
       {claudeDesktopStatusMessages.length > 0 && (
         <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-900 dark:text-amber-200">
           <div className="flex items-center gap-2 font-medium">

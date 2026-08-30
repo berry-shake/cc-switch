@@ -47,12 +47,13 @@ export function AddProviderDialog({
   onSubmit,
 }: AddProviderDialogProps) {
   const { t } = useTranslation();
+  const isNativeModelApp = appId === "pi" || appId === "omp";
   // OpenCode and OpenClaw don't support universal providers
   const showUniversalTab =
     appId !== "opencode" &&
     appId !== "openclaw" &&
     appId !== "hermes" &&
-    appId !== "pi" &&
+    !isNativeModelApp &&
     appId !== "grokbuild" &&
     appId !== "claude-desktop";
   const [activeTab, setActiveTab] = useState<"app-specific" | "universal">(
@@ -89,12 +90,12 @@ export function AddProviderDialog({
   currentFormReadyToken.current = formReadyToken;
   const [formReadyState, setFormReadyState] = useState({
     token: formReadyToken,
-    ready: appId !== "pi",
+    ready: !isNativeModelApp,
   });
   const isFormReady =
     formReadyState.token === formReadyToken
       ? formReadyState.ready
-      : appId !== "pi";
+      : !isNativeModelApp;
   const handleSubmitReadyChange = useCallback(
     (ready: boolean) => {
       if (currentFormReadyToken.current === formReadyToken) {
@@ -197,7 +198,7 @@ export function AddProviderDialog({
         (appId === "opencode" ||
           appId === "openclaw" ||
           appId === "hermes" ||
-          appId === "pi") &&
+          isNativeModelApp) &&
         values.providerKey
       ) {
         providerData.providerKey = values.providerKey;
@@ -407,7 +408,7 @@ export function AddProviderDialog({
       title={t("provider.addNewProvider")}
       onClose={handlePanelClose}
       footer={footer}
-      contentClassName={appId === "pi" ? "pt-3 pb-0" : "pt-3"}
+      contentClassName={isNativeModelApp ? "pt-3 pb-0" : "pt-3"}
     >
       {showUniversalTab ? (
         <Tabs

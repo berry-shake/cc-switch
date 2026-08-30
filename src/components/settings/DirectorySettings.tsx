@@ -22,6 +22,7 @@ interface DirectorySettingsProps {
   openclawDir?: string;
   hermesDir?: string;
   piDir?: string;
+  ompDir?: string;
   onDirectoryChange: (app: DirectoryAppId, value?: string) => void;
   onBrowseDirectory: (app: DirectoryAppId) => Promise<void>;
   onResetDirectory: (app: DirectoryAppId) => Promise<void>;
@@ -41,6 +42,7 @@ export function DirectorySettings({
   openclawDir,
   hermesDir,
   piDir,
+  ompDir,
   onDirectoryChange,
   onBrowseDirectory,
   onResetDirectory,
@@ -183,6 +185,19 @@ export function DirectorySettings({
           onChange={(val) => onDirectoryChange("pi", val)}
           onBrowse={() => onBrowseDirectory("pi")}
           onReset={() => onResetDirectory("pi")}
+        />
+
+        <DirectoryInput
+          label={t("settings.ompConfigDir", { defaultValue: "OMP 配置目录" })}
+          description={undefined}
+          value={ompDir}
+          resolvedValue={resolvedDirs.omp}
+          placeholder={t("settings.browsePlaceholderOmp", {
+            defaultValue: "例如：/home/<你的用户名>/.omp/agent",
+          })}
+          onChange={(val) => onDirectoryChange("omp", val)}
+          onBrowse={() => onBrowseDirectory("omp")}
+          onReset={() => onResetDirectory("omp")}
         />
       </section>
     </div>

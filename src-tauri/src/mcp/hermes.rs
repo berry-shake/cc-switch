@@ -318,6 +318,7 @@ pub fn import_from_hermes(config: &mut MultiAppConfig) -> Result<usize, AppError
                         grokbuild: false,
                         opencode: false,
                         hermes: true,
+                        omp: false,
                     },
                     description: None,
                     homepage: None,

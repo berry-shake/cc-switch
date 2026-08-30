@@ -35,6 +35,7 @@ const PromptFormPanel: React.FC<PromptFormPanelProps> = ({
     openclaw: "AGENTS.md",
     hermes: "SOUL.md",
     pi: "AGENTS.md",
+    omp: "AGENTS.md",
   };
   const filename = filenameMap[appId];
   const [name, setName] = useState("");
@@ -66,7 +67,7 @@ const PromptFormPanel: React.FC<PromptFormPanelProps> = ({
         id,
         name: name.trim(),
         description: description.trim() || undefined,
-        content: appId === "pi" ? content : content.trim(),
+        content: appId === "pi" || appId === "omp" ? content : content.trim(),
         enabled: initialData?.enabled || false,
         createdAt: initialData?.createdAt || timestamp,
         updatedAt: timestamp,

@@ -100,6 +100,7 @@ export function EditProviderDialog({
   const [isFormSubmitting, setIsFormSubmitting] = useState(false);
   const [authSettingsTarget, setAuthSettingsTarget] =
     useState<ManagedAuthProvider | null>(null);
+  const isNativeModelApp = appId === "pi" || appId === "omp";
 
   useEffect(() => {
     setAuthSettingsTarget(null);
@@ -113,12 +114,12 @@ export function EditProviderDialog({
   currentFormReadyToken.current = formReadyToken;
   const [formReadyState, setFormReadyState] = useState({
     token: formReadyToken,
-    ready: appId !== "pi",
+    ready: !isNativeModelApp,
   });
   const isFormReady =
     formReadyState.token === formReadyToken
       ? formReadyState.ready
-      : appId !== "pi";
+      : !isNativeModelApp;
   const handleSubmitReadyChange = useCallback(
     (ready: boolean) => {
       if (currentFormReadyToken.current === formReadyToken) {
@@ -177,7 +178,7 @@ export function EditProviderDialog({
       // OpenCode uses additive mode, while Pi's shared models.json is owned by
       // the catalog coordinator. Neither has a per-provider generic live
       // snapshot that may replace the DB aggregate in this form.
-      if (appId === "opencode" || appId === "pi") {
+      if (appId === "opencode" || isNativeModelApp) {
         if (!cancelled) {
           setLiveSettings(null);
           setHasLoadedLive(true);
@@ -302,7 +303,7 @@ export function EditProviderDialog({
         unknown
       >;
       const nextProviderId =
-        (appId === "opencode" || appId === "openclaw" || appId === "pi") &&
+        (appId === "opencode" || appId === "openclaw" || isNativeModelApp) &&
         values.providerKey?.trim()
           ? values.providerKey.trim()
           : provider.id;
@@ -339,7 +340,7 @@ export function EditProviderDialog({
       isOpen={open}
       title={t("provider.editProvider")}
       onClose={handlePanelClose}
-      contentClassName={appId === "pi" ? "pb-0" : undefined}
+      contentClassName={isNativeModelApp ? "pb-0" : undefined}
       footer={
         <Button
           type="submit"

@@ -14,7 +14,11 @@ import {
   PiSystemPromptFiles,
   type PiPromptTemplatesHandle,
 } from "@/components/prompts/PiNativePromptResources";
-import { promptsApi, type PiPromptFileKind } from "@/lib/api/prompts";
+import {
+  promptsApi,
+  type NativePromptAppId,
+  type PiPromptFileKind,
+} from "@/lib/api/prompts";
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -85,14 +89,14 @@ const renderWithQueryClient = (
   ),
 });
 
-function TemplateHarness() {
+function TemplateHarness({ appId = "pi" }: { appId?: NativePromptAppId }) {
   const ref = useRef<PiPromptTemplatesHandle>(null);
   return (
     <>
       <button type="button" onClick={() => ref.current?.openCreate()}>
         open-create
       </button>
-      <PiPromptTemplates ref={ref} />
+      <PiPromptTemplates ref={ref} appId={appId} />
     </>
   );
 }
@@ -100,27 +104,27 @@ function TemplateHarness() {
 describe("Pi native prompt resources", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
-    vi.spyOn(promptsApi, "getPiPromptFile").mockImplementation(
-      async (kind: PiPromptFileKind) => ({
+    vi.spyOn(promptsApi, "getNativePromptFile").mockImplementation(
+      async (_app, kind: PiPromptFileKind) => ({
         exists: kind === "system_append",
         revision: kind === "system_append" ? "append-revision" : "missing",
         content: kind === "system_append" ? "append" : "",
       }),
     );
-    vi.spyOn(promptsApi, "listPiPromptTemplates").mockResolvedValue([
+    vi.spyOn(promptsApi, "listNativePromptTemplates").mockResolvedValue([
       {
         slug: "empty",
         content: "",
         revision: "empty-revision",
       },
     ]);
-    vi.spyOn(promptsApi, "upsertPiPromptTemplate").mockResolvedValue({
+    vi.spyOn(promptsApi, "upsertNativePromptTemplate").mockResolvedValue({
       slug: "new-empty",
       content: "",
       revision: "created-revision",
     });
-    vi.spyOn(promptsApi, "replacePiPromptFile").mockImplementation(
-      async (_kind, _revision, content) => ({
+    vi.spyOn(promptsApi, "replaceNativePromptFile").mockImplementation(
+      async (_app, _kind, _revision, content) => ({
         exists: true,
         revision: "saved-revision",
         content,
@@ -148,7 +152,8 @@ describe("Pi native prompt resources", () => {
     fireEvent.click(screen.getByRole("button", { name: "common.save" }));
 
     await waitFor(() =>
-      expect(promptsApi.replacePiPromptFile).toHaveBeenCalledWith(
+      expect(promptsApi.replaceNativePromptFile).toHaveBeenCalledWith(
+        "pi",
         "system_append",
         "append-revision",
         "new append",
@@ -177,7 +182,8 @@ describe("Pi native prompt resources", () => {
     expect(editor).toHaveValue("local draft");
     fireEvent.click(screen.getByRole("button", { name: "common.save" }));
     await waitFor(() =>
-      expect(promptsApi.replacePiPromptFile).toHaveBeenCalledWith(
+      expect(promptsApi.replaceNativePromptFile).toHaveBeenCalledWith(
+        "pi",
         "system_append",
         "append-revision",
         "local draft",
@@ -201,7 +207,8 @@ describe("Pi native prompt resources", () => {
     fireEvent.click(create);
 
     await waitFor(() =>
-      expect(promptsApi.upsertPiPromptTemplate).toHaveBeenCalledWith(
+      expect(promptsApi.upsertNativePromptTemplate).toHaveBeenCalledWith(
+        "pi",
         "new-empty",
         "missing",
         "",
@@ -211,7 +218,7 @@ describe("Pi native prompt resources", () => {
   });
 
   it("renames an existing slash-command template while saving it", async () => {
-    vi.spyOn(promptsApi, "upsertPiPromptTemplate").mockResolvedValue({
+    vi.spyOn(promptsApi, "upsertNativePromptTemplate").mockResolvedValue({
       slug: "renamed",
       content: "",
       revision: "renamed-revision",
@@ -226,7 +233,8 @@ describe("Pi native prompt resources", () => {
     fireEvent.click(screen.getByRole("button", { name: "common.save" }));
 
     await waitFor(() =>
-      expect(promptsApi.upsertPiPromptTemplate).toHaveBeenCalledWith(
+      expect(promptsApi.upsertNativePromptTemplate).toHaveBeenCalledWith(
+        "pi",
         "renamed",
         "empty-revision",
         "",
@@ -236,7 +244,7 @@ describe("Pi native prompt resources", () => {
   });
 
   it("edits Pi description as notes without duplicating it in the body", async () => {
-    vi.spyOn(promptsApi, "listPiPromptTemplates").mockResolvedValue([
+    vi.spyOn(promptsApi, "listNativePromptTemplates").mockResolvedValue([
       {
         slug: "review",
         content:
@@ -244,7 +252,7 @@ describe("Pi native prompt resources", () => {
         revision: "review-revision",
       },
     ]);
-    vi.spyOn(promptsApi, "upsertPiPromptTemplate").mockResolvedValue({
+    vi.spyOn(promptsApi, "upsertNativePromptTemplate").mockResolvedValue({
       slug: "review",
       content:
         '---\ndescription: "Updated note"\nargument-hint: "<target>"\n---\nReview $1',
@@ -281,7 +289,8 @@ describe("Pi native prompt resources", () => {
     fireEvent.click(screen.getByRole("button", { name: "common.save" }));
 
     await waitFor(() =>
-      expect(promptsApi.upsertPiPromptTemplate).toHaveBeenCalledWith(
+      expect(promptsApi.upsertNativePromptTemplate).toHaveBeenCalledWith(
+        "pi",
         "review",
         "review-revision",
         '---\ndescription: "Updated note"\nargument-hint: "<target>"\n---\nReview $1',
@@ -329,7 +338,7 @@ describe("Pi native prompt resources", () => {
       }),
     );
 
-    expect(promptsApi.replacePiPromptFile).not.toHaveBeenCalled();
+    expect(promptsApi.replaceNativePromptFile).not.toHaveBeenCalled();
     const dialogTitle = screen.getByText("pi.prompts.activateOverrideTitle");
     const dialog = dialogTitle.closest('[role="dialog"]');
     expect(dialog).not.toBeNull();
@@ -340,7 +349,8 @@ describe("Pi native prompt resources", () => {
     );
 
     await waitFor(() =>
-      expect(promptsApi.replacePiPromptFile).toHaveBeenCalledWith(
+      expect(promptsApi.replaceNativePromptFile).toHaveBeenCalledWith(
+        "pi",
         "system_override",
         "missing",
         "replace the system prompt",
@@ -349,15 +359,15 @@ describe("Pi native prompt resources", () => {
   });
 
   it("removes the global SYSTEM.md file through the native file API", async () => {
-    vi.spyOn(promptsApi, "getPiPromptFile").mockImplementation(
-      async (kind: PiPromptFileKind) => ({
+    vi.spyOn(promptsApi, "getNativePromptFile").mockImplementation(
+      async (_app, kind: PiPromptFileKind) => ({
         exists: kind === "system_override",
         revision: kind === "system_override" ? "system-revision" : "missing",
         content: kind === "system_override" ? "custom system prompt" : "",
       }),
     );
     const remove = vi
-      .spyOn(promptsApi, "deletePiPromptFile")
+      .spyOn(promptsApi, "deleteNativePromptFile")
       .mockResolvedValue(true);
     renderWithQueryClient(<PiSystemPromptFiles />);
 
@@ -378,7 +388,32 @@ describe("Pi native prompt resources", () => {
     );
 
     await waitFor(() =>
-      expect(remove).toHaveBeenCalledWith("system_override", "system-revision"),
+      expect(remove).toHaveBeenCalledWith(
+        "pi",
+        "system_override",
+        "system-revision",
+      ),
+    );
+  });
+
+  it("routes OMP instruction edits through OMP-native commands", async () => {
+    renderWithQueryClient(<PiSystemPromptFiles appId="omp" />);
+
+    await screen.findByText("omp.prompts.configured");
+    fireEvent.click(screen.getByText("APPEND_SYSTEM.md").closest("button")!);
+    fireEvent.change(
+      screen.getByPlaceholderText("omp.prompts.instructionPlaceholder"),
+      { target: { value: "OMP append instructions" } },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "common.save" }));
+
+    await waitFor(() =>
+      expect(promptsApi.replaceNativePromptFile).toHaveBeenCalledWith(
+        "omp",
+        "system_append",
+        "append-revision",
+        "OMP append instructions",
+      ),
     );
   });
 });

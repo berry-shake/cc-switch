@@ -25,6 +25,8 @@ export interface PiPromptTemplate {
   revision: string;
 }
 
+export type NativePromptAppId = "pi" | "omp";
+
 export const promptsApi = {
   async getPrompts(app: AppId): Promise<Record<string, Prompt>> {
     return await invoke("get_prompts", { app });
@@ -96,6 +98,69 @@ export const promptsApi = {
     expectedRevision: string,
   ): Promise<boolean> {
     return await invoke("delete_pi_prompt_template", {
+      slug,
+      expectedRevision,
+    });
+  },
+
+  async getNativePromptFile(
+    app: NativePromptAppId,
+    kind: PiPromptFileKind,
+  ): Promise<PiPromptFileSnapshot> {
+    return await invoke(`get_${app}_prompt_file`, { kind });
+  },
+
+  async replaceNativePromptFile(
+    app: NativePromptAppId,
+    kind: PiPromptFileKind,
+    expectedRevision: string,
+    content: string,
+  ): Promise<PiPromptFileSnapshot> {
+    return await invoke(`replace_${app}_prompt_file`, {
+      kind,
+      expectedRevision,
+      content,
+    });
+  },
+
+  async deleteNativePromptFile(
+    app: NativePromptAppId,
+    kind: PiPromptFileKind,
+    expectedRevision: string,
+  ): Promise<boolean> {
+    return await invoke(`delete_${app}_prompt_file`, {
+      kind,
+      expectedRevision,
+    });
+  },
+
+  async listNativePromptTemplates(
+    app: NativePromptAppId,
+  ): Promise<PiPromptTemplate[]> {
+    return await invoke(`list_${app}_prompt_templates`);
+  },
+
+  async upsertNativePromptTemplate(
+    app: NativePromptAppId,
+    slug: string,
+    expectedRevision: string,
+    content: string,
+    originalSlug?: string,
+  ): Promise<PiPromptTemplate> {
+    return await invoke(`upsert_${app}_prompt_template`, {
+      slug,
+      originalSlug: originalSlug ?? null,
+      expectedRevision,
+      content,
+    });
+  },
+
+  async deleteNativePromptTemplate(
+    app: NativePromptAppId,
+    slug: string,
+    expectedRevision: string,
+  ): Promise<boolean> {
+    return await invoke(`delete_${app}_prompt_template`, {
       slug,
       expectedRevision,
     });

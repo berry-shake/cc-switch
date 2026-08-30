@@ -69,7 +69,7 @@ pub async fn get_current_prompt_file_content(app: String) -> Result<Option<Strin
 
 #[tauri::command]
 pub async fn get_pi_prompt_file(kind: PiPromptFileKind) -> Result<PiPromptFileSnapshot, String> {
-    PiPromptFileService::read(kind).map_err(|error| error.to_string())
+    PiPromptFileService::read(&AppType::Pi, kind).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -78,7 +78,7 @@ pub async fn replace_pi_prompt_file(
     #[allow(non_snake_case)] expectedRevision: String,
     content: String,
 ) -> Result<PiPromptFileSnapshot, String> {
-    PiPromptFileService::replace(kind, &expectedRevision, &content)
+    PiPromptFileService::replace(&AppType::Pi, kind, &expectedRevision, &content)
         .map_err(|error| error.to_string())
 }
 
@@ -87,12 +87,13 @@ pub async fn delete_pi_prompt_file(
     kind: PiPromptFileKind,
     #[allow(non_snake_case)] expectedRevision: String,
 ) -> Result<bool, String> {
-    PiPromptFileService::delete(kind, &expectedRevision).map_err(|error| error.to_string())
+    PiPromptFileService::delete(&AppType::Pi, kind, &expectedRevision)
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
 pub async fn list_pi_prompt_templates() -> Result<Vec<PiPromptTemplate>, String> {
-    PiPromptTemplateService::list().map_err(|error| error.to_string())
+    PiPromptTemplateService::list(&AppType::Pi).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -102,8 +103,14 @@ pub async fn upsert_pi_prompt_template(
     #[allow(non_snake_case)] expectedRevision: String,
     content: String,
 ) -> Result<PiPromptTemplate, String> {
-    PiPromptTemplateService::upsert(&slug, originalSlug.as_deref(), &expectedRevision, &content)
-        .map_err(|error| error.to_string())
+    PiPromptTemplateService::upsert(
+        &AppType::Pi,
+        &slug,
+        originalSlug.as_deref(),
+        &expectedRevision,
+        &content,
+    )
+    .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -111,5 +118,61 @@ pub async fn delete_pi_prompt_template(
     slug: String,
     #[allow(non_snake_case)] expectedRevision: String,
 ) -> Result<bool, String> {
-    PiPromptTemplateService::delete(&slug, &expectedRevision).map_err(|error| error.to_string())
+    PiPromptTemplateService::delete(&AppType::Pi, &slug, &expectedRevision)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn get_omp_prompt_file(kind: PiPromptFileKind) -> Result<PiPromptFileSnapshot, String> {
+    PiPromptFileService::read(&AppType::Omp, kind).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn replace_omp_prompt_file(
+    kind: PiPromptFileKind,
+    #[allow(non_snake_case)] expectedRevision: String,
+    content: String,
+) -> Result<PiPromptFileSnapshot, String> {
+    PiPromptFileService::replace(&AppType::Omp, kind, &expectedRevision, &content)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn delete_omp_prompt_file(
+    kind: PiPromptFileKind,
+    #[allow(non_snake_case)] expectedRevision: String,
+) -> Result<bool, String> {
+    PiPromptFileService::delete(&AppType::Omp, kind, &expectedRevision)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn list_omp_prompt_templates() -> Result<Vec<PiPromptTemplate>, String> {
+    PiPromptTemplateService::list(&AppType::Omp).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn upsert_omp_prompt_template(
+    slug: String,
+    #[allow(non_snake_case)] originalSlug: Option<String>,
+    #[allow(non_snake_case)] expectedRevision: String,
+    content: String,
+) -> Result<PiPromptTemplate, String> {
+    PiPromptTemplateService::upsert(
+        &AppType::Omp,
+        &slug,
+        originalSlug.as_deref(),
+        &expectedRevision,
+        &content,
+    )
+    .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn delete_omp_prompt_template(
+    slug: String,
+    #[allow(non_snake_case)] expectedRevision: String,
+) -> Result<bool, String> {
+    PiPromptTemplateService::delete(&AppType::Omp, &slug, &expectedRevision)
+        .map_err(|error| error.to_string())
 }

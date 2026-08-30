@@ -113,7 +113,9 @@ export function ProviderActions({
   const isFailoverMode =
     !isAdditiveMode && !isOmo && isAutoFailoverEnabled && onToggleFailover;
   const isMembershipMode = isAdditiveMode;
-  const piStateChangeHint = t("pi.current.stateUnavailableHint");
+  const nativeStateChangeHint = t(
+    `${appId === "omp" ? "omp" : "pi"}.current.stateUnavailableHint`,
+  );
 
   const handleMainButtonClick = () => {
     if (isOmo) {
@@ -176,7 +178,7 @@ export function ProviderActions({
           text: isInConfig
             ? t("provider.removeFromConfig", { defaultValue: "移除" })
             : t("provider.enable", { defaultValue: "启用" }),
-          title: piStateChangeHint,
+          title: nativeStateChangeHint,
         };
       }
       if (isInConfig) {
@@ -198,7 +200,7 @@ export function ProviderActions({
           "bg-emerald-500 hover:bg-emerald-600 dark:bg-emerald-600 dark:hover:bg-emerald-700",
         icon: <Plus className="h-4 w-4" />,
         text:
-          appId === "pi"
+          appId === "pi" || appId === "omp"
             ? t("provider.enable", { defaultValue: "启用" })
             : t("provider.addToConfig", { defaultValue: "添加" }),
       };
@@ -261,7 +263,7 @@ export function ProviderActions({
   const buttonState = getMainButtonState();
   const canDelete =
     !isReadOnly &&
-    (appId === "pi"
+    (appId === "pi" || appId === "omp"
       ? !isStateChangeProtected
       : isOmo || isAdditiveMode
         ? true
@@ -270,8 +272,8 @@ export function ProviderActions({
     defaultValue: "由 Hermes 管理，请在 Hermes Web UI 中编辑",
   });
   const deleteHint =
-    appId === "pi" && isStateChangeProtected
-      ? piStateChangeHint
+    (appId === "pi" || appId === "omp") && isStateChangeProtected
+      ? nativeStateChangeHint
       : isReadOnly
         ? readOnlyHint
         : t("common.delete");

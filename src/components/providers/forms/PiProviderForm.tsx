@@ -75,6 +75,14 @@ const PI_API_FORMATS = [
   { value: "bedrock-converse-stream", label: "Amazon Bedrock" },
 ] as const satisfies ReadonlyArray<{ value: PiApiFormat; label: string }>;
 
+const OMP_API_FORMATS = [
+  ...PI_API_FORMATS,
+  { value: "openai-codex-responses", label: "OpenAI Codex Responses" },
+  { value: "azure-openai-responses", label: "Azure OpenAI Responses" },
+  { value: "google-gemini-cli", label: "Google Gemini CLI" },
+  { value: "google-vertex", label: "Google Vertex AI" },
+] as const satisfies ReadonlyArray<{ value: string; label: string }>;
+
 const ROOT_CONTROLLED_KEYS = new Set([
   "name",
   "baseUrl",
@@ -383,6 +391,7 @@ function buildPiSettingsConfig({
 }
 
 export function PiProviderForm({
+  appId,
   providerId,
   submitLabel,
   onSubmit,
@@ -394,6 +403,8 @@ export function PiProviderForm({
 }: ProviderFormProps) {
   const { t } = useTranslation();
   const isDarkMode = useDarkMode();
+  const isOmp = appId === "omp";
+  const apiFormats = isOmp ? OMP_API_FORMATS : PI_API_FORMATS;
   const initialConfig = useMemo(
     () => asObject(initialData?.settingsConfig),
     [initialData?.settingsConfig],
@@ -1154,6 +1165,7 @@ export function PiProviderForm({
             )
           : undefined;
         if (
+          !isOmp &&
           model.hasThinkingLevelMap &&
           !isPiThinkingLevelMap(model.thinkingLevelMap)
         ) {
@@ -1206,7 +1218,7 @@ export function PiProviderForm({
             : {}),
           ...(contextWindow !== undefined ? { contextWindow } : {}),
           ...(maxTokens !== undefined ? { maxTokens } : {}),
-          ...(model.hasThinkingLevelMap
+          ...(!isOmp && model.hasThinkingLevelMap
             ? { thinkingLevelMap: model.thinkingLevelMap }
             : {}),
         };
@@ -1243,7 +1255,7 @@ export function PiProviderForm({
         websiteUrl: identity.websiteUrl?.trim() ?? "",
         notes: identity.notes?.trim() ?? "",
         settingsConfig: JSON.stringify(settingsConfig),
-        icon: identity.icon || selectedPreset?.icon || "pi",
+        icon: identity.icon || selectedPreset?.icon || (isOmp ? "omp" : "pi"),
         iconColor: identity.iconColor || selectedPreset?.iconColor || "",
         providerKey: isEdit ? providerId : trimmedKey,
         presetId: selectedPresetId ?? undefined,
@@ -1298,9 +1310,7 @@ export function PiProviderForm({
     }),
     [t],
   );
-  const isKnownApiFormat = PI_API_FORMATS.some(
-    (format) => format.value === api,
-  );
+  const isKnownApiFormat = apiFormats.some((format) => format.value === api);
 
   return (
     <Form {...form}>
@@ -1398,7 +1408,7 @@ export function PiProviderForm({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {PI_API_FORMATS.map((format) => (
+                  {apiFormats.map((format) => (
                     <SelectItem key={format.value} value={format.value}>
                       {format.label}
                     </SelectItem>
@@ -1715,7 +1725,7 @@ export function PiProviderForm({
                                 placeholder="16384"
                               />
                             </Field>
-                            {model.reasoning === true && (
+                            {!isOmp && model.reasoning === true && (
                               <div
                                 id={`pi-model-thinking-levels-${model.key}`}
                                 tabIndex={-1}

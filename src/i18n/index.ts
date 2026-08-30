@@ -61,18 +61,56 @@ const getInitialLanguage = (): Language => {
   return DEFAULT_LANGUAGE;
 };
 
+export function withOmpAliases<T>(value: T): T {
+  const visit = (current: unknown, ompAlias: boolean): unknown => {
+    if (typeof current === "string") {
+      return ompAlias ? current.split("Pi").join("OMP") : current;
+    }
+    if (Array.isArray(current)) {
+      return current.map((child) => visit(child, ompAlias));
+    }
+    if (!current || typeof current !== "object") {
+      return current;
+    }
+
+    const source = current as Record<string, unknown>;
+    const result = Object.fromEntries(
+      Object.entries(source).map(([key, child]) => [
+        key,
+        visit(child, ompAlias),
+      ]),
+    ) as Record<string, unknown>;
+    for (const [key, child] of Object.entries(source)) {
+      const alias =
+        key === "pi"
+          ? "omp"
+          : /^pi[A-Z]/.test(key)
+            ? `omp${key.slice(2)}`
+            : key.includes("Pi")
+              ? key.split("Pi").join("Omp")
+              : undefined;
+      if (alias && !(alias in source)) {
+        result[alias] = visit(child, true);
+      }
+    }
+    return result;
+  };
+
+  return visit(value, false) as T;
+}
+
 const resources = {
   en: {
-    translation: en,
+    translation: withOmpAliases(en),
   },
   ja: {
-    translation: ja,
+    translation: withOmpAliases(ja),
   },
   zh: {
-    translation: zh,
+    translation: withOmpAliases(zh),
   },
   "zh-TW": {
-    translation: zhTW,
+    translation: withOmpAliases(zhTW),
   },
 };
 

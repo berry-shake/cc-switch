@@ -3,6 +3,7 @@ import en from "@/i18n/locales/en.json";
 import ja from "@/i18n/locales/ja.json";
 import zhTW from "@/i18n/locales/zh-TW.json";
 import zh from "@/i18n/locales/zh.json";
+import { withOmpAliases } from "@/i18n";
 
 type TranslationTree = Record<string, unknown>;
 
@@ -89,6 +90,24 @@ describe("locale coverage", () => {
       });
 
       expect(missingMentions).toEqual([]);
+    },
+  );
+
+  it.each([["en", en], ...locales] as const)(
+    "keeps Pi labels while generating OMP aliases in %s",
+    (_name, tree) => {
+      const translations = withOmpAliases(tree) as typeof en & {
+        apps: { omp: string };
+        omp: typeof en.pi;
+        confirm: typeof en.confirm & { ompDefaultProviderWarning: string };
+      };
+
+      expect(translations.apps.pi).toBe("Pi");
+      expect(translations.apps.omp).toBe("OMP");
+      expect(translations.pi.provider.enabled).toContain("Pi");
+      expect(translations.omp.provider.enabled).toContain("OMP");
+      expect(translations.confirm.piDefaultProviderWarning).toContain("Pi");
+      expect(translations.confirm.ompDefaultProviderWarning).toContain("OMP");
     },
   );
 });

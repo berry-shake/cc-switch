@@ -18,6 +18,7 @@ export type PiPromptTab = "global" | "system" | "templates";
 export type PromptPrimaryAction = "prompt" | "template" | null;
 
 interface PiPromptPanelProps {
+  appId: "pi" | "omp";
   open: boolean;
   onInteractionBlockedChange?: (blocked: boolean) => void;
   onNavigationBlockedChange?: (blocked: boolean) => void;
@@ -37,6 +38,7 @@ const actionForTab = (tab: PiPromptTab): PromptPrimaryAction => {
 const PiPromptPanel = React.forwardRef<PiPromptPanelHandle, PiPromptPanelProps>(
   (
     {
+      appId,
       open,
       onInteractionBlockedChange,
       onNavigationBlockedChange,
@@ -61,7 +63,7 @@ const PiPromptPanel = React.forwardRef<PiPromptPanelHandle, PiPromptPanelProps>(
       savePrompt,
       deletePrompt,
       toggleEnabled,
-    } = usePromptActions("pi");
+    } = usePromptActions(appId);
     const dialogOpen = deletingPrompt !== null;
     const writePending = Boolean(togglingId);
     const interactionBlocked =
@@ -95,7 +97,7 @@ const PiPromptPanel = React.forwardRef<PiPromptPanelHandle, PiPromptPanelProps>(
     useEffect(() => {
       const handlePromptImported = (event: Event) => {
         const customEvent = event as CustomEvent;
-        if (customEvent.detail?.app === "pi") {
+        if (customEvent.detail?.app === appId) {
           void reload();
         }
       };
@@ -103,7 +105,7 @@ const PiPromptPanel = React.forwardRef<PiPromptPanelHandle, PiPromptPanelProps>(
       window.addEventListener("prompt-imported", handlePromptImported);
       return () =>
         window.removeEventListener("prompt-imported", handlePromptImported);
-    }, [reload]);
+    }, [appId, reload]);
 
     useTauriEvent("profile-applied", () => {
       void reload();
@@ -152,13 +154,13 @@ const PiPromptPanel = React.forwardRef<PiPromptPanelHandle, PiPromptPanelProps>(
           <div className="flex shrink-0 py-4">
             <TabsList className="self-start">
               <TabsTrigger value="global">
-                {t("pi.prompts.globalTab")}
+                {t(`${appId}.prompts.globalTab`)}
               </TabsTrigger>
               <TabsTrigger value="system">
-                {t("pi.prompts.systemTab")}
+                {t(`${appId}.prompts.systemTab`)}
               </TabsTrigger>
               <TabsTrigger value="templates">
-                {t("pi.prompts.templatesTab")}
+                {t(`${appId}.prompts.templatesTab`)}
               </TabsTrigger>
             </TabsList>
           </div>
@@ -175,7 +177,7 @@ const PiPromptPanel = React.forwardRef<PiPromptPanelHandle, PiPromptPanelProps>(
                 activePrompt
                   ? t("prompts.enabledName", { name: activePrompt[1].name })
                   : hasExternalPrompt
-                    ? t("pi.prompts.externalAgents")
+                    ? t(`${appId}.prompts.externalAgents`)
                     : t("prompts.noneEnabled")
               }
               disabled={interactionBlocked}
@@ -191,7 +193,7 @@ const PiPromptPanel = React.forwardRef<PiPromptPanelHandle, PiPromptPanelProps>(
               isDeleteDisabled={(_id, prompt) => prompt.enabled}
               getDeleteTitle={(_id, prompt) =>
                 prompt.enabled
-                  ? t("pi.prompts.stopBeforeDelete")
+                  ? t(`${appId}.prompts.stopBeforeDelete`)
                   : t("common.delete")
               }
             />
@@ -203,19 +205,19 @@ const PiPromptPanel = React.forwardRef<PiPromptPanelHandle, PiPromptPanelProps>(
           >
             <ScrollArea className="-mr-3 h-full" type="auto">
               <div className="pb-16 pr-3">
-                <PiSystemPromptFiles />
+                <PiSystemPromptFiles appId={appId} />
               </div>
             </ScrollArea>
           </TabsContent>
 
           <TabsContent value="templates" className="m-0 min-h-0 min-w-0 flex-1">
-            <PiPromptTemplates ref={templatesRef} />
+            <PiPromptTemplates ref={templatesRef} appId={appId} />
           </TabsContent>
         </Tabs>
 
         {isFormOpen && (
           <PromptFormPanel
-            appId="pi"
+            appId={appId}
             editingId={editingId ?? undefined}
             initialData={editingId ? prompts[editingId] : undefined}
             onSave={savePrompt}

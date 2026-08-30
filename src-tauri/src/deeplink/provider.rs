@@ -152,10 +152,11 @@ pub(crate) fn build_provider_from_request(
         AppType::OpenCode => build_opencode_settings(request),
         AppType::OpenClaw => build_additive_app_settings(request),
         AppType::Hermes => build_hermes_settings(request),
-        AppType::Pi => {
-            return Err(AppError::InvalidInput(
-                "Pi providers must be added from the Pi provider page".to_string(),
-            ));
+        AppType::Pi | AppType::Omp => {
+            return Err(AppError::InvalidInput(format!(
+                "{} providers must be added from the native provider page",
+                app_type.as_str()
+            )));
         }
     };
 

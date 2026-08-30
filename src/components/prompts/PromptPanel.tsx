@@ -311,10 +311,11 @@ StandardPromptPanel.displayName = "StandardPromptPanel";
 
 const PromptPanel = React.forwardRef<PromptPanelHandle, PromptPanelProps>(
   (props, ref) => {
-    if (props.appId === "pi") {
+    if (props.appId === "pi" || props.appId === "omp") {
       return (
         <PiPromptPanel
           ref={ref}
+          appId={props.appId}
           open={props.open}
           onInteractionBlockedChange={props.onInteractionBlockedChange}
           onNavigationBlockedChange={props.onNavigationBlockedChange}

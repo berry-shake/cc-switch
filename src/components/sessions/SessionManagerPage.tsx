@@ -25,11 +25,12 @@ import {
 } from "lucide-react";
 import {
   piKeys,
+  ompKeys,
   useDeleteSessionMutation,
   useSessionMessagesQuery,
   useSessionsQuery,
 } from "@/lib/query";
-import { piApi, sessionsApi } from "@/lib/api";
+import { ompApi, piApi, sessionsApi } from "@/lib/api";
 import type { SessionMeta } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -91,7 +92,8 @@ type ProviderFilter =
   | "openclaw"
   | "gemini"
   | "hermes"
-  | "pi";
+  | "pi"
+  | "omp";
 
 type SessionListViewMode = "flat" | "grouped";
 
@@ -200,6 +202,16 @@ export function SessionManagerPage({ appId }: { appId: string }) {
     enabled: appId === "pi",
     staleTime: 30 * 1000,
   });
+  const ompSessionDiscovery = useQuery({
+    queryKey: ompKeys.sessionDiscovery,
+    queryFn: () => ompApi.getSessionDiscovery(),
+    enabled: appId === "omp",
+    staleTime: 30 * 1000,
+  });
+  const isNativeSessionApp = appId === "pi" || appId === "omp";
+  const nativeSessionDiscovery =
+    appId === "omp" ? ompSessionDiscovery : piSessionDiscovery;
+  const nativeSessionAppName = appId === "omp" ? "OMP" : "Pi";
   const detailRef = useRef<HTMLDivElement | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const [activeMessageIndex, setActiveMessageIndex] = useState<number | null>(
@@ -807,22 +819,25 @@ export function SessionManagerPage({ appId }: { appId: string }) {
         onWheel={(e) => e.stopPropagation()}
       >
         <div className="flex-1 overflow-hidden flex flex-col gap-4">
-          {appId === "pi" &&
-            piSessionDiscovery.data?.status === "requires_project_context" && (
+          {isNativeSessionApp &&
+            nativeSessionDiscovery.data?.status ===
+              "requires_project_context" && (
               <div
                 role="status"
                 className="flex shrink-0 items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-800 dark:text-amber-200"
               >
                 <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
                 <span>
-                  {t("sessionManager.piRelativeSessionDir")}{" "}
-                  <code>{piSessionDiscovery.data.configuredPath}</code>
+                  {t("sessionManager.piRelativeSessionDir")
+                    .split("Pi")
+                    .join(nativeSessionAppName)}{" "}
+                  <code>{nativeSessionDiscovery.data.configuredPath}</code>
                 </span>
               </div>
             )}
-          {appId === "pi" &&
-            (piSessionDiscovery.data?.status === "unavailable" ||
-              piSessionDiscovery.isError) && (
+          {isNativeSessionApp &&
+            (nativeSessionDiscovery.data?.status === "unavailable" ||
+              nativeSessionDiscovery.isError) && (
               <div
                 role="alert"
                 className="flex shrink-0 items-start gap-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-800 dark:text-red-200"
@@ -831,10 +846,12 @@ export function SessionManagerPage({ appId }: { appId: string }) {
                 <span>
                   {t("sessionManager.piDiscoveryUnavailable", {
                     error:
-                      piSessionDiscovery.data?.status === "unavailable"
-                        ? piSessionDiscovery.data.reason
-                        : extractErrorMessage(piSessionDiscovery.error),
-                  })}
+                      nativeSessionDiscovery.data?.status === "unavailable"
+                        ? nativeSessionDiscovery.data.reason
+                        : extractErrorMessage(nativeSessionDiscovery.error),
+                  })
+                    .split("Pi")
+                    .join(nativeSessionAppName)}
                 </span>
               </div>
             )}
@@ -1176,6 +1193,12 @@ export function SessionManagerPage({ appId }: { appId: string }) {
                               <div className="flex items-center gap-2">
                                 <ProviderIcon icon="pi" name="pi" size={14} />
                                 <span>Pi</span>
+                              </div>
+                            </SelectItem>
+                            <SelectItem value="omp">
+                              <div className="flex items-center gap-2">
+                                <ProviderIcon icon="omp" name="omp" size={14} />
+                                <span>OMP</span>
                               </div>
                             </SelectItem>
                           </SelectContent>

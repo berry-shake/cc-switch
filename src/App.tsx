@@ -35,6 +35,7 @@ import { proxyKeys, useProvidersQuery, useSettingsQuery } from "@/lib/query";
 import { resetCodexSubscriptionQueries } from "@/lib/query/subscription";
 import {
   piApi,
+  ompApi,
   providersApi,
   settingsApi,
   type AppId,
@@ -102,6 +103,10 @@ import {
   useDisableCurrentOmoSlim,
 } from "@/lib/query/omo";
 import { invalidatePiProviderCaches, usePiCurrentState } from "@/lib/query/pi";
+import {
+  invalidateOmpProviderCaches,
+  useOmpCurrentState,
+} from "@/lib/query/omp";
 import WorkspaceFilesPanel from "@/components/workspace/WorkspaceFilesPanel";
 import EnvPanel from "@/components/openclaw/EnvPanel";
 import ToolsPanel from "@/components/openclaw/ToolsPanel";
@@ -240,7 +245,8 @@ function App() {
       sharedFeatureApp !== "openclaw" &&
       sharedFeatureApp !== "gemini" &&
       sharedFeatureApp !== "hermes" &&
-      sharedFeatureApp !== "pi"
+      sharedFeatureApp !== "pi" &&
+      sharedFeatureApp !== "omp"
     ) {
       setCurrentView("providers");
     }
@@ -296,6 +302,10 @@ function App() {
     isProxyRunning: currentAppUsesProxy && isProxyRunning,
   });
   const { data: piCurrentState } = usePiCurrentState(activeApp === "pi");
+  const { data: ompCurrentState } = useOmpCurrentState(activeApp === "omp");
+  const isNativeModelApp = activeApp === "pi" || activeApp === "omp";
+  const nativeCurrentState =
+    activeApp === "omp" ? ompCurrentState : piCurrentState;
   const providers = useMemo(() => data?.providers ?? {}, [data]);
   const currentProviderId = data?.currentProviderId ?? "";
   const isOpenClawView =
@@ -317,7 +327,8 @@ function App() {
     sharedFeatureApp === "openclaw" ||
     sharedFeatureApp === "gemini" ||
     sharedFeatureApp === "hermes" ||
-    sharedFeatureApp === "pi";
+    sharedFeatureApp === "pi" ||
+    sharedFeatureApp === "omp";
   const hasMcpSupport = sharedFeatureApp !== "pi";
 
   const {
@@ -332,34 +343,29 @@ function App() {
     currentAppUsesProxy && isProxyRunning,
     isProxyRunning && isCurrentAppTakeoverActive,
   );
-  const handleEnablePiProvider = async (provider: Provider) => {
+  const handleEnableNativeProvider = async (provider: Provider) => {
+    const appName = activeApp === "omp" ? "OMP" : "Pi";
     try {
-      await providersApi.switch(provider.id, "pi");
-      await invalidatePiProviderCaches(queryClient);
+      await providersApi.switch(provider.id, activeApp);
+      if (activeApp === "omp") {
+        await invalidateOmpProviderCaches(queryClient);
+      } else {
+        await invalidatePiProviderCaches(queryClient);
+      }
       await providersApi.updateTrayMenu().catch((error) => {
         console.error(
-          "Failed to update tray menu after enabling Pi provider",
+          `Failed to update tray menu after enabling ${appName} provider`,
           error,
         );
       });
-      toast.success(
-        t("pi.provider.enabled", {
-          defaultValue: "已在 Pi 中启用",
-        }),
-        { closeButton: true },
-      );
+      toast.success(`已在 ${appName} 中启用`, { closeButton: true });
     } catch (error) {
       const detail = extractErrorMessage(error);
-      toast.error(
-        t("pi.provider.enableFailed", {
-          defaultValue: "无法在 Pi 中启用此供应商",
-        }),
-        {
-          description:
-            translatePiProviderMutationError(detail, t) || detail || undefined,
-          closeButton: true,
-        },
-      );
+      toast.error(`无法在 ${appName} 中启用此供应商`, {
+        description:
+          translatePiProviderMutationError(detail, t) || detail || undefined,
+        closeButton: true,
+      });
     }
   };
 
@@ -413,6 +419,9 @@ function App() {
             }
             if (event.appType === "pi") {
               await invalidatePiProviderCaches(queryClient);
+            }
+            if (event.appType === "omp") {
+              await invalidateOmpProviderCaches(queryClient);
             }
           },
         );
@@ -730,12 +739,13 @@ function App() {
         await providersApi.removeFromLiveConfig(provider.id, activeApp);
       } catch (error) {
         const detail = extractErrorMessage(error);
-        const description =
-          activeApp === "pi"
-            ? translatePiProviderMutationError(detail, t) || detail
-            : detail;
+        const description = isNativeModelApp
+          ? translatePiProviderMutationError(detail, t) || detail
+          : detail;
         if (activeApp === "pi") {
           void invalidatePiProviderCaches(queryClient).catch(() => undefined);
+        } else if (activeApp === "omp") {
+          void invalidateOmpProviderCaches(queryClient).catch(() => undefined);
         }
         toast.error(t("notifications.removeFromConfigFailed"), {
           description: description || t("common.unknown"),
@@ -745,6 +755,8 @@ function App() {
       }
       if (activeApp === "pi") {
         await invalidatePiProviderCaches(queryClient);
+      } else if (activeApp === "omp") {
+        await invalidateOmpProviderCaches(queryClient);
       }
       // Invalidate queries to refresh the isInConfig state
       if (activeApp === "opencode") {
@@ -764,10 +776,8 @@ function App() {
         });
       }
       toast.success(
-        activeApp === "pi"
-          ? t("pi.provider.removed", {
-              defaultValue: "已从 Pi 移除",
-            })
+        isNativeModelApp
+          ? `已从 ${activeApp === "omp" ? "OMP" : "Pi"} 移除`
           : t("notifications.removeFromConfigSuccess", {
               defaultValue: "已从配置移除",
             }),
@@ -818,7 +828,8 @@ function App() {
       activeApp === "opencode" ||
       activeApp === "openclaw" ||
       activeApp === "hermes" ||
-      activeApp === "pi"
+      activeApp === "pi" ||
+      activeApp === "omp"
     ) {
       let liveProviderIds: string[] = [];
       try {
@@ -838,12 +849,19 @@ function App() {
                     queryKey: hermesKeys.liveProviderIds,
                     queryFn: () => providersApi.getHermesLiveProviderIds(),
                   })
-                : (
-                    await queryClient.ensureQueryData({
-                      queryKey: ["pi", "currentState"],
-                      queryFn: () => piApi.getCurrentState(),
-                    })
-                  ).enabledProviderIds;
+                : activeApp === "omp"
+                  ? (
+                      await queryClient.ensureQueryData({
+                        queryKey: ["omp", "currentState"],
+                        queryFn: () => ompApi.getCurrentState(),
+                      })
+                    ).enabledProviderIds
+                  : (
+                      await queryClient.ensureQueryData({
+                        queryKey: ["pi", "currentState"],
+                        queryFn: () => piApi.getCurrentState(),
+                      })
+                    ).enabledProviderIds;
       } catch (error) {
         console.error(
           "[App] Failed to load live provider IDs for duplication",
@@ -909,14 +927,23 @@ function App() {
         : t("confirm.deleteProviderMessage", {
             name: confirmAction.provider.name,
           });
-    const isPiGlobalDefault =
-      activeApp === "pi" &&
-      piCurrentState?.defaultProviderId === confirmAction.provider.id;
+    const isNativeGlobalDefault =
+      isNativeModelApp &&
+      nativeCurrentState?.defaultProviderId === confirmAction.provider.id;
 
-    return isPiGlobalDefault
-      ? `${message}\n\n${t("confirm.piDefaultProviderWarning")}`
+    return isNativeGlobalDefault
+      ? `${message}\n\n${t(
+          `confirm.${activeApp}DefaultProviderWarning`,
+          t("confirm.piDefaultProviderWarning"),
+        )}`
       : message;
-  }, [activeApp, confirmAction, piCurrentState?.defaultProviderId, t]);
+  }, [
+    activeApp,
+    confirmAction,
+    isNativeModelApp,
+    nativeCurrentState?.defaultProviderId,
+    t,
+  ]);
 
   const handleOpenTerminal = async (provider: Provider) => {
     try {
@@ -1115,8 +1142,8 @@ function App() {
                       }
                       activeProviderId={activeProviderId}
                       onSwitch={
-                        activeApp === "pi"
-                          ? handleEnablePiProvider
+                        isNativeModelApp
+                          ? handleEnableNativeProvider
                           : switchProvider
                       }
                       onEdit={(provider) => {
@@ -1129,7 +1156,8 @@ function App() {
                         activeApp === "opencode" ||
                         activeApp === "openclaw" ||
                         activeApp === "hermes" ||
-                        activeApp === "pi"
+                        activeApp === "pi" ||
+                        activeApp === "omp"
                           ? (provider) =>
                               setConfirmAction({ provider, action: "remove" })
                           : undefined
@@ -1428,8 +1456,8 @@ function App() {
                   >
                     <Plus className="w-4 h-4 mr-2" />
                     {t(
-                      promptPrimaryAction === "template"
-                        ? "pi.prompts.newTemplate"
+                      promptPrimaryAction === "template" && sharedFeatureApp
+                        ? `${sharedFeatureApp}.prompts.newTemplate`
                         : "prompts.add",
                     )}
                   </Button>

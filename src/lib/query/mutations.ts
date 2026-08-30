@@ -16,6 +16,7 @@ import { proxyKeys } from "@/lib/query/proxy";
 import { usageKeys } from "@/lib/query/usage";
 import { resetCodexSubscriptionQueries } from "@/lib/query/subscription";
 import { invalidatePiProviderCaches } from "@/lib/query/pi";
+import { invalidateOmpProviderCaches } from "@/lib/query/omp";
 import { GROKBUILD_OFFICIAL_PROVIDER_ID } from "@/utils/providerCapabilities";
 
 export const useAddProviderMutation = (appId: AppId) => {
@@ -65,7 +66,8 @@ export const useAddProviderMutation = (appId: AppId) => {
         appId === "opencode" ||
         appId === "openclaw" ||
         appId === "hermes" ||
-        appId === "pi"
+        appId === "pi" ||
+        appId === "omp"
       ) {
         if (
           providerInput.category === "omo" ||
@@ -145,7 +147,7 @@ export const useAddProviderMutation = (appId: AppId) => {
     onError: (error: Error) => {
       const rawDetail = extractErrorMessage(error);
       const detail =
-        (appId === "pi"
+        (appId === "pi" || appId === "omp"
           ? translatePiProviderMutationError(rawDetail, t)
           : "") ||
         rawDetail ||
@@ -160,6 +162,8 @@ export const useAddProviderMutation = (appId: AppId) => {
     onSettled: async () => {
       if (appId === "pi") {
         await invalidatePiProviderCaches(queryClient);
+      } else if (appId === "omp") {
+        await invalidateOmpProviderCaches(queryClient);
       }
     },
   });
@@ -210,7 +214,7 @@ export const useUpdateProviderMutation = (appId: AppId) => {
     onError: (error: Error) => {
       const rawDetail = extractErrorMessage(error);
       const detail =
-        (appId === "pi"
+        (appId === "pi" || appId === "omp"
           ? translatePiProviderMutationError(rawDetail, t)
           : "") ||
         rawDetail ||
@@ -225,6 +229,8 @@ export const useUpdateProviderMutation = (appId: AppId) => {
     onSettled: async () => {
       if (appId === "pi") {
         await invalidatePiProviderCaches(queryClient);
+      } else if (appId === "omp") {
+        await invalidateOmpProviderCaches(queryClient);
       }
     },
   });
@@ -286,7 +292,7 @@ export const useDeleteProviderMutation = (appId: AppId) => {
     onError: (error: Error) => {
       const rawDetail = extractErrorMessage(error);
       const detail =
-        (appId === "pi"
+        (appId === "pi" || appId === "omp"
           ? translatePiProviderMutationError(rawDetail, t)
           : "") ||
         rawDetail ||
@@ -301,6 +307,8 @@ export const useDeleteProviderMutation = (appId: AppId) => {
     onSettled: async () => {
       if (appId === "pi") {
         await invalidatePiProviderCaches(queryClient);
+      } else if (appId === "omp") {
+        await invalidateOmpProviderCaches(queryClient);
       }
     },
   });
@@ -387,6 +395,8 @@ export const useSwitchProviderMutation = (appId: AppId) => {
     onSettled: async () => {
       if (appId === "pi") {
         await invalidatePiProviderCaches(queryClient);
+      } else if (appId === "omp") {
+        await invalidateOmpProviderCaches(queryClient);
       }
     },
   });

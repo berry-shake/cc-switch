@@ -73,6 +73,7 @@ describe("useDirectorySettings", () => {
       if (app === "opencode") return "/remote/opencode";
       if (app === "openclaw") return "/remote/openclaw";
       if (app === "pi") return "/remote/pi";
+      if (app === "omp") return "/remote/omp";
       return "/remote/hermes";
     });
     selectConfigDirectoryMock.mockReset();
@@ -98,10 +99,11 @@ describe("useDirectorySettings", () => {
       openclaw: "/remote/openclaw",
       hermes: "/remote/hermes",
       pi: "/remote/pi",
+      omp: "/remote/omp",
     });
   });
 
-  it("updates claude directory when browsing succeeds", async () => {
+  it("updates app directory when browsing succeeds", async () => {
     selectConfigDirectoryMock.mockResolvedValue("/picked/claude");
 
     const { result } = renderHook(() =>
@@ -218,6 +220,25 @@ describe("useDirectorySettings", () => {
     expect(result.current.resolvedDirs.claude).toBe("/home/mock/.claude");
     expect(result.current.resolvedDirs.codex).toBe("/home/mock/.codex");
     expect(result.current.resolvedDirs.appConfig).toBe("/home/mock/.cc-switch");
+  });
+
+  it("persists OMP directory overrides independently", async () => {
+    selectConfigDirectoryMock.mockResolvedValue("/picked/omp");
+    const { result } = renderHook(() =>
+      useDirectorySettings({ settings: createSettings(), onUpdateSettings }),
+    );
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    await act(async () => {
+      await result.current.browseDirectory("omp");
+    });
+
+    expect(selectConfigDirectoryMock).toHaveBeenCalledWith("/remote/omp");
+    expect(onUpdateSettings).toHaveBeenCalledWith({
+      ompConfigDir: "/picked/omp",
+    });
+    expect(result.current.resolvedDirs.omp).toBe("/picked/omp");
+    expect(result.current.resolvedDirs.pi).toBe("/remote/pi");
   });
 
   it("updates openclaw directory when browsing succeeds", async () => {

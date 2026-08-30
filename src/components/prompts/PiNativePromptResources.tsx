@@ -36,6 +36,7 @@ import {
   type PiPromptFileKind,
   type PiPromptFileSnapshot,
   type PiPromptTemplate,
+  type NativePromptAppId,
 } from "@/lib/api/prompts";
 import { useDarkMode } from "@/hooks/useDarkMode";
 import {
@@ -72,63 +73,89 @@ const EDITABLE_FILES: Array<{
   },
 ];
 
-const promptFileKey = (kind: EditablePiPromptFileKind) =>
-  ["pi", "promptFile", kind] as const;
+const promptFileKey = (
+  appId: NativePromptAppId,
+  kind: EditablePiPromptFileKind,
+) => [appId, "promptFile", kind] as const;
 
-const promptTemplatesKey = ["pi", "promptTemplates"] as const;
+const promptTemplatesKey = (appId: NativePromptAppId) =>
+  [appId, "promptTemplates"] as const;
 
 function showMutationError(error: unknown, fallback: string) {
   toast.error(extractErrorMessage(error) || fallback);
 }
 
+function useNativePromptTranslation(appId: NativePromptAppId) {
+  const { t } = useTranslation();
+  return (key: string, options?: Record<string, unknown>) =>
+    t(key.replace(/^pi\.prompts/, `${appId}.prompts`), options);
+}
+
 function PiInstructionFileEditor({
+  appId,
   file,
   snapshot,
   onClose,
 }: {
+  appId: NativePromptAppId;
   file: (typeof EDITABLE_FILES)[number];
   snapshot: PiPromptFileSnapshot;
   onClose: () => void;
 }) {
-  const { t } = useTranslation();
+  const t = useNativePromptTranslation(appId);
   const darkMode = useDarkMode();
   const queryClient = useQueryClient();
   const [baseSnapshot] = useState(() => snapshot);
   const [draft, setDraft] = useState(baseSnapshot.content);
   const [confirmCreate, setConfirmCreate] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const queryKey = promptFileKey(file.kind);
+  const queryKey = promptFileKey(appId, file.kind);
 
   const save = useMutation({
     mutationFn: () =>
-      promptsApi.replacePiPromptFile(file.kind, baseSnapshot.revision, draft),
+      promptsApi.replaceNativePromptFile(
+        appId,
+        file.kind,
+        baseSnapshot.revision,
+        draft,
+      ),
     onSuccess: (nextSnapshot) => {
       queryClient.setQueryData<PiPromptFileSnapshot>(queryKey, nextSnapshot);
-      toast.success(t("pi.prompts.fileSaved", { filename: file.filename }), {
-        description: t("pi.prompts.reloadNotice"),
-      });
+      toast.success(
+        t(`${appId}.prompts.fileSaved`, { filename: file.filename }),
+        {
+          description: t(`${appId}.prompts.reloadNotice`),
+        },
+      );
       setConfirmCreate(false);
       onClose();
     },
     onError: async (error) => {
-      showMutationError(error, t("pi.prompts.saveFailed"));
+      showMutationError(error, t(`${appId}.prompts.saveFailed`));
       await queryClient.invalidateQueries({ queryKey });
     },
   });
 
   const remove = useMutation({
     mutationFn: () =>
-      promptsApi.deletePiPromptFile(file.kind, baseSnapshot.revision),
+      promptsApi.deleteNativePromptFile(
+        appId,
+        file.kind,
+        baseSnapshot.revision,
+      ),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey });
-      toast.success(t("pi.prompts.fileRemoved", { filename: file.filename }), {
-        description: t("pi.prompts.reloadNotice"),
-      });
+      toast.success(
+        t(`${appId}.prompts.fileRemoved`, { filename: file.filename }),
+        {
+          description: t(`${appId}.prompts.reloadNotice`),
+        },
+      );
       setConfirmDelete(false);
       onClose();
     },
     onError: async (error) => {
-      showMutationError(error, t("pi.prompts.deleteFailed"));
+      showMutationError(error, t(`${appId}.prompts.deleteFailed`));
       await queryClient.invalidateQueries({ queryKey });
     },
   });
@@ -246,15 +273,17 @@ function PiInstructionFileEditor({
 }
 
 function PiInstructionFileCard({
+  appId,
   file,
 }: {
+  appId: NativePromptAppId;
   file: (typeof EDITABLE_FILES)[number];
 }) {
-  const { t } = useTranslation();
+  const t = useNativePromptTranslation(appId);
   const [editing, setEditing] = useState(false);
   const query = useQuery({
-    queryKey: promptFileKey(file.kind),
-    queryFn: () => promptsApi.getPiPromptFile(file.kind),
+    queryKey: promptFileKey(appId, file.kind),
+    queryFn: () => promptsApi.getNativePromptFile(appId, file.kind),
   });
 
   const status = (() => {
@@ -351,6 +380,7 @@ function PiInstructionFileCard({
 
       {editing && query.data && (
         <PiInstructionFileEditor
+          appId={appId}
           file={file}
           snapshot={query.data}
           onClose={() => setEditing(false)}
@@ -360,8 +390,12 @@ function PiInstructionFileCard({
   );
 }
 
-export function PiSystemPromptFiles() {
-  const { t } = useTranslation();
+export function PiSystemPromptFiles({
+  appId = "pi",
+}: {
+  appId?: NativePromptAppId;
+}) {
+  const t = useNativePromptTranslation(appId);
 
   return (
     <section>
@@ -371,7 +405,7 @@ export function PiSystemPromptFiles() {
 
       <div className="grid grid-cols-1 gap-3">
         {EDITABLE_FILES.map((file) => (
-          <PiInstructionFileCard key={file.kind} file={file} />
+          <PiInstructionFileCard key={file.kind} appId={appId} file={file} />
         ))}
       </div>
     </section>
@@ -379,6 +413,7 @@ export function PiSystemPromptFiles() {
 }
 
 interface PiPromptTemplateEditorProps {
+  appId: NativePromptAppId;
   template?: PiPromptTemplate;
   existingSlugs: Set<string>;
   onClose: () => void;
@@ -386,12 +421,13 @@ interface PiPromptTemplateEditorProps {
 }
 
 function PiPromptTemplateEditor({
+  appId,
   template,
   existingSlugs,
   onClose,
   onChanged,
 }: PiPromptTemplateEditorProps) {
-  const { t } = useTranslation();
+  const t = useNativePromptTranslation(appId);
   const darkMode = useDarkMode();
   const initialDescription = getPiPromptTemplateDescription(
     template?.content ?? "",
@@ -420,7 +456,8 @@ function PiPromptTemplateEditor({
 
   const save = useMutation({
     mutationFn: () =>
-      promptsApi.upsertPiPromptTemplate(
+      promptsApi.upsertNativePromptTemplate(
+        appId,
         normalizedSlug,
         template?.revision ?? "missing",
         serializedContent,
@@ -575,227 +612,241 @@ export interface PiPromptTemplatesHandle {
   openCreate: () => void;
 }
 
-export const PiPromptTemplates = forwardRef<PiPromptTemplatesHandle>(
-  function PiPromptTemplates(_props, ref) {
-    const { t } = useTranslation();
-    const queryClient = useQueryClient();
-    const [search, setSearch] = useState("");
-    const [editor, setEditor] = useState<
-      { mode: "create" } | { mode: "edit"; template: PiPromptTemplate } | null
-    >(null);
-    const [pendingDelete, setPendingDelete] = useState<PiPromptTemplate | null>(
-      null,
-    );
+interface PiPromptTemplatesProps {
+  appId?: NativePromptAppId;
+}
 
-    const templates = useQuery({
-      queryKey: promptTemplatesKey,
-      queryFn: () => promptsApi.listPiPromptTemplates(),
-    });
+export const PiPromptTemplates = forwardRef<
+  PiPromptTemplatesHandle,
+  PiPromptTemplatesProps
+>(function PiPromptTemplates({ appId = "pi" }, ref) {
+  const t = useNativePromptTranslation(appId);
+  const queryClient = useQueryClient();
+  const templatesQueryKey = promptTemplatesKey(appId);
+  const [search, setSearch] = useState("");
+  const [editor, setEditor] = useState<
+    { mode: "create" } | { mode: "edit"; template: PiPromptTemplate } | null
+  >(null);
+  const [pendingDelete, setPendingDelete] = useState<PiPromptTemplate | null>(
+    null,
+  );
 
-    useImperativeHandle(ref, () => ({
-      openCreate: () => setEditor({ mode: "create" }),
-    }));
+  const templates = useQuery({
+    queryKey: templatesQueryKey,
+    queryFn: () => promptsApi.listNativePromptTemplates(appId),
+  });
 
-    const refresh = async () => {
-      await queryClient.invalidateQueries({ queryKey: promptTemplatesKey });
-    };
+  useImperativeHandle(ref, () => ({
+    openCreate: () => setEditor({ mode: "create" }),
+  }));
 
-    const remove = useMutation({
-      mutationFn: (template: PiPromptTemplate) =>
-        promptsApi.deletePiPromptTemplate(template.slug, template.revision),
-      onSuccess: async (_removed, template) => {
-        await refresh();
-        toast.success(
-          t("pi.prompts.templateDeleted", { slug: template.slug }),
-          { description: t("pi.prompts.reloadNotice") },
-        );
-        setPendingDelete(null);
-      },
-      onError: (error) =>
-        showMutationError(error, t("pi.prompts.templateDeleteFailed")),
-    });
+  const refresh = async () => {
+    await queryClient.invalidateQueries({ queryKey: templatesQueryKey });
+  };
 
-    const filteredTemplates = useMemo(() => {
-      const query = search.trim().toLocaleLowerCase();
-      if (!query) return templates.data ?? [];
-      return (templates.data ?? []).filter((template) => {
-        const summary = getPiPromptTemplateSummary(template.content);
-        return (
-          template.slug.toLocaleLowerCase().includes(query) ||
-          summary.description?.toLocaleLowerCase().includes(query) ||
-          summary.argumentHint?.toLocaleLowerCase().includes(query) ||
-          template.content.toLocaleLowerCase().includes(query)
-        );
+  const remove = useMutation({
+    mutationFn: (template: PiPromptTemplate) =>
+      promptsApi.deleteNativePromptTemplate(
+        appId,
+        template.slug,
+        template.revision,
+      ),
+    onSuccess: async (_removed, template) => {
+      await refresh();
+      toast.success(t("pi.prompts.templateDeleted", { slug: template.slug }), {
+        description: t("pi.prompts.reloadNotice"),
       });
-    }, [search, templates.data]);
+      setPendingDelete(null);
+    },
+    onError: (error) =>
+      showMutationError(error, t("pi.prompts.templateDeleteFailed")),
+  });
 
-    const existingSlugs = useMemo(
-      () => new Set((templates.data ?? []).map((template) => template.slug)),
-      [templates.data],
-    );
+  const filteredTemplates = useMemo(() => {
+    const query = search.trim().toLocaleLowerCase();
+    if (!query) return templates.data ?? [];
+    return (templates.data ?? []).filter((template) => {
+      const summary = getPiPromptTemplateSummary(template.content);
+      return (
+        template.slug.toLocaleLowerCase().includes(query) ||
+        summary.description?.toLocaleLowerCase().includes(query) ||
+        summary.argumentHint?.toLocaleLowerCase().includes(query) ||
+        template.content.toLocaleLowerCase().includes(query)
+      );
+    });
+  }, [search, templates.data]);
 
-    return (
-      <section className="flex h-full min-h-0 flex-col">
-        <p className="mb-4 max-w-3xl shrink-0 text-xs leading-relaxed text-muted-foreground">
-          {t("pi.prompts.templatesDescription")}
-        </p>
+  const existingSlugs = useMemo(
+    () => new Set((templates.data ?? []).map((template) => template.slug)),
+    [templates.data],
+  );
 
-        {!templates.isLoading && !templates.isError && (
-          <ManagementListSearch
-            value={search}
-            onValueChange={setSearch}
-            placeholder={t("pi.prompts.searchTemplates")}
-            ariaLabel={t("pi.prompts.searchTemplates")}
-            clearLabel={t("common.clear")}
-          />
-        )}
+  return (
+    <section className="flex h-full min-h-0 flex-col">
+      <p className="mb-4 max-w-3xl shrink-0 text-xs leading-relaxed text-muted-foreground">
+        {t("pi.prompts.templatesDescription")}
+      </p>
 
-        <ScrollArea className="-mr-3 min-h-0 flex-1" type="auto">
-          <div className="pb-16 pr-3">
-            {templates.isLoading ? (
-              <div className="flex min-h-48 items-center justify-center gap-2 text-sm text-muted-foreground">
-                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-                {t("common.loading")}
-              </div>
-            ) : templates.isError ? (
-              <div className="flex min-h-48 flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-destructive/30 px-6 text-center">
-                <AlertTriangle
-                  className="h-8 w-8 text-destructive/70"
+      {!templates.isLoading && !templates.isError && (
+        <ManagementListSearch
+          value={search}
+          onValueChange={setSearch}
+          placeholder={t("pi.prompts.searchTemplates")}
+          ariaLabel={t("pi.prompts.searchTemplates")}
+          clearLabel={t("common.clear")}
+        />
+      )}
+
+      <ScrollArea className="-mr-3 min-h-0 flex-1" type="auto">
+        <div className="pb-16 pr-3">
+          {templates.isLoading ? (
+            <div className="flex min-h-48 items-center justify-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+              {t("common.loading")}
+            </div>
+          ) : templates.isError ? (
+            <div className="flex min-h-48 flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-destructive/30 px-6 text-center">
+              <AlertTriangle
+                className="h-8 w-8 text-destructive/70"
+                aria-hidden="true"
+              />
+              <p className="text-sm text-muted-foreground">
+                {t("pi.prompts.templateLoadFailed")}
+              </p>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => void templates.refetch()}
+              >
+                <RefreshCw className="h-4 w-4" aria-hidden="true" />
+                {t("common.refresh")}
+              </Button>
+            </div>
+          ) : (templates.data ?? []).length === 0 ? (
+            <div className="flex min-h-52 flex-col items-center justify-center rounded-xl border border-dashed px-6 text-center">
+              <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-muted">
+                <SquareTerminal
+                  className="h-5 w-5 text-muted-foreground"
                   aria-hidden="true"
                 />
-                <p className="text-sm text-muted-foreground">
-                  {t("pi.prompts.templateLoadFailed")}
-                </p>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => void templates.refetch()}
-                >
-                  <RefreshCw className="h-4 w-4" aria-hidden="true" />
-                  {t("common.refresh")}
-                </Button>
               </div>
-            ) : (templates.data ?? []).length === 0 ? (
-              <div className="flex min-h-52 flex-col items-center justify-center rounded-xl border border-dashed px-6 text-center">
-                <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-muted">
-                  <SquareTerminal
-                    className="h-5 w-5 text-muted-foreground"
-                    aria-hidden="true"
-                  />
-                </div>
-                <h4 className="text-sm font-medium">
-                  {t("pi.prompts.noTemplates")}
-                </h4>
-                <p className="mt-1 max-w-sm text-xs leading-relaxed text-muted-foreground">
-                  {t("pi.prompts.noTemplatesDescription")}
-                </p>
-              </div>
-            ) : filteredTemplates.length === 0 ? (
-              <div className="flex min-h-40 flex-col items-center justify-center rounded-xl border border-dashed px-6 text-center">
-                <Search
-                  className="mb-3 h-8 w-8 text-muted-foreground/50"
-                  aria-hidden="true"
-                />
-                <p className="text-sm text-muted-foreground">
-                  {t("pi.prompts.noTemplateResults")}
-                </p>
-              </div>
-            ) : (
-              <div className="overflow-hidden rounded-xl border border-border bg-card">
-                {filteredTemplates.map((template, index) => {
-                  const summary = getPiPromptTemplateSummary(template.content);
-                  return (
-                    <ListItemRow
-                      key={template.slug}
-                      isLast={index === filteredTemplates.length - 1}
+              <h4 className="text-sm font-medium">
+                {t("pi.prompts.noTemplates")}
+              </h4>
+              <p className="mt-1 max-w-sm text-xs leading-relaxed text-muted-foreground">
+                {t("pi.prompts.noTemplatesDescription")}
+              </p>
+            </div>
+          ) : filteredTemplates.length === 0 ? (
+            <div className="flex min-h-40 flex-col items-center justify-center rounded-xl border border-dashed px-6 text-center">
+              <Search
+                className="mb-3 h-8 w-8 text-muted-foreground/50"
+                aria-hidden="true"
+              />
+              <p className="text-sm text-muted-foreground">
+                {t("pi.prompts.noTemplateResults")}
+              </p>
+            </div>
+          ) : (
+            <div className="overflow-hidden rounded-xl border border-border bg-card">
+              {filteredTemplates.map((template, index) => {
+                const summary = getPiPromptTemplateSummary(template.content);
+                return (
+                  <ListItemRow
+                    key={template.slug}
+                    isLast={index === filteredTemplates.length - 1}
+                  >
+                    <button
+                      type="button"
+                      className="flex min-h-11 min-w-0 flex-1 items-center gap-3 rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      onClick={() => setEditor({ mode: "edit", template })}
+                      title={t("common.edit")}
                     >
-                      <button
-                        type="button"
-                        className="flex min-h-11 min-w-0 flex-1 items-center gap-3 rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                        onClick={() => setEditor({ mode: "edit", template })}
-                        title={t("common.edit")}
-                      >
-                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted font-mono text-sm text-muted-foreground">
-                          /
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-2">
-                            <code className="truncate text-sm font-medium text-foreground">
-                              /{template.slug}
+                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted font-mono text-sm text-muted-foreground">
+                        /
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <code className="truncate text-sm font-medium text-foreground">
+                            /{template.slug}
+                          </code>
+                          {summary.argumentHint && (
+                            <code className="hidden truncate text-xs text-muted-foreground sm:block">
+                              {summary.argumentHint}
                             </code>
-                            {summary.argumentHint && (
-                              <code className="hidden truncate text-xs text-muted-foreground sm:block">
-                                {summary.argumentHint}
-                              </code>
-                            )}
-                          </div>
-                          {summary.description && (
-                            <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                              {summary.description}
-                            </p>
                           )}
                         </div>
-                        <Edit3
-                          className="h-4 w-4 shrink-0 text-muted-foreground"
-                          aria-hidden="true"
-                        />
-                      </button>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        className="shrink-0 hover:text-destructive"
-                        onClick={() => setPendingDelete(template)}
-                        title={t("common.delete")}
-                      >
-                        <Trash2 className="h-4 w-4" aria-hidden="true" />
-                      </Button>
-                    </ListItemRow>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        </ScrollArea>
+                        {summary.description && (
+                          <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                            {summary.description}
+                          </p>
+                        )}
+                      </div>
+                      <Edit3
+                        className="h-4 w-4 shrink-0 text-muted-foreground"
+                        aria-hidden="true"
+                      />
+                    </button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="shrink-0 hover:text-destructive"
+                      onClick={() => setPendingDelete(template)}
+                      title={t("common.delete")}
+                    >
+                      <Trash2 className="h-4 w-4" aria-hidden="true" />
+                    </Button>
+                  </ListItemRow>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </ScrollArea>
 
-        {editor && (
-          <PiPromptTemplateEditor
-            template={editor.mode === "edit" ? editor.template : undefined}
-            existingSlugs={existingSlugs}
-            onClose={() => setEditor(null)}
-            onChanged={refresh}
-          />
-        )}
-
-        <ConfirmDialog
-          isOpen={Boolean(pendingDelete)}
-          title={t("pi.prompts.deleteTemplateTitle", {
-            slug: pendingDelete?.slug,
-          })}
-          message={t("pi.prompts.deleteTemplateMessage", {
-            slug: pendingDelete?.slug,
-          })}
-          confirmText={t("common.delete")}
-          onConfirm={() => {
-            if (pendingDelete) remove.mutate(pendingDelete);
-          }}
-          onCancel={() => setPendingDelete(null)}
+      {editor && (
+        <PiPromptTemplateEditor
+          appId={appId}
+          template={editor.mode === "edit" ? editor.template : undefined}
+          existingSlugs={existingSlugs}
+          onClose={() => setEditor(null)}
+          onChanged={refresh}
         />
-      </section>
-    );
-  },
-);
+      )}
+
+      <ConfirmDialog
+        isOpen={Boolean(pendingDelete)}
+        title={t("pi.prompts.deleteTemplateTitle", {
+          slug: pendingDelete?.slug,
+        })}
+        message={t("pi.prompts.deleteTemplateMessage", {
+          slug: pendingDelete?.slug,
+        })}
+        confirmText={t("common.delete")}
+        onConfirm={() => {
+          if (pendingDelete) remove.mutate(pendingDelete);
+        }}
+        onCancel={() => setPendingDelete(null)}
+      />
+    </section>
+  );
+});
 
 /**
  * Kept as a compatibility export for callers that render the native resources
  * directly. The Pi page itself places these sections in separate tabs.
  */
-export function PiNativePromptResources() {
+export function PiNativePromptResources({
+  appId = "pi",
+}: {
+  appId?: NativePromptAppId;
+}) {
   return (
     <div className="space-y-6">
-      <PiSystemPromptFiles />
-      <PiPromptTemplates />
+      <PiSystemPromptFiles appId={appId} />
+      <PiPromptTemplates appId={appId} />
     </div>
   );
 }

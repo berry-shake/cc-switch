@@ -227,6 +227,64 @@ pub fn scan_sessions() -> Vec<SessionMeta> {
     }
 }
 
+pub(super) fn project_session_files(root: &Path) -> Vec<PathBuf> {
+    let mut files = Vec::new();
+    collect_jsonl_files(root, SessionLayout::ProjectDirectories, &mut files, false);
+    files.sort();
+    files
+}
+
+pub(super) fn scan_project_sessions(
+    root: &Path,
+    provider_id: &str,
+    resume_binary: &str,
+    app_name: &str,
+) -> Vec<SessionMeta> {
+    let mut files = Vec::new();
+    collect_jsonl_files(root, SessionLayout::ProjectDirectories, &mut files, true);
+    files
+        .into_iter()
+        .filter_map(|path| match parse_session(&path) {
+            Ok(mut session) => {
+                session.provider_id = provider_id.to_string();
+                if let Some(source_path) = session.source_path.as_deref() {
+                    session.resume_command = Some(format!(
+                        "{resume_binary} --session {}",
+                        crate::session_manager::terminal::shell_escape(source_path)
+                    ));
+                }
+                Some(session)
+            }
+            Err(error) => {
+                log::debug!(
+                    "Skipping invalid {app_name} session {}: {error}",
+                    path.display()
+                );
+                None
+            }
+        })
+        .collect()
+}
+
+pub(super) fn load_project_messages(
+    root: &Path,
+    path: &Path,
+    app_name: &str,
+) -> Result<Vec<SessionMessage>, String> {
+    load_messages_with_layout(root, path, SessionLayout::ProjectDirectories)
+        .map_err(|error| error.replace("Pi", app_name))
+}
+
+pub(super) fn delete_project_session(
+    root: &Path,
+    path: &Path,
+    session_id: &str,
+    app_name: &str,
+) -> Result<bool, String> {
+    delete_session_with_layout(root, path, session_id, SessionLayout::ProjectDirectories)
+        .map_err(|error| error.replace("Pi", app_name))
+}
+
 fn scan_sessions_in_root(root: &Path, layout: SessionLayout) -> Vec<SessionMeta> {
     let mut files = Vec::new();
     collect_jsonl_files(root, layout, &mut files, true);

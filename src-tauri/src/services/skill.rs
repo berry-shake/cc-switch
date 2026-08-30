@@ -608,6 +608,9 @@ impl SkillService {
             AppType::Pi => {
                 return Ok(crate::pi_config::get_pi_agent_dir()?.join("skills"));
             }
+            AppType::Omp => {
+                return Ok(crate::omp_config::get_omp_agent_dir()?.join("skills"));
+            }
         }
 
         // 默认路径：回退到用户主目录下的标准位置。
@@ -625,6 +628,7 @@ impl SkillService {
             AppType::OpenClaw => home.join(".openclaw").join("skills"),
             AppType::Hermes => crate::hermes_config::get_hermes_dir().join("skills"),
             AppType::Pi => crate::pi_config::get_pi_agent_dir()?.join("skills"),
+            AppType::Omp => crate::omp_config::get_omp_agent_dir()?.join("skills"),
         })
     }
 
@@ -698,6 +702,7 @@ impl SkillService {
         let mut skills = db.get_all_installed_skills()?;
         for skill in skills.values_mut() {
             skill.apps.pi = Self::skill_exists_in_app(&skill.directory, &AppType::Pi);
+            skill.apps.omp = Self::skill_exists_in_app(&skill.directory, &AppType::Omp);
         }
         Ok(skills.into_values().collect())
     }
@@ -1362,6 +1367,7 @@ impl SkillService {
             .get_installed_skill(skill_id)?
             .ok_or_else(|| anyhow!("Skill not found: {skill_id}"))?;
         skill.apps.pi = Self::skill_exists_in_app(&skill.directory, &AppType::Pi);
+        skill.apps.omp = Self::skill_exists_in_app(&skill.directory, &AppType::Omp);
 
         // 本函数后续三种危险操作都用 directory 拼路径：备份源（把任意目录复制进
         // 备份区并在界面列出）、remove_dir_all（删任意目录）、copy_dir_recursive
@@ -1455,6 +1461,7 @@ impl SkillService {
         }
         Self::require_valid_directory(&current_skill.directory)?;
         current_skill.apps.pi = Self::skill_exists_in_app(&current_skill.directory, &AppType::Pi);
+        current_skill.apps.omp = Self::skill_exists_in_app(&current_skill.directory, &AppType::Omp);
         let skill = current_skill;
 
         let dest = ssot_dir.join(&skill.directory);

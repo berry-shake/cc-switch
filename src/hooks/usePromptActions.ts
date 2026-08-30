@@ -100,8 +100,8 @@ export function usePromptActions(appId: AppId) {
         toast.success(t("prompts.saveSuccess"), {
           closeButton: true,
           description:
-            appId === "pi" && prompt.enabled
-              ? t("pi.prompts.reloadNotice")
+            (appId === "pi" || appId === "omp") && prompt.enabled
+              ? t(`${appId}.prompts.reloadNotice`)
               : undefined,
         });
         return refreshed;
@@ -160,7 +160,7 @@ export function usePromptActions(appId: AppId) {
 
   const toggleEnabled = useCallback(
     async (id: string, enabled: boolean) => {
-      if (appId === "pi") {
+      if (appId === "pi" || appId === "omp") {
         setTogglingId(id);
         try {
           if (enabled) {
@@ -180,12 +180,12 @@ export function usePromptActions(appId: AppId) {
           toast.success(
             t(
               enabled
-                ? "pi.prompts.usePromptSuccess"
-                : "pi.prompts.stopUsingSuccess",
+                ? `${appId}.prompts.usePromptSuccess`
+                : `${appId}.prompts.stopUsingSuccess`,
             ),
             {
               closeButton: true,
-              description: t("pi.prompts.reloadNotice"),
+              description: t(`${appId}.prompts.reloadNotice`),
             },
           );
           return refreshed;
