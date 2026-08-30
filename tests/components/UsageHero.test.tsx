@@ -30,15 +30,15 @@ describe("UsageHero token metrics", () => {
         {
           appType: "claude",
           summary: {
-            totalRequests: 1,
-            totalCost: "1.25",
-            totalInputTokens: 101,
-            totalOutputTokens: 404,
-            totalCacheCreationTokens: 202,
-            totalCacheReadTokens: 303,
+            totalRequests: 2_947,
+            totalCost: "225.9919",
+            totalInputTokens: 8_622_000,
+            totalOutputTokens: 1_040_000,
+            totalCacheCreationTokens: 0,
+            totalCacheReadTokens: 370_000_000,
             successRate: 100,
-            realTotalTokens: 1010,
-            cacheHitRate: 0.5,
+            realTotalTokens: 379_662_000,
+            cacheHitRate: 0.97,
           },
         },
       ],
@@ -46,8 +46,11 @@ describe("UsageHero token metrics", () => {
     });
   });
 
-  it("orders input, cache write, cache read, then output with matching values", () => {
+  it("uses K, M, and B units for every count while preserving metric order", () => {
     render(<UsageHero range={{ preset: "today" }} refreshIntervalMs={0} />);
+
+    expect(screen.getByText("379.66M")).toBeInTheDocument();
+    expect(screen.getByText("2.95K")).toBeInTheDocument();
 
     const labels = screen.getAllByText(
       /^usage\.(inputTokens|cacheCreationTokens|cacheReadTokens|outputTokens)$/,
@@ -60,6 +63,6 @@ describe("UsageHero token metrics", () => {
     ]);
     expect(
       labels.map((label) => label.parentElement?.nextSibling?.textContent),
-    ).toEqual(["101", "202", "303", "404"]);
+    ).toEqual(["8.62M", "0", "370M", "1.04M"]);
   });
 });

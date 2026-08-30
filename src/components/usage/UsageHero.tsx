@@ -16,12 +16,7 @@ import {
   Sparkles,
   Zap,
 } from "lucide-react";
-import {
-  fmtUsd,
-  formatTokensShort,
-  getResolvedLang,
-  parseFiniteNumber,
-} from "./format";
+import { fmtUsd, formatCompactCount, parseFiniteNumber } from "./format";
 import {
   getCacheWriteAvailability,
   type AppType,
@@ -159,8 +154,7 @@ export function UsageHero({
   model,
   refreshIntervalMs,
 }: UsageHeroProps) {
-  const { t, i18n } = useTranslation();
-  const lang = getResolvedLang(i18n);
+  const { t } = useTranslation();
 
   const { data, isLoading } = useUsageSummaryByApp(
     range,
@@ -197,8 +191,7 @@ export function UsageHero({
   const requests = summary?.totalRequests ?? 0;
 
   const cacheWriteDisplay = {
-    value:
-      cacheWriteState === "na" ? "N/A" : formatTokensShort(cacheWrite, lang),
+    value: cacheWriteState === "na" ? "N/A" : formatCompactCount(cacheWrite),
     muted: cacheWriteState === "na",
     tooltip:
       cacheWriteState === "na"
@@ -266,10 +259,7 @@ export function UsageHero({
                       className="text-2xl md:text-3xl font-bold tabular-nums tracking-tight leading-none"
                       title={realTotal.toLocaleString()}
                     >
-                      {realTotal.toLocaleString()}
-                    </span>
-                    <span className="text-xs text-muted-foreground font-medium bg-muted/40 px-1.5 py-0.5 rounded-md">
-                      ≈ {formatTokensShort(realTotal, lang, 2)}
+                      {formatCompactCount(realTotal)}
                     </span>
                   </div>
                 </div>
@@ -280,9 +270,12 @@ export function UsageHero({
                   <span className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">
                     {t("usage.totalRequests")}
                   </span>
-                  <span className="font-semibold flex items-center gap-1.5 text-sm tabular-nums">
+                  <span
+                    className="font-semibold flex items-center gap-1.5 text-sm tabular-nums"
+                    title={requests.toLocaleString()}
+                  >
                     <Activity className="h-3.5 w-3.5 text-blue-500" />
-                    {requests.toLocaleString()}
+                    {formatCompactCount(requests)}
                   </span>
                 </div>
                 <div className="w-px h-8 bg-border/60" />
@@ -302,7 +295,7 @@ export function UsageHero({
               <MiniStat
                 icon={<ArrowDownToLine className="h-3.5 w-3.5" />}
                 label={t("usage.inputTokens", "输入")}
-                value={formatTokensShort(input, lang)}
+                value={formatCompactCount(input)}
                 accent="text-blue-500"
               />
               <MiniStat
@@ -316,13 +309,13 @@ export function UsageHero({
               <MiniStat
                 icon={<Sparkles className="h-3.5 w-3.5" />}
                 label={t("usage.cacheReadTokens", "缓存读取")}
-                value={formatTokensShort(cacheRead, lang)}
+                value={formatCompactCount(cacheRead)}
                 accent="text-emerald-500"
               />
               <MiniStat
                 icon={<ArrowUpFromLine className="h-3.5 w-3.5" />}
                 label={t("usage.outputTokens", "输出")}
-                value={formatTokensShort(output, lang)}
+                value={formatCompactCount(output)}
                 accent="text-purple-500"
               />
 
