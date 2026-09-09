@@ -257,6 +257,9 @@ enum ParentResolution {
 #[derive(Debug)]
 struct ParsedCodexFile {
     root_thread_id: Option<String>,
+    /// root `session_meta` 的线程 ID（稳定逻辑线程）：单段文件名与文件名
+    /// UUID 一致，revert/resume 的双段文件名对应前置 UUID。
+    meta_thread_id: Option<String>,
     root_meta_seen: bool,
     root_timestamp: Option<DateTime<Utc>>,
     parent: ParentResolution,
@@ -288,12 +291,6 @@ struct StagedCodexRow {
 }
 
 impl StagedCodexRow {
-    fn thread_id(&self) -> Option<String> {
-        let (thread_id, _) = thread_identity_from_request_id(&self.request_id)?;
-        let session_id = normalize_thread_id(&self.session_id)?;
-        (thread_id == session_id).then_some(thread_id)
-    }
-
     fn local_date(&self) -> Option<String> {
         local_date_from_unix(self.created_at)
     }
@@ -361,6 +358,7 @@ struct CodexRebuildEventFingerprint {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct CodexRebuildFileFingerprint {
     root_meta_seen: bool,
+    meta_thread_id: Option<String>,
     root_timestamp: Option<DateTime<Utc>>,
     parent: ParentResolution,
     events: Vec<CodexRebuildEventFingerprint>,
@@ -370,6 +368,7 @@ impl CodexRebuildFileFingerprint {
     fn from_parsed(parsed: &ParsedCodexFile) -> Self {
         Self {
             root_meta_seen: parsed.root_meta_seen,
+            meta_thread_id: parsed.meta_thread_id.clone(),
             root_timestamp: parsed.root_timestamp,
             parent: parsed.parent.clone(),
             events: parsed
@@ -395,6 +394,7 @@ impl CodexRebuildFileFingerprint {
 
     fn is_prefix_compatible_with(&self, other: &Self) -> bool {
         self.root_meta_seen == other.root_meta_seen
+            && self.meta_thread_id == other.meta_thread_id
             && self.root_timestamp == other.root_timestamp
             && self.parent == other.parent
             && self.events[..self.events.len().min(other.events.len())]
@@ -478,6 +478,37 @@ fn local_date_from_unix(created_at: i64) -> Option<String> {
         .timestamp_opt(created_at, 0)
         .single()
         .map(|value| value.format("%Y-%m-%d").to_string())
+}
+
+/// 双段文件名（`rollout-…-<threadId>_<rolloutId>.jsonl`）里下划线前的线程
+/// 本体 UUID；单段文件名返回 `None`。
+///
+/// `thread/revert` 为同一线程新建替换 rollout 时产生这种文件名（见
+/// openai/codex#38127）：末段是新生成的 rollout ID，其后的 resume 继续
+/// 向该文件追加。root meta 的 `id` 始终是原线程 ID，一致性校验需同时
+/// 接受两个 UUID。
+fn leading_thread_id_from_filename(path: &Path) -> Option<String> {
+    let stem = path.file_stem()?.to_str()?;
+    let len = stem.len();
+    // 布局尾部：…<uuidA>_<uuidB>。uuidB 占 36 字符，其前是 '_'（共 37）
+    if !stem.get(len.checked_sub(37)?..)?.starts_with('_') {
+        return None;
+    }
+    let candidate = stem.get(len.checked_sub(73)?..len.checked_sub(37)?)?;
+    uuid::Uuid::parse_str(candidate)
+        .ok()
+        .map(|value| value.hyphenated().to_string())
+}
+
+fn rebuild_rollout_identity(
+    request_id: &str,
+    session_id: Option<&str>,
+    resumed_identities: &HashSet<(String, String)>,
+) -> Option<String> {
+    let (rollout_id, _) = thread_identity_from_request_id(request_id)?;
+    let session_id = normalize_thread_id(session_id?)?;
+    (rollout_id == session_id || resumed_identities.contains(&(rollout_id.clone(), session_id)))
+        .then_some(rollout_id)
 }
 
 fn explicit_parent_from_meta(payload: &serde_json::Value) -> ParentResolution {
@@ -1105,6 +1136,19 @@ fn apply_staged_codex_usage(
     staged_cursors: Vec<StagedCodexCursor>,
     blocked_threads: &HashSet<String>,
 ) -> Result<(u32, u32), AppError> {
+    // Only completed staging cursors can establish the two-UUID relationship.
+    // Group by the physical rollout ID, which also owns the request ordinals
+    // and cursor; never merge different files solely by their session ID.
+    // Source audit excludes changed/conflicting files before any rows apply.
+    let resumed_identities = staged_cursors
+        .iter()
+        .filter_map(|cursor| {
+            let rollout_id = thread_id_from_cursor_path(&cursor.file_path)?;
+            let filename = cursor.file_path.rsplit(['/', '\\']).next()?;
+            let session_id = leading_thread_id_from_filename(Path::new(filename))?;
+            Some((rollout_id, session_id))
+        })
+        .collect::<HashSet<_>>();
     let mut conn = lock_conn!(db.conn);
     // Recalculate with the live pricing table while holding its connection
     // lock. A concurrent pricing edit cannot race between this step and commit.
@@ -1122,17 +1166,11 @@ fn apply_staged_codex_usage(
             .query_map([], |row| {
                 let request_id = row.get::<_, String>(0)?;
                 let session_id = row.get::<_, Option<String>>(1)?;
-                let request_thread =
-                    thread_identity_from_request_id(&request_id).map(|(thread_id, _)| thread_id);
-                let session_thread = session_id.as_deref().and_then(normalize_thread_id);
-                let thread_id = match (request_thread, session_thread) {
-                    (Some(request_thread), Some(session_thread))
-                        if request_thread == session_thread =>
-                    {
-                        Some(request_thread)
-                    }
-                    _ => None,
-                };
+                let thread_id = rebuild_rollout_identity(
+                    &request_id,
+                    session_id.as_deref(),
+                    &resumed_identities,
+                );
                 let created_at = row.get::<_, i64>(2)?;
                 Ok(LiveCodexRowIdentity {
                     request_id,
@@ -1196,7 +1234,9 @@ fn apply_staged_codex_usage(
     let mut skipped = 0u32;
     let mut staged_by_thread: HashMap<String, Vec<StagedCodexRow>> = HashMap::new();
     for row in staged_rows {
-        if let Some(thread_id) = row.thread_id() {
+        if let Some(thread_id) =
+            rebuild_rollout_identity(&row.request_id, Some(&row.session_id), &resumed_identities)
+        {
             staged_by_thread.entry(thread_id).or_default().push(row);
         } else {
             skipped = skipped.saturating_add(1);
@@ -1477,6 +1517,7 @@ fn parse_codex_file(
     let mut reader = BufReader::new(file);
     let mut root_meta_seen = false;
     let mut root_timestamp = None;
+    let mut meta_thread_id = None;
     let mut parent = ParentResolution::None;
     let mut current_model = "unknown".to_string();
     let mut current_service_tier = CodexServiceTier::Unknown;
@@ -1564,14 +1605,24 @@ fn parse_codex_file(
                 let payload = value.get("payload").unwrap_or(&serde_json::Value::Null);
                 parent = explicit_parent_from_meta(payload);
 
-                let meta_thread_id = non_empty_string(
+                meta_thread_id = non_empty_string(
                     payload
                         .get("id")
                         .or_else(|| payload.get("thread_id"))
                         .or_else(|| payload.get("threadId")),
-                );
-                if let (Some(filename_id), Some(meta_id)) = (&root_thread_id, meta_thread_id) {
-                    if filename_id != &meta_id {
+                )
+                .map(|id| {
+                    uuid::Uuid::parse_str(&id)
+                        .map(|value| value.hyphenated().to_string())
+                        .unwrap_or(id)
+                });
+                if let (Some(filename_id), Some(meta_id)) =
+                    (&root_thread_id, meta_thread_id.as_ref())
+                {
+                    let leading_id = leading_thread_id_from_filename(file_path);
+                    let matches =
+                        filename_id == meta_id || leading_id.as_deref() == Some(meta_id.as_str());
+                    if !matches {
                         parent = ParentResolution::Deferred(format!(
                             "文件名线程 ID ({filename_id}) 与 root meta ID ({meta_id}) 不一致"
                         ));
@@ -1738,6 +1789,7 @@ fn parse_codex_file(
 
     Ok(ParsedCodexFile {
         root_thread_id,
+        meta_thread_id,
         root_meta_seen,
         root_timestamp,
         parent,
@@ -2120,6 +2172,12 @@ fn sync_single_codex_file(
     // journal 建立/fsync/删除）是全量重导的最大耗时项。批内任一插入失败
     // 都回滚该批且不推进游标；下一 pass 重扫时由 request_id 主键 + 指纹
     // 去重兜底，不会丢数据或双算。
+    //
+    // session_id 记 root meta 的线程 ID：双段文件名（thread/revert 的替换
+    // rollout）下是前置 UUID，与会话管理器侧的会话身份同口径；尾部 rollout
+    // ID 只承担 request_id 去重键（event_index 按物理文件计数，不能改用
+    // 前置 ID）。
+    let session_thread_id = parsed.meta_thread_id.as_deref().unwrap_or(root_thread_id);
     let batch_count = to_insert.len().div_ceil(CODEX_INSERT_BATCH_SIZE);
     for (batch_index, batch) in to_insert.chunks(CODEX_INSERT_BATCH_SIZE).enumerate() {
         let is_last_batch = batch_index + 1 == batch_count;
@@ -2140,7 +2198,7 @@ fn sync_single_codex_file(
                 &event.delta,
                 &event.model,
                 event.service_tier,
-                Some(root_thread_id),
+                Some(session_thread_id),
                 event.timestamp.as_deref(),
                 &mut batch_suspected,
                 &mut pass.pricing,
@@ -2604,6 +2662,203 @@ mod tests {
             ],
         )?;
         Ok(())
+    }
+
+    /// revert 产生的替换 rollout 是 `<threadId>_<rolloutId>` 双段文件名，
+    /// root meta 的 id 是原线程 ID（第一个 UUID）、forked_from_id 为空。
+    /// 旧校验只认末尾 UUID，会把这类文件永久 deferred，其后 resume 追加
+    /// 的用量全部丢失。
+    #[test]
+    fn test_resumed_rollout_meta_id_matching_leading_uuid_is_not_deferred() -> Result<(), AppError>
+    {
+        let dir = tempdir().unwrap();
+        let file = dir.path().join(format!(
+            "rollout-2026-08-26T17-18-13-{PARENT_ID}_{CHILD_A_ID}.jsonl"
+        ));
+        write_jsonl(
+            &file,
+            &[
+                session_meta(PARENT_ID),
+                turn_context(),
+                token_count_at(100, 50, 20, "2026-08-26T09:18:20Z"),
+            ],
+        );
+
+        let parsed = parse_codex_file(&file, thread_id_from_filename(&file))?;
+
+        // 恢复会话没有显式 parent，不应因 ID 不一致被拒
+        assert!(
+            !matches!(parsed.parent, ParentResolution::Deferred(_)),
+            "恢复会话不应被 deferred，实际: {:?}",
+            parsed.parent
+        );
+        assert_eq!(parsed.root_thread_id.as_deref(), Some(CHILD_A_ID));
+        assert!(parsed.has_billable_tokens);
+        Ok(())
+    }
+
+    /// 完整同步链路下双段 rollout 的两个 UUID 分工：request_id 用尾部
+    /// rollout ID（event_index 按物理文件计数，去重键不能换），库里
+    /// session_id 记前置线程 ID，与会话管理器侧的会话身份同口径。
+    #[test]
+    fn test_resumed_rollout_session_id_uses_leading_thread_id() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        let temp = tempdir().unwrap();
+        let file = temp.path().join(format!(
+            "rollout-2026-08-26T17-18-13-{PARENT_ID}_{CHILD_A_ID}.jsonl"
+        ));
+        write_jsonl(
+            &file,
+            &[
+                session_meta(PARENT_ID),
+                turn_context(),
+                token_count(100, 50, 10),
+            ],
+        );
+
+        assert_eq!(sync_test_file(&db, &file, &[&file])?.imported, 1);
+
+        let conn = lock_conn!(db.conn);
+        let (request_id, session_id) = conn
+            .prepare(
+                "SELECT request_id, session_id FROM proxy_request_logs
+                 WHERE data_source = 'codex_session'",
+            )?
+            .query_row([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?;
+        assert_eq!(
+            request_id,
+            format!("{CODEX_THREAD_REQUEST_ID_PREFIX}:{CHILD_A_ID}:1")
+        );
+        assert_eq!(session_id, PARENT_ID);
+        Ok(())
+    }
+
+    /// 单段文件名的不一致仍要拒收。
+    #[test]
+    fn test_single_uuid_filename_meta_mismatch_still_deferred() -> Result<(), AppError> {
+        let dir = tempdir().unwrap();
+        let file = rollout_path(dir.path(), PARENT_ID);
+        // meta 里写的是另一个线程的 ID —— 这不是 revert 双段文件名能解释的形态
+        write_jsonl(
+            &file,
+            &[
+                session_meta(CHILD_B_ID),
+                turn_context(),
+                token_count_at(1, 1, 1, "2026-07-10T03:00:02Z"),
+            ],
+        );
+
+        let parsed = parse_codex_file(&file, thread_id_from_filename(&file))?;
+        assert!(matches!(parsed.parent, ParentResolution::Deferred(_)));
+        Ok(())
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn safe_rebuild_resumed_rollout_preserves_fast_cache_write_and_identity() -> Result<(), AppError>
+    {
+        let db = Database::memory()?;
+        let staging = Database::memory()?;
+        let temp = tempdir().unwrap();
+        let file = temp.path().join(format!(
+            "rollout-2026-08-26T17-18-13-{PARENT_ID}_{CHILD_A_ID}.jsonl"
+        ));
+        let timestamp = "2026-08-26T09:18:20Z";
+        write_jsonl(
+            &file,
+            &[
+                session_meta(PARENT_ID),
+                thread_settings_at(Some("priority"), "gpt-5.6-sol", timestamp),
+                token_count_with_cache_write_at(100, 20, 10, 5, timestamp),
+            ],
+        );
+        let audit = audit_codex_rebuild_sources(std::slice::from_ref(&file));
+        assert_eq!(sync_test_file(&staging, &file, &[&file])?.imported, 1);
+        // Include an existing row with separate rollout and session IDs so
+        // the rebuild exercises both live and staged identity validation.
+        assert_eq!(sync_test_file(&db, &file, &[&file])?.imported, 1);
+        let staged_rows = load_staged_codex_rows(&staging)?;
+        let cursors = load_staged_codex_cursors(&staging)?;
+        let blocked = finalize_codex_rebuild_audit(audit, &cursors);
+        assert!(blocked.is_empty());
+        assert_eq!(
+            apply_staged_codex_usage(&db, staged_rows.clone(), cursors.clone(), &blocked)?,
+            (1, 0)
+        );
+        assert_eq!(
+            apply_staged_codex_usage(&db, staged_rows, cursors, &blocked)?,
+            (1, 0)
+        );
+        let conn = lock_conn!(db.conn);
+        let rows: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM proxy_request_logs WHERE data_source = 'codex_session'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(rows, 1);
+        let (session_id, cache_write, multiplier): (String, i64, String) = conn.query_row(
+            "SELECT session_id, cache_creation_tokens, cost_multiplier
+             FROM proxy_request_logs WHERE request_id = ?1",
+            [thread_request_id(CHILD_A_ID, 1)],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )?;
+        assert_eq!(session_id, PARENT_ID);
+        assert_eq!(cache_write, 10);
+        assert_eq!(multiplier.parse::<Decimal>().unwrap(), Decimal::new(25, 1));
+        let offset: i64 = conn.query_row(
+            "SELECT last_line_offset FROM session_log_sync WHERE file_path = ?1",
+            [file.to_string_lossy().to_string()],
+            |row| row.get(0),
+        )?;
+        assert_eq!(offset, 3);
+        Ok(())
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn safe_rebuild_rejects_unverified_resumed_identity() -> Result<(), AppError> {
+        for leading_id in [None, Some(CHILD_B_ID)] {
+            let db = Database::memory()?;
+            let mut row = staged_codex_row(CHILD_A_ID, 1, 100, "1", 1_700_000_000);
+            row.session_id = PARENT_ID.to_string();
+            let filename = leading_id.map_or_else(
+                || format!("rollout-2026-08-26-{CHILD_A_ID}.jsonl"),
+                |id| format!("rollout-2026-08-26-{id}_{CHILD_A_ID}.jsonl"),
+            );
+            let cursor = StagedCodexCursor {
+                file_path: filename,
+                last_modified: 1,
+                last_line_offset: 3,
+                last_synced_at: 1,
+            };
+            assert_eq!(
+                apply_staged_codex_usage(&db, vec![row], vec![cursor], &HashSet::new())?,
+                (0, 1)
+            );
+            let conn = lock_conn!(db.conn);
+            let count: i64 =
+                conn.query_row("SELECT COUNT(*) FROM session_log_sync", [], |row| {
+                    row.get(0)
+                })?;
+            assert_eq!(count, 0);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn rebuild_audit_blocks_conflicting_resumed_session_ids() {
+        let temp = tempdir().unwrap();
+        let files = [PARENT_ID, CHILD_B_ID].map(|id| {
+            let file = temp
+                .path()
+                .join(format!("rollout-2026-08-26-{id}_{CHILD_A_ID}.jsonl"));
+            write_jsonl(&file, &[session_meta(id), token_count(100, 20, 10)]);
+            file
+        });
+        let audit = audit_codex_rebuild_sources(&files);
+        assert!(audit.blocked_threads.contains(CHILD_A_ID));
     }
 
     #[test]

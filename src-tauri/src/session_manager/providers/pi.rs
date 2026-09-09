@@ -673,9 +673,9 @@ fn is_session_title_slot(value: &Value) -> bool {
         && value.get("title").is_some_and(Value::is_string)
         && value.get("updatedAt").is_some_and(Value::is_string)
         && value.get("pad").is_some_and(Value::is_string)
-        && value.get("source").map_or(true, |source| {
-            matches!(source.as_str(), Some("auto" | "user"))
-        })
+        && value
+            .get("source")
+            .is_none_or(|source| matches!(source.as_str(), Some("auto" | "user")))
 }
 
 fn parse_header(value: &Value) -> Result<SessionHeader, String> {
