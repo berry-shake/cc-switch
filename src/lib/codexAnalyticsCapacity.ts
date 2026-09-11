@@ -127,6 +127,7 @@ function fastMultiplier(modelName: string, speed: string): number {
   const family = modelFamily(modelName);
   if (
     [
+      "gpt-6-astra",
       "gpt-5.6",
       "gpt-5.6-sol",
       "gpt-5.6-terra",
@@ -428,6 +429,10 @@ export function buildCodexAnalyticsUsageBasis(
   analytics: CodexAnalyticsUsage | null | undefined,
   modelPricing: readonly ModelPricing[] | null | undefined,
 ): CodexAnalyticsUsageBasis | null {
+  // Personal raw Credits have an independent, nullable-data path. Never fall
+  // back to price-derived dollars when that path is incomplete or unavailable.
+  if (analytics?.accountMode === "personal" && analytics.personalCredits)
+    return null;
   if (!cycle || !analytics || !modelPricing) return null;
   const pricing = buildPricingLookup(modelPricing);
   if (pricing.size === 0) return null;

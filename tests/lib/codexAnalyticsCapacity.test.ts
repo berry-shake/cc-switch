@@ -74,6 +74,66 @@ function tokens(
 }
 
 describe("codexAnalyticsCapacity", () => {
+  it("applies Astra Fast 2.5x to token-priced usage including cache writes", () => {
+    const analytics: CodexAnalyticsUsage = {
+      accountMode: "workspace",
+      queriedAt,
+      days: [
+        {
+          date: "2026-08-22",
+          missingTokenData: false,
+          missingModelBreakdown: false,
+          totals: tokens(1_000_000, 1_000_000, 1_000_000, 1_000_000),
+          models: [
+            {
+              model: "gpt-6-astra-high",
+              speed: "fast",
+              credits: 0,
+              tokens: tokens(1_000_000, 1_000_000, 1_000_000, 1_000_000),
+            },
+          ],
+        },
+      ],
+    };
+    const pricing = [
+      {
+        modelId: "gpt-6-astra",
+        displayName: "GPT-6 Astra",
+        inputCostPerMillion: "10",
+        outputCostPerMillion: "50",
+        cacheReadCostPerMillion: "1",
+        cacheCreationCostPerMillion: "12.5",
+      },
+    ];
+    expect(
+      deriveCodexAnalyticsCycleCapacity(quota, analytics, pricing, queriedAt)
+        ?.usedUsd,
+    ).toBe(183.75);
+    analytics.days[0].models[0].speed = "standard";
+    expect(
+      deriveCodexAnalyticsCycleCapacity(quota, analytics, pricing, queriedAt)
+        ?.usedUsd,
+    ).toBe(73.5);
+  });
+  it("never silently falls back to token pricing for incomplete raw Credits", () => {
+    const analytics: CodexAnalyticsUsage = {
+      accountMode: "personal",
+      queriedAt,
+      days: [],
+      personalCredits: {
+        totalsStatus: "invalid",
+        breakdownStatus: "available",
+        days: [],
+      },
+    };
+    expect(
+      buildCodexAnalyticsUsageBasis(
+        resolveCodexQuotaCycle(quota, queriedAt),
+        analytics,
+        modelPricing,
+      ),
+    ).toBeNull();
+  });
   it("prices workspace model buckets directly, including GPT-5.6 cache writes", () => {
     const analytics: CodexAnalyticsUsage = {
       accountMode: "workspace",

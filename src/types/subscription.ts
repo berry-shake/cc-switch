@@ -69,6 +69,37 @@ export interface CodexAnalyticsUsage {
   accountMode: CodexAnalyticsAccountMode;
   days: CodexAnalyticsDailyUsage[];
   queriedAt: number;
+  /** Present for the validated personal Credits path; never mixed with Token pricing. */
+  personalCredits?: CodexPersonalCredits | null;
+}
+
+export type CreditDataStatus = "available" | "unavailable" | "invalid";
+export type CreditAllocation =
+  | "reported"
+  | "allocated"
+  | "unallocated"
+  | "mismatched"
+  | "pending";
+
+export interface PersonalCreditModel {
+  model: string;
+  speed: string;
+  credits: number;
+}
+
+export interface PersonalCreditDay {
+  date: string;
+  credits: number | null;
+  tokens: { [K in keyof CodexAnalyticsTokenCounts]: number | null };
+  models: PersonalCreditModel[];
+  unallocatedCredits: number | null;
+  allocation: CreditAllocation;
+}
+
+export interface CodexPersonalCredits {
+  totalsStatus: CreditDataStatus;
+  breakdownStatus: CreditDataStatus;
+  days: PersonalCreditDay[];
 }
 
 export type CodexCredentialSource = "file" | "keyring";
@@ -96,5 +127,6 @@ export interface CodexQuotaSnapshot {
 
 export interface CodexOfficialUsageSnapshot extends CodexQuotaSnapshot {
   analytics: CodexAnalyticsUsage | null;
+  analyticsUnavailable?: boolean;
   queriedAt: number;
 }

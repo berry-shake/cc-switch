@@ -73,7 +73,12 @@ impl CodexServiceTier {
             Self::Fast
                 if matches!(
                     family,
-                    "gpt-5.6" | "gpt-5.6-sol" | "gpt-5.6-terra" | "gpt-5.6-luna" | "gpt-5.5"
+                    "gpt-6-astra"
+                        | "gpt-5.6"
+                        | "gpt-5.6-sol"
+                        | "gpt-5.6-terra"
+                        | "gpt-5.6-luna"
+                        | "gpt-5.5"
                 ) =>
             {
                 Decimal::new(25, 1)
@@ -3102,6 +3107,20 @@ mod tests {
 
     #[test]
     fn test_quota_multiplier_matches_personal_script_rates() {
+        for model in ["gpt-6-astra", "gpt-6-astra-high", "gpt-6-astra-xhigh"] {
+            assert_eq!(
+                CodexServiceTier::Fast.quota_cost_multiplier(model),
+                Decimal::new(25, 1)
+            );
+            assert_eq!(
+                CodexServiceTier::Standard.quota_cost_multiplier(model),
+                Decimal::from(1)
+            );
+            assert_eq!(
+                CodexServiceTier::Unknown.quota_cost_multiplier(model),
+                Decimal::from(1)
+            );
+        }
         assert_eq!(
             CodexServiceTier::Fast.quota_cost_multiplier("gpt-5.6-sol"),
             Decimal::new(25, 1)
@@ -4275,6 +4294,41 @@ mod tests {
         assert_eq!(base_cost, Decimal::new(394, 2));
         assert_eq!(total_cost, Decimal::new(985, 2));
         assert_eq!(total_cost, base_cost * Decimal::new(25, 1));
+        Ok(())
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn astra_fast_import_keeps_cache_write_and_persists_quota_multiplier() -> Result<(), AppError> {
+        clear_codex_replay_caches();
+        let db = Database::memory()?;
+        let temp = tempdir().unwrap();
+        let file = rollout_path(temp.path(), PARENT_ID);
+        write_jsonl(
+            &file,
+            &[
+                session_meta(PARENT_ID),
+                thread_settings_at(Some("fast"), "gpt-6-astra", "2026-09-10T03:00:01Z"),
+                token_count_with_cache_write_at(
+                    1_000_000,
+                    100_000,
+                    100_000,
+                    10_000,
+                    "2026-09-10T03:00:02Z",
+                ),
+            ],
+        );
+        assert_eq!(sync_test_file(&db, &file, &[&file])?.imported, 1);
+        assert_eq!(sync_test_file(&db, &file, &[&file])?.imported, 0);
+        let conn = lock_conn!(db.conn);
+        let (multiplier, cache_write, total): (String,i64,String) = conn.query_row(
+            "SELECT cost_multiplier,cache_creation_tokens,total_cost_usd FROM proxy_request_logs WHERE data_source='codex_session'",
+            [], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?)))?;
+        assert_eq!(multiplier.parse::<Decimal>().unwrap(), Decimal::new(25, 1));
+        assert_eq!(cache_write, 100_000);
+        // Total input includes cached reads and writes: 800k uncached, 100k read,
+        // 100k write and 10k output, all at the 2.5x quota-equivalent multiplier.
+        assert_eq!(total.parse::<Decimal>().unwrap(), Decimal::new(24625, 3));
         Ok(())
     }
 

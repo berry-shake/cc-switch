@@ -181,6 +181,70 @@ const modelPricing: ModelPricing[] = [
 ];
 
 describe("CodexCycleCapacityCard", () => {
+  it("uses personal raw Credits with missing pricing and keeps the forecast", () => {
+    render(
+      <CodexCycleCapacityCard
+        quota={quota}
+        usage={usage}
+        modelPricing={null}
+        calculationMode="analytics"
+        nowMs={queriedAt}
+        analyticsUsage={{
+          accountMode: "personal",
+          queriedAt,
+          days: [],
+          personalCredits: {
+            totalsStatus: "available",
+            breakdownStatus: "unavailable",
+            days: [
+              {
+                date: "2026-08-22",
+                credits: 1250,
+                allocation: "unallocated",
+                unallocatedCredits: 1250,
+                models: [],
+                tokens: {
+                  totalTokens: null,
+                  uncachedInputTokens: null,
+                  cachedInputTokens: null,
+                  cacheWriteInputTokens: null,
+                  outputTokens: null,
+                },
+              },
+            ],
+          },
+        }}
+      />,
+    );
+    const panel = screen.getByTestId("codex-personal-credits-panel");
+    expect(within(panel).getByText("$50.00")).toBeInTheDocument();
+    expect(screen.getByTestId("codex-cycle-forecast")).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("codex-capacity-metrics"),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("$691.48")).not.toBeInTheDocument();
+  });
+  it("analytics failure keeps a fresh quota forecast without showing local estimates", () => {
+    render(
+      <CodexCycleCapacityCard
+        quota={quota}
+        usage={usage}
+        analyticsUsage={null}
+        analyticsUnavailable
+        calculationMode="analytics"
+        nowMs={queriedAt}
+      />,
+    );
+    expect(
+      screen.getByTestId("codex-analytics-unavailable"),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId("codex-cycle-forecast")).toBeInTheDocument();
+    expect(screen.getByRole("progressbar", { name: "已用" })).toHaveAttribute(
+      "aria-valuenow",
+      "30",
+    );
+    expect(screen.queryByText("$691.48")).not.toBeInTheDocument();
+  });
   beforeEach(() => {
     window.localStorage.removeItem(CODEX_CYCLE_CAPACITY_EXPANDED_STORAGE_KEY);
     window.localStorage.removeItem(CODEX_CYCLE_CAPACITY_MODE_STORAGE_KEY);

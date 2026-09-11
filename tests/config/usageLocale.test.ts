@@ -27,6 +27,13 @@ function interpolationVariables(value: string): string[] {
 }
 
 describe("usage token labels", () => {
+  it("keeps personal Credits translations aligned in all languages", () => {
+    const reference = flattenTranslationStrings(en.usage.personalCredits);
+    for (const locale of [zh, zhTW, ja]) {
+      const actual = flattenTranslationStrings(locale.usage.personalCredits);
+      expect([...actual.keys()].sort()).toEqual([...reference.keys()].sort());
+    }
+  });
   it.each([
     [en, ["Input", "Cache Write", "Cache Read", "Output"]],
     [zh, ["输入", "缓存写入", "缓存读取", "输出"]],

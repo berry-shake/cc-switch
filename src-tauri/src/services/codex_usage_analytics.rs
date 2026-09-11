@@ -1,10 +1,9 @@
 //! Codex official usage API reader.
 //!
 //! The ChatGPT Codex analytics endpoints expose model-level token totals for
-//! workspaces. Personal accounts expose daily total tokens separately from
-//! model/speed credit shares; the frontend applies the same rate-adjusted
-//! allocation used by the reference userscript without ever receiving OAuth
-//! credentials.
+//! workspaces. Personal accounts expose daily Credits and tokens separately from
+//! model/speed weights. Raw Credits are validated independently and never
+//! repriced. OAuth credentials remain on the Rust side.
 
 use chrono::NaiveDate;
 use reqwest::{RequestBuilder, StatusCode};
@@ -14,6 +13,7 @@ use std::collections::{BTreeSet, HashMap};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::services::codex_auth_credentials::CodexCredentialSnapshot;
+use crate::services::codex_personal_credits::{build_personal_credits, CodexPersonalCredits};
 
 const WORKSPACE_USAGE_URL: &str =
     "https://chatgpt.com/backend-api/wham/usage/daily-workspace-user-token-usage-breakdown";
@@ -98,6 +98,7 @@ pub struct CodexAnalyticsUsage {
     pub account_mode: CodexAnalyticsAccountMode,
     pub days: Vec<CodexAnalyticsDailyUsage>,
     pub queried_at: i64,
+    pub personal_credits: Option<CodexPersonalCredits>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -415,6 +416,7 @@ pub(crate) async fn query_codex_usage_analytics_with_credentials(
             account_mode: CodexAnalyticsAccountMode::Workspace,
             days: build_workspace_days(&workspace_body)?,
             queried_at: now_millis(),
+            personal_credits: None,
         });
     }
 
@@ -446,29 +448,64 @@ pub(crate) async fn query_codex_usage_analytics_with_credentials(
         end_date,
         true,
     );
-    let ((breakdown_status, breakdown_body), (totals_status, totals_body)) =
-        tokio::try_join!(breakdown_request, totals_request)?;
-    ensure_success(
-        breakdown_status,
-        &breakdown_body,
-        "Codex personal model analytics",
-    )?;
-    ensure_success(
-        totals_status,
-        &totals_body,
-        "Codex personal token analytics",
-    )?;
+    let (breakdown, totals) = tokio::join!(breakdown_request, totals_request);
+    Ok(personal_analytics(totals, breakdown))
+}
 
-    Ok(CodexAnalyticsUsage {
+fn personal_analytics(
+    totals: Result<(StatusCode, String), String>,
+    breakdown: Result<(StatusCode, String), String>,
+) -> CodexAnalyticsUsage {
+    // Never forward backend error bodies (or credentials) as UI warnings.
+    // Each successful endpoint remains useful even if its sibling failed.
+    let body = |response: Result<(StatusCode, String), String>| {
+        response
+            .ok()
+            .and_then(|(status, body)| status.is_success().then_some(body))
+    };
+    let totals = body(totals);
+    let breakdown = body(breakdown);
+    CodexAnalyticsUsage {
         account_mode: CodexAnalyticsAccountMode::Personal,
-        days: build_personal_days(&totals_body, &breakdown_body)?,
+        days: build_personal_days(
+            totals.as_deref().unwrap_or("{\"data\":[]}"),
+            breakdown.as_deref().unwrap_or("{\"data\":[]}"),
+        )
+        .unwrap_or_default(),
+        personal_credits: Some(build_personal_credits(
+            totals.as_deref(),
+            breakdown.as_deref(),
+        )),
         queried_at: now_millis(),
-    })
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn partial_http_failure_keeps_daily_credits_without_leaking_error_bodies() {
+        use crate::services::codex_personal_credits::CreditDataStatus;
+        for failure in [
+            Err("secret-network-error".to_string()),
+            Ok((StatusCode::UNAUTHORIZED, "secret-http-error".to_string())),
+        ] {
+            let data = personal_analytics(Ok((StatusCode::OK,
+                r#"{"balance_unit":"credit","group_by":"day","data":[{"date":"2026-09-10","totals":{"credits":123}}]}"#.to_string())), failure);
+            let credits = data.personal_credits.as_ref().unwrap();
+            assert_eq!(credits.days[0].credits, Some(123.0));
+            assert_eq!(credits.breakdown_status, CreditDataStatus::Unavailable);
+            assert!(!serde_json::to_string(&data).unwrap().contains("secret"));
+        }
+        let data = personal_analytics(
+            Err("totals unavailable".into()),
+            Err("models unavailable".into()),
+        );
+        let credits = data.personal_credits.unwrap();
+        assert_eq!(credits.totals_status, CreditDataStatus::Unavailable);
+        assert_eq!(credits.breakdown_status, CreditDataStatus::Unavailable);
+    }
 
     #[test]
     fn workspace_payload_preserves_models_speeds_and_token_buckets() {

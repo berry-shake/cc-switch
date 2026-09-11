@@ -30,6 +30,8 @@ pub struct CodexOfficialUsageSnapshot {
     pub quota: SubscriptionQuota,
     pub quota_windows: Vec<CodexQuotaWindow>,
     pub analytics: Option<CodexAnalyticsUsage>,
+    /// Analytics failed after quota succeeded. No HTTP body or credential crosses IPC.
+    pub analytics_unavailable: bool,
     pub email: Option<String>,
     pub credential_source: CodexCredentialSource,
     pub credential_scope: String,
@@ -116,32 +118,85 @@ pub async fn query_codex_official_usage_snapshot() -> Result<CodexOfficialUsageS
     let credentials = read_codex_request_credentials()?;
     let result = query_quota(&credentials).await?;
     let quota = result.quota;
-    let analytics = match analytics_range(&quota) {
-        Some((start_date, end_date)) => Some(
+    let analytics_result = match analytics_range(&quota) {
+        Some((start_date, end_date)) => {
             query_codex_usage_analytics_with_credentials(&start_date, &end_date, &credentials)
-                .await?,
-        ),
-        None => None,
+                .await
+                .map(Some)
+        }
+        None => Ok(None),
     };
+    Ok(assemble_official_snapshot(
+        result.quota_windows,
+        result.email,
+        quota,
+        credentials,
+        analytics_result,
+    ))
+}
+
+fn assemble_official_snapshot(
+    quota_windows: Vec<CodexQuotaWindow>,
+    email: Option<String>,
+    quota: SubscriptionQuota,
+    credentials: CodexCredentialSnapshot,
+    analytics_result: Result<Option<CodexAnalyticsUsage>, String>,
+) -> CodexOfficialUsageSnapshot {
+    let analytics_unavailable = analytics_result.is_err();
+    let analytics = analytics_result.ok().flatten();
     let queried_at = quota
         .queried_at
         .unwrap_or_else(|| Utc::now().timestamp_millis());
 
-    Ok(CodexOfficialUsageSnapshot {
+    CodexOfficialUsageSnapshot {
         quota,
-        quota_windows: result.quota_windows,
+        quota_windows,
         analytics,
-        email: result.email,
+        analytics_unavailable,
+        email,
         credential_source: credentials.source,
         credential_scope: credentials.account_scope,
         queried_at,
-    })
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::services::subscription::{CredentialStatus, QuotaTier};
+
+    #[tokio::test]
+    #[ignore = "Manual read-only contract probe using the current Codex login; no secrets or amounts printed"]
+    async fn live_personal_credit_contract() {
+        let result = query_codex_official_usage_snapshot().await;
+        assert!(
+            result.is_ok(),
+            "Current login could not query the official snapshot"
+        );
+        let snapshot = result.unwrap();
+        println!(
+            "quota_success={} analytics_unavailable={}",
+            snapshot.quota.success, snapshot.analytics_unavailable
+        );
+        assert!(snapshot.quota.success, "Quota query did not succeed");
+        let Some(analytics) = snapshot.analytics else {
+            assert!(!snapshot.analytics_unavailable, "Analytics request failed");
+            println!("No active nonzero long cycle; daily contract probe not applicable");
+            return;
+        };
+        let Some(credits) = analytics.personal_credits else {
+            println!("Workspace account; personal Credits contract not applicable");
+            return;
+        };
+        println!("totals_status={:?} breakdown_status={:?} days={} known_credit_days={} known_token_days={}",
+            credits.totals_status, credits.breakdown_status, credits.days.len(),
+            credits.days.iter().filter(|day| day.credits.is_some()).count(),
+            credits.days.iter().filter(|day| day.tokens.total_tokens.is_some()).count());
+        assert_eq!(
+            credits.totals_status,
+            crate::services::codex_personal_credits::CreditDataStatus::Available
+        );
+    }
 
     fn quota() -> SubscriptionQuota {
         SubscriptionQuota {
@@ -175,6 +230,31 @@ mod tests {
             analytics_range(&value),
             Some(("2026-08-20".to_string(), "2026-08-25".to_string()))
         );
+    }
+
+    #[test]
+    fn analytics_failure_preserves_quota_identity_and_hides_error_content() {
+        let credentials = CodexCredentialSnapshot {
+            access_token: "secret-token".into(),
+            account_id: Some("secret-account".into()),
+            account_scope: "anonymous-scope".into(),
+            source: CodexCredentialSource::File,
+            last_refresh: None,
+        };
+        let snapshot = assemble_official_snapshot(
+            vec![],
+            Some("fixture@example.test".into()),
+            quota(),
+            credentials,
+            Err("secret-http-body".into()),
+        );
+        assert!(snapshot.quota.success);
+        assert_eq!(snapshot.quota.tiers[0].utilization, 30.0);
+        assert!(snapshot.analytics_unavailable);
+        assert!(snapshot.analytics.is_none());
+        assert_eq!(snapshot.credential_scope, "anonymous-scope");
+        assert_eq!(snapshot.email.as_deref(), Some("fixture@example.test"));
+        assert!(!serde_json::to_string(&snapshot).unwrap().contains("secret"));
     }
 
     #[test]

@@ -155,6 +155,13 @@ export function CodexCycleCapacitySection({
       lastRefreshedAt={activeSnapshot?.quota.queriedAt}
       usage={usageQuery.isSuccess ? usageQuery.data : null}
       analyticsUsage={analyticsUsage}
+      analyticsUnavailable={Boolean(
+        calculationMode === "analytics" &&
+          officialQuery.isSuccess &&
+          officialQuery.data.credentialScope ===
+            activeSnapshot.credentialScope &&
+          officialQuery.data.analyticsUnavailable,
+      )}
       modelPricing={pricingQuery.isSuccess ? pricingQuery.data : null}
       quotaSamples={quotaSamples}
       calculationMode={calculationMode}

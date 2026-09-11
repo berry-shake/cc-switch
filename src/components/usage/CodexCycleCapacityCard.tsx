@@ -51,6 +51,7 @@ import type { ModelPricing, UsageSummary } from "@/types/usage";
 
 import { fmtUsd, getLocaleFromLanguage, getResolvedLang } from "./format";
 import { CodexCycleForecastPanel } from "./CodexCycleForecastPanel";
+import { CodexPersonalCreditsPanel } from "./CodexPersonalCreditsPanel";
 
 export interface CodexCycleCapacityCardProps {
   quota: SubscriptionQuota | null | undefined;
@@ -64,6 +65,7 @@ export interface CodexCycleCapacityCardProps {
   usage: UsageSummary | null | undefined;
   /** 来自 Codex 官方用量接口的日级 Token 与模型/速度数据。 */
   analyticsUsage?: CodexAnalyticsUsage | null;
+  analyticsUnavailable?: boolean;
   /** 两种来源共用的本地模型定价；官方接口模式不会另起硬编码价格表。 */
   modelPricing?: readonly ModelPricing[] | null;
   /** 当前本机保存的官方额度采样；仅同一周期的数据会参与近期预测。 */
@@ -290,6 +292,7 @@ export function CodexCycleCapacityCard({
   lastRefreshedAt,
   usage,
   analyticsUsage,
+  analyticsUnavailable = false,
   modelPricing,
   quotaSamples = [],
   calculationMode,
@@ -319,12 +322,16 @@ export function CodexCycleCapacityCard({
   const gradientId = `codex-capacity-${rawId.replace(/[^a-zA-Z0-9_-]/g, "")}`;
 
   const effectiveMode: CodexCycleCapacityCalculationMode = selectedMode;
+  const personalCredits =
+    effectiveMode === "analytics" && analyticsUsage?.accountMode === "personal"
+      ? analyticsUsage.personalCredits
+      : null;
   const estimate =
     effectiveMode === "analytics" ? analyticsEstimate : localEstimate;
   // 必须用容量外推同款周期：cycleWindow 在 used_percent 缺失时会回退到原始
   // 额度窗口，而那种情况下根本不会外推容量，提示也就无从谈起。
   const analyticsDataQuality =
-    effectiveMode === "analytics"
+    effectiveMode === "analytics" && !personalCredits
       ? inspectCodexAnalyticsCycleData(
           resolveCodexQuotaCycle(quota, nowMs),
           analyticsUsage,
@@ -336,7 +343,8 @@ export function CodexCycleCapacityCard({
   const activeAnalyticsEstimate: CodexAnalyticsCycleCapacityEstimate | null =
     effectiveMode === "analytics" ? analyticsEstimate : null;
   const showModeSwitch = Boolean(
-    onCalculationModeChange || (localEstimate && analyticsEstimate),
+    onCalculationModeChange ||
+      (localEstimate && (analyticsEstimate || personalCredits)),
   );
 
   const forecast =
@@ -367,8 +375,12 @@ export function CodexCycleCapacityCard({
   const toggleAriaLabel = `${toggleLabel} ${titleLabel}`;
   const analyticsAccountMode =
     activeAnalyticsEstimate?.accountMode ?? analyticsUsage?.accountMode ?? null;
-  const basisLabel =
-    effectiveMode === "analytics"
+  const basisLabel = personalCredits
+    ? t(
+        "usage.personalCredits.basis",
+        "按官方每日原始 Credits 统计，美元为自定义等值换算",
+      )
+    : effectiveMode === "analytics"
       ? analyticsAccountMode === "workspace"
         ? t(
             "usage.cycleCapacity.analyticsWorkspaceBasis",
@@ -384,8 +396,9 @@ export function CodexCycleCapacityCard({
               "等待官方用量与模型/速度数据同步",
             )
       : t("usage.cycleCapacity.basis", "按当前模型、速度及 Token 结构折算");
-  const compactBasisLabel =
-    effectiveMode === "analytics"
+  const compactBasisLabel = personalCredits
+    ? t("usage.personalCredits.compactBasis", "官方原始 Credits")
+    : effectiveMode === "analytics"
       ? analyticsAccountMode === "workspace"
         ? t(
             "usage.cycleCapacity.analyticsWorkspaceCompactBasis",
@@ -401,8 +414,12 @@ export function CodexCycleCapacityCard({
               "官方接口 · 等待同步",
             )
       : t("usage.cycleCapacity.compactBasis", "模型 · 速度 · Token 结构");
-  const disclaimer =
-    effectiveMode === "analytics"
+  const disclaimer = personalCredits
+    ? t(
+        "usage.personalCredits.disclaimer",
+        "原始 Credits 与美元等值分开显示；未应用缓存校正，不额外乘 Fast 倍率。日统计存在同步延迟和周期边界误差。",
+      )
+    : effectiveMode === "analytics"
       ? analyticsAccountMode === "workspace"
         ? t(
             "usage.cycleCapacity.analyticsWorkspaceDisclaimer",
@@ -479,9 +496,11 @@ export function CodexCycleCapacityCard({
     "usage.cycleCapacity.empty.metricValue",
     "待估算",
   );
-  const ringDetailLabel = estimate
-    ? estimateLabel
-    : t("usage.cycleCapacity.empty.ringLabel", "等待可估算用量");
+  const ringDetailLabel = personalCredits
+    ? t("usage.personalCredits.quota", "官方额度")
+    : estimate
+      ? estimateLabel
+      : t("usage.cycleCapacity.empty.ringLabel", "等待可估算用量");
   const normalizedEmail = accountEmail?.trim() || null;
   const refreshTimestamp =
     lastRefreshedAt != null && Number.isFinite(lastRefreshedAt)
@@ -673,6 +692,18 @@ export function CodexCycleCapacityCard({
           </div>
 
           <CollapsibleContent>
+            {effectiveMode === "analytics" && analyticsUnavailable ? (
+              <div
+                role="status"
+                className="mt-4 rounded-lg border border-amber-500/25 bg-amber-500/[0.07] p-3 text-xs"
+                data-testid="codex-analytics-unavailable"
+              >
+                {t(
+                  "usage.personalCredits.analyticsUnavailable",
+                  "官方日统计暂不可用，已保留本次成功查询的额度和消耗速度预测；稍后可手动刷新。",
+                )}
+              </div>
+            ) : null}
             {analyticsDataQuality &&
             (analyticsDataQuality.missingTokenDates.length > 0 ||
               analyticsDataQuality.missingModelBreakdownDates.length > 0 ||
@@ -760,120 +791,131 @@ export function CodexCycleCapacityCard({
                   />
                 </div>
 
-                {!estimate ? (
-                  <div
-                    className="mb-3 flex items-start gap-2.5 rounded-xl border border-border/50 bg-muted/25 px-3.5 py-3"
-                    role="status"
-                    data-testid="codex-capacity-waiting-state"
-                    data-reason={waitingReason}
-                  >
-                    <Clock3 className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
-                    <div className="min-w-0">
-                      <div className="text-sm font-semibold text-foreground">
-                        {waitingTitle}
+                {personalCredits ? (
+                  <CodexPersonalCreditsPanel
+                    data={personalCredits}
+                    cycle={cycleWindow}
+                  />
+                ) : (
+                  <>
+                    {!estimate ? (
+                      <div
+                        className="mb-3 flex items-start gap-2.5 rounded-xl border border-border/50 bg-muted/25 px-3.5 py-3"
+                        role="status"
+                        data-testid="codex-capacity-waiting-state"
+                        data-reason={waitingReason}
+                      >
+                        <Clock3 className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+                        <div className="min-w-0">
+                          <div className="text-sm font-semibold text-foreground">
+                            {waitingTitle}
+                          </div>
+                          <div className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground">
+                            {waitingDescription}
+                          </div>
+                        </div>
                       </div>
-                      <div className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground">
-                        {waitingDescription}
-                      </div>
-                    </div>
-                  </div>
-                ) : null}
+                    ) : null}
 
-                <div
-                  className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 xl:grid-cols-3"
-                  data-testid="codex-capacity-metrics"
-                >
-                  <CapacityMetric
-                    label={t(
-                      "usage.cycleCapacity.totalTokens",
-                      "完整周期 Token 等效容量",
-                    )}
-                    value={
-                      estimate
-                        ? formatEstimatedTokens(estimate.totalTokens)
-                        : waitingMetricValue
-                    }
-                    title={
-                      estimate
-                        ? Math.round(estimate.totalTokens).toLocaleString(
-                            locale,
-                          )
-                        : waitingDescription
-                    }
-                    emphasized
-                  />
-                  <CapacityMetric
-                    label={t(
-                      "usage.cycleCapacity.usedTokens",
-                      "已用额度 Token 等效容量",
-                    )}
-                    value={
-                      estimate
-                        ? formatEstimatedTokens(estimate.usedTokens)
-                        : waitingMetricValue
-                    }
-                    title={
-                      estimate
-                        ? Math.round(estimate.usedTokens).toLocaleString(locale)
-                        : waitingDescription
-                    }
-                  />
-                  <CapacityMetric
-                    label={t(
-                      "usage.cycleCapacity.remainingTokens",
-                      "剩余额度 Token 等效容量",
-                    )}
-                    value={
-                      estimate
-                        ? formatEstimatedTokens(estimate.remainingTokens)
-                        : waitingMetricValue
-                    }
-                    title={
-                      estimate
-                        ? Math.round(estimate.remainingTokens).toLocaleString(
-                            locale,
-                          )
-                        : waitingDescription
-                    }
-                  />
-                  <CapacityMetric
-                    label={t(
-                      "usage.cycleCapacity.totalUsd",
-                      "完整周期美元等效容量",
-                    )}
-                    value={
-                      estimate
-                        ? formatUsdEstimate(estimate.totalUsd)
-                        : waitingMetricValue
-                    }
-                    title={estimate ? undefined : waitingDescription}
-                    emphasized
-                  />
-                  <CapacityMetric
-                    label={t(
-                      "usage.cycleCapacity.usedUsd",
-                      "已用额度美元等效容量",
-                    )}
-                    value={
-                      estimate
-                        ? formatUsdEstimate(estimate.usedUsd)
-                        : waitingMetricValue
-                    }
-                    title={estimate ? undefined : waitingDescription}
-                  />
-                  <CapacityMetric
-                    label={t(
-                      "usage.cycleCapacity.remainingUsd",
-                      "剩余额度美元等效容量",
-                    )}
-                    value={
-                      estimate
-                        ? formatUsdEstimate(estimate.remainingUsd)
-                        : waitingMetricValue
-                    }
-                    title={estimate ? undefined : waitingDescription}
-                  />
-                </div>
+                    <div
+                      className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 xl:grid-cols-3"
+                      data-testid="codex-capacity-metrics"
+                    >
+                      <CapacityMetric
+                        label={t(
+                          "usage.cycleCapacity.totalTokens",
+                          "完整周期 Token 等效容量",
+                        )}
+                        value={
+                          estimate
+                            ? formatEstimatedTokens(estimate.totalTokens)
+                            : waitingMetricValue
+                        }
+                        title={
+                          estimate
+                            ? Math.round(estimate.totalTokens).toLocaleString(
+                                locale,
+                              )
+                            : waitingDescription
+                        }
+                        emphasized
+                      />
+                      <CapacityMetric
+                        label={t(
+                          "usage.cycleCapacity.usedTokens",
+                          "已用额度 Token 等效容量",
+                        )}
+                        value={
+                          estimate
+                            ? formatEstimatedTokens(estimate.usedTokens)
+                            : waitingMetricValue
+                        }
+                        title={
+                          estimate
+                            ? Math.round(estimate.usedTokens).toLocaleString(
+                                locale,
+                              )
+                            : waitingDescription
+                        }
+                      />
+                      <CapacityMetric
+                        label={t(
+                          "usage.cycleCapacity.remainingTokens",
+                          "剩余额度 Token 等效容量",
+                        )}
+                        value={
+                          estimate
+                            ? formatEstimatedTokens(estimate.remainingTokens)
+                            : waitingMetricValue
+                        }
+                        title={
+                          estimate
+                            ? Math.round(
+                                estimate.remainingTokens,
+                              ).toLocaleString(locale)
+                            : waitingDescription
+                        }
+                      />
+                      <CapacityMetric
+                        label={t(
+                          "usage.cycleCapacity.totalUsd",
+                          "完整周期美元等效容量",
+                        )}
+                        value={
+                          estimate
+                            ? formatUsdEstimate(estimate.totalUsd)
+                            : waitingMetricValue
+                        }
+                        title={estimate ? undefined : waitingDescription}
+                        emphasized
+                      />
+                      <CapacityMetric
+                        label={t(
+                          "usage.cycleCapacity.usedUsd",
+                          "已用额度美元等效容量",
+                        )}
+                        value={
+                          estimate
+                            ? formatUsdEstimate(estimate.usedUsd)
+                            : waitingMetricValue
+                        }
+                        title={estimate ? undefined : waitingDescription}
+                      />
+                      <CapacityMetric
+                        label={t(
+                          "usage.cycleCapacity.remainingUsd",
+                          "剩余额度美元等效容量",
+                        )}
+                        value={
+                          estimate
+                            ? formatUsdEstimate(estimate.remainingUsd)
+                            : waitingMetricValue
+                        }
+                        title={estimate ? undefined : waitingDescription}
+                      />
+                    </div>
+                  </>
+                )}
               </div>
             </div>
 

@@ -49,6 +49,7 @@ vi.mock("@/components/usage/CodexCycleCapacityCard", () => ({
     usage,
     quotaSamples,
     analyticsUsage,
+    analyticsUnavailable,
     accountEmail,
     lastRefreshedAt,
     calculationMode,
@@ -59,6 +60,7 @@ vi.mock("@/components/usage/CodexCycleCapacityCard", () => ({
     quotaWindows?: readonly unknown[];
     usage: UsageSummary | null;
     analyticsUsage?: { accountMode: string } | null;
+    analyticsUnavailable?: boolean;
     accountEmail?: string | null;
     lastRefreshedAt?: number | null;
     quotaSamples?: readonly unknown[];
@@ -70,6 +72,9 @@ vi.mock("@/components/usage/CodexCycleCapacityCard", () => ({
       {quota.tool}:{usage?.realTotalTokens ?? "no-local"}:
       {analyticsUsage?.accountMode ?? "no-analytics"}
       <span data-testid="sample-count">{quotaSamples?.length ?? 0}</span>
+      <span data-testid="analytics-unavailable">
+        {String(Boolean(analyticsUnavailable))}
+      </span>
       <span data-testid="window-count">{quotaWindows?.length ?? 0}</span>
       <span data-testid="calculation-mode">{calculationMode}</span>
       <span data-testid="account-email">{accountEmail ?? "no-email"}</span>
@@ -278,6 +283,28 @@ describe("CodexCycleCapacitySection", () => {
     await officialOptions.queryFn?.();
     expect(getQuotaSnapshotMock).toHaveBeenCalledTimes(1);
     expect(getOfficialSnapshotMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("forwards partial analytics failure only for the active official snapshot", () => {
+    installQueries({
+      official: {
+        ...officialSnapshot,
+        analytics: null,
+        analyticsUnavailable: true,
+      },
+    });
+    render(<CodexCycleCapacitySection enabled />);
+    expect(screen.getByTestId("analytics-unavailable")).toHaveTextContent(
+      "false",
+    );
+    fireEvent.click(screen.getByText("switch-official"));
+    expect(screen.getByTestId("analytics-unavailable")).toHaveTextContent(
+      "true",
+    );
+    expect(screen.getByTestId("capacity-entry")).toBeInTheDocument();
+    expect(screen.getByTestId("account-email")).toHaveTextContent(
+      officialSnapshot.email!,
+    );
   });
 
   it("polls and manually refreshes one atomic official snapshot", async () => {
