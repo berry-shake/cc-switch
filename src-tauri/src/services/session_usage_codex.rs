@@ -271,6 +271,11 @@ struct ParsedCodexFile {
     token_events: Vec<ParsedTokenEvent>,
     line_offset: i64,
     has_unterminated_tail: bool,
+    /// Bytes actually read, including an incomplete final record. Persisted in
+    /// `last_byte_offset` only to detect file changes, never used as a seek
+    /// position: parsing restarts at the beginning and `line_offset` tracks
+    /// consumed records so an incomplete tail can be retried after an append.
+    observed_bytes: i64,
     has_billable_tokens: bool,
 }
 
@@ -306,6 +311,7 @@ struct StagedCodexCursor {
     file_path: String,
     last_modified: i64,
     last_line_offset: i64,
+    last_byte_offset: Option<i64>,
     last_synced_at: i64,
 }
 
@@ -594,6 +600,7 @@ fn token_snapshot_source(payload: &serde_json::Value) -> Option<String> {
 ///   仍用旧价，下一个同步 pass 生效。
 struct CodexSyncPass {
     cursors: HashMap<String, (i64, i64)>,
+    byte_offsets: HashMap<String, Option<i64>>,
     pricing: HashMap<String, Option<ModelPricing>>,
 }
 
@@ -612,8 +619,15 @@ impl CodexSyncPass {
             })
             .and_then(|rows| rows.collect::<Result<HashMap<_, _>, _>>())
             .map_err(|e| AppError::Database(format!("预载同步游标失败: {e}")))?;
+        let mut stmt = conn.prepare("SELECT file_path, last_byte_offset FROM session_log_sync")?;
+        let byte_offsets = stmt
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, Option<i64>>(1)?))
+            })?
+            .collect::<Result<HashMap<_, _>, _>>()?;
         Ok(Self {
             cursors,
+            byte_offsets,
             pricing: HashMap::new(),
         })
     }
@@ -1116,7 +1130,7 @@ fn load_staged_codex_cursors(staging: &Database) -> Result<Vec<StagedCodexCursor
     let conn = lock_conn!(staging.conn);
     let mut statement = conn
         .prepare(
-            "SELECT file_path, last_modified, last_line_offset, last_synced_at
+            "SELECT file_path, last_modified, last_line_offset, last_synced_at, last_byte_offset
              FROM session_log_sync",
         )
         .map_err(|error| AppError::Database(format!("读取临时 Codex cursor 失败: {error}")))?;
@@ -1127,6 +1141,7 @@ fn load_staged_codex_cursors(staging: &Database) -> Result<Vec<StagedCodexCursor
                 last_modified: row.get(1)?,
                 last_line_offset: row.get(2)?,
                 last_synced_at: row.get(3)?,
+                last_byte_offset: row.get(4)?,
             })
         })
         .map_err(|error| AppError::Database(format!("查询临时 Codex cursor 失败: {error}")))?
@@ -1414,13 +1429,14 @@ fn apply_staged_codex_usage(
             transaction
                 .execute(
                     "INSERT OR REPLACE INTO session_log_sync (
-                        file_path, last_modified, last_line_offset, last_synced_at
-                     ) VALUES (?1, ?2, ?3, ?4)",
+                        file_path, last_modified, last_line_offset, last_synced_at, last_byte_offset
+                     ) VALUES (?1, ?2, ?3, ?4, ?5)",
                     rusqlite::params![
                         cursor.file_path,
                         cursor.last_modified,
                         cursor.last_line_offset,
                         cursor.last_synced_at,
+                        cursor.last_byte_offset,
                     ],
                 )
                 .map_err(|error| AppError::Database(format!("写入 Codex cursor 失败: {error}")))?;
@@ -1540,6 +1556,7 @@ fn parse_codex_file(
     let mut event_index = 0u32;
     let mut token_events = Vec::new();
     let mut line_offset = 0i64;
+    let mut observed_bytes = 0i64;
     let mut has_unterminated_tail = false;
     let mut has_billable_tokens = false;
 
@@ -1553,6 +1570,9 @@ fn parse_codex_file(
                 file_path.display()
             ))
         })?;
+        // Include the incomplete suffix for unchanged-file detection, but do
+        // not consume its line cursor or trust it during a destructive rebuild.
+        observed_bytes += bytes_read as i64;
         if bytes_read == 0 {
             break;
         }
@@ -1801,6 +1821,7 @@ fn parse_codex_file(
         token_events,
         line_offset,
         has_unterminated_tail,
+        observed_bytes,
         has_billable_tokens,
     })
 }
@@ -2002,6 +2023,33 @@ fn mark_deferred(
 /// 与大文件重导期间面板的响应性。
 const CODEX_INSERT_BATCH_SIZE: usize = 1000;
 
+fn update_codex_sync_state_on_conn(
+    conn: &rusqlite::Connection,
+    file_path: &str,
+    modified: i64,
+    parsed: &ParsedCodexFile,
+) -> Result<(), AppError> {
+    update_sync_state_on_conn(conn, file_path, modified, parsed.line_offset)?;
+    conn.execute(
+        "UPDATE session_log_sync SET last_byte_offset = ?1 WHERE file_path = ?2",
+        rusqlite::params![parsed.observed_bytes, file_path],
+    )?;
+    Ok(())
+}
+
+fn update_codex_sync_state(
+    db: &Database,
+    file_path: &str,
+    modified: i64,
+    parsed: &ParsedCodexFile,
+) -> Result<(), AppError> {
+    let conn = lock_conn!(db.conn);
+    let tx = conn.unchecked_transaction()?;
+    update_codex_sync_state_on_conn(&tx, file_path, modified, parsed)?;
+    tx.commit()?;
+    Ok(())
+}
+
 /// 同步单个 Codex JSONL 文件。
 fn sync_single_codex_file(
     db: &Database,
@@ -2020,8 +2068,10 @@ fn sync_single_codex_file(
     // 检查同步状态
     let (last_modified, last_offset) = get_codex_sync_state(db, file_path, &pass.cursors)?;
 
-    // 文件未变化则跳过
-    if file_modified <= last_modified {
+    // Windows may keep mtime unchanged while Codex holds its write handle open.
+    // Legacy cursors have no byte offset: rescan once to catch up and persist it.
+    let last_byte_offset = pass.byte_offsets.get(&file_path_str).copied().flatten();
+    if file_modified == last_modified && last_byte_offset == i64::try_from(file_size).ok() {
         return Ok(CodexFileSyncResult::default());
     }
 
@@ -2053,17 +2103,15 @@ fn sync_single_codex_file(
     }
 
     let parsed = parse_codex_file(file_path, thread_id_from_filename(file_path))?;
-    if parsed.has_unterminated_tail {
-        return Ok(mark_deferred(
-            file_path,
-            file_modified,
-            file_size,
-            PendingReason::Stable("JSONL 尾行尚未写完".to_string()),
-        ));
-    }
+    // Normal sync may append complete records before an unfinished tail. The
+    // rebuild audit still rejects this source, so that partial snapshot can
+    // never replace historical rows. Only the incomplete record stays pending.
     if !parsed.has_billable_tokens {
-        update_sync_state(db, &file_path_str, file_modified, parsed.line_offset)?;
-        return Ok(CodexFileSyncResult::default());
+        update_codex_sync_state(db, &file_path_str, file_modified, &parsed)?;
+        return Ok(CodexFileSyncResult {
+            deferred: parsed.has_unterminated_tail,
+            ..CodexFileSyncResult::default()
+        });
     }
     let Some(root_thread_id) = parsed.root_thread_id.as_deref() else {
         return Ok(mark_deferred(
@@ -2155,7 +2203,10 @@ fn sync_single_codex_file(
         caches.pending.remove(file_path);
     }
 
-    let mut result = CodexFileSyncResult::default();
+    let mut result = CodexFileSyncResult {
+        deferred: parsed.has_unterminated_tail,
+        ..CodexFileSyncResult::default()
+    };
     let mut to_insert: Vec<(&ParsedTokenEvent, u32)> = Vec::new();
     for (token_offset, event) in parsed.token_events.iter().enumerate() {
         let Some(event_index) = event.event_index else {
@@ -2220,7 +2271,7 @@ fn sync_single_codex_file(
         if is_last_batch {
             // 游标推进与最后一批数据同事务提交：中途崩溃时两者一起回滚，
             // 不会出现"游标已推进但数据缺失"的丢数据窗口。
-            update_sync_state_on_conn(&tx, &file_path_str, file_modified, parsed.line_offset)?;
+            update_codex_sync_state_on_conn(&tx, &file_path_str, file_modified, &parsed)?;
         }
         tx.commit()
             .map_err(|e| AppError::Database(format!("提交 Codex 会话写入事务失败: {e}")))?;
@@ -2231,7 +2282,7 @@ fn sync_single_codex_file(
     }
 
     if to_insert.is_empty() {
-        update_sync_state(db, &file_path_str, file_modified, parsed.line_offset)?;
+        update_codex_sync_state(db, &file_path_str, file_modified, &parsed)?;
     }
     Ok(result)
 }
@@ -2669,6 +2720,182 @@ mod tests {
         Ok(())
     }
 
+    fn assert_unchanged_codex_file_is_skipped(db: &Database, file: &Path) -> Result<(), AppError> {
+        let changes_before: i64 = {
+            let conn = lock_conn!(db.conn);
+            conn.query_row("SELECT total_changes()", [], |row| row.get(0))?
+        };
+        // Reload the persisted cursor each time: returning zero imports alone
+        // does not prove that the file was skipped rather than fully reparsed.
+        for _ in 0..3 {
+            assert_eq!(sync_test_file(db, file, &[file])?.imported, 0);
+        }
+        let conn = lock_conn!(db.conn);
+        let changes_after: i64 = conn.query_row("SELECT total_changes()", [], |row| row.get(0))?;
+        assert_eq!(
+            changes_after, changes_before,
+            "unchanged file rewrote its cursor"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_unchanged_incomplete_tail_is_skipped_after_cursor_reload() -> Result<(), AppError> {
+        use std::io::Write;
+        for has_usage in [false, true] {
+            for tail in ["{\"type\":\"event_msg\"", "  "] {
+                let db = Database::memory()?;
+                let dir = tempdir().unwrap();
+                let file = rollout_path(dir.path(), PARENT_ID);
+                let mut records = vec![session_meta(PARENT_ID), turn_context()];
+                if has_usage {
+                    records.push(token_count(100, 50, 10));
+                }
+                write_jsonl(&file, &records);
+                {
+                    let mut writer = fs::OpenOptions::new().append(true).open(&file).unwrap();
+                    writer.write_all(tail.as_bytes()).unwrap();
+                }
+                assert_eq!(
+                    sync_test_file(&db, &file, &[&file])?.imported,
+                    u32::from(has_usage)
+                );
+                assert_eq!(
+                    get_sync_state(&db, &file.to_string_lossy())?.1,
+                    records.len() as i64
+                );
+                assert_unchanged_codex_file_is_skipped(&db, &file)?;
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_append_with_unchanged_mtime_survives_reload_without_duplicates() -> Result<(), AppError>
+    {
+        use std::io::Write;
+        let db = Database::memory()?;
+        let dir = tempdir().unwrap();
+        let file = rollout_path(dir.path(), PARENT_ID);
+        write_jsonl(
+            &file,
+            &[
+                session_meta(PARENT_ID),
+                turn_context(),
+                token_count(100, 50, 10),
+            ],
+        );
+        let modified = fs::metadata(&file).unwrap().modified().unwrap();
+        assert_eq!(sync_test_file(&db, &file, &[&file])?.imported, 1);
+        let mut writer = fs::OpenOptions::new().append(true).open(&file).unwrap();
+        writeln!(writer, "{}", token_count(250, 100, 30)).unwrap();
+        writer
+            .set_times(fs::FileTimes::new().set_modified(modified))
+            .unwrap();
+        // Each call reloads its cursor from the DB, as after an application restart.
+        assert_eq!(sync_test_file(&db, &file, &[&file])?.imported, 1);
+        assert_eq!(sync_test_file(&db, &file, &[&file])?.imported, 0);
+        let conn = lock_conn!(db.conn);
+        let totals: (i64, i64, i64) = conn.query_row(
+            "SELECT count(*), sum(input_tokens), sum(output_tokens) FROM proxy_request_logs",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )?;
+        assert_eq!(totals, (2, 250, 30));
+        Ok(())
+    }
+
+    #[test]
+    fn test_legacy_cursor_catches_up_with_unchanged_mtime() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        let dir = tempdir().unwrap();
+        let file = rollout_path(dir.path(), PARENT_ID);
+        write_jsonl(
+            &file,
+            &[
+                session_meta(PARENT_ID),
+                turn_context(),
+                token_count(100, 50, 10),
+                token_count(250, 100, 30),
+            ],
+        );
+        let modified = metadata_modified_nanos(&fs::metadata(&file).unwrap());
+        update_sync_state(&db, &file.to_string_lossy(), modified, 3)?;
+        assert_eq!(sync_test_file(&db, &file, &[&file])?.imported, 1);
+        assert_eq!(sync_test_file(&db, &file, &[&file])?.imported, 0);
+        let conn = lock_conn!(db.conn);
+        let bytes: i64 =
+            conn.query_row("SELECT last_byte_offset FROM session_log_sync", [], |r| {
+                r.get(0)
+            })?;
+        assert_eq!(bytes as u64, fs::metadata(&file).unwrap().len());
+        Ok(())
+    }
+
+    #[test]
+    fn test_complete_final_record_without_newline_is_imported_once() -> Result<(), AppError> {
+        use std::io::Write;
+        let db = Database::memory()?;
+        let dir = tempdir().unwrap();
+        let file = rollout_path(dir.path(), PARENT_ID);
+        write_jsonl(&file, &[session_meta(PARENT_ID), turn_context()]);
+        let mut writer = fs::OpenOptions::new().append(true).open(&file).unwrap();
+        write!(writer, "{}", token_count(100, 50, 10)).unwrap();
+        let modified = fs::metadata(&file).unwrap().modified().unwrap();
+        assert_eq!(sync_test_file(&db, &file, &[&file])?.imported, 1);
+        assert_eq!(sync_test_file(&db, &file, &[&file])?.imported, 0);
+        writeln!(writer).unwrap();
+        writeln!(writer, "{}", token_count(250, 100, 30)).unwrap();
+        writer
+            .set_times(fs::FileTimes::new().set_modified(modified))
+            .unwrap();
+        assert_eq!(sync_test_file(&db, &file, &[&file])?.imported, 1);
+        assert_eq!(sync_test_file(&db, &file, &[&file])?.imported, 0);
+        let conn = lock_conn!(db.conn);
+        let totals: (i64, i64, i64) = conn.query_row(
+            "SELECT count(*), sum(input_tokens), sum(output_tokens) FROM proxy_request_logs",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )?;
+        assert_eq!(totals, (2, 250, 30));
+        Ok(())
+    }
+
+    #[test]
+    fn test_partial_live_record_is_retried_after_append() -> Result<(), AppError> {
+        use std::io::Write;
+        let db = Database::memory()?;
+        let dir = tempdir().unwrap();
+        let file = rollout_path(dir.path(), PARENT_ID);
+        write_jsonl(
+            &file,
+            &[
+                session_meta(PARENT_ID),
+                turn_context(),
+                token_count(100, 50, 10),
+            ],
+        );
+        let modified = fs::metadata(&file).unwrap().modified().unwrap();
+        let next = format!("{}\n", token_count(250, 100, 30));
+        let split = next.len() / 2;
+        let mut writer = fs::OpenOptions::new().append(true).open(&file).unwrap();
+        writer.write_all(&next.as_bytes()[..split]).unwrap();
+        writer
+            .set_times(fs::FileTimes::new().set_modified(modified))
+            .unwrap();
+        assert_eq!(sync_test_file(&db, &file, &[&file])?.imported, 1);
+        assert_eq!(get_sync_state(&db, &file.to_string_lossy())?.1, 3);
+        assert_unchanged_codex_file_is_skipped(&db, &file)?;
+        writer.write_all(&next.as_bytes()[split..]).unwrap();
+        writer
+            .set_times(fs::FileTimes::new().set_modified(modified))
+            .unwrap();
+        assert_eq!(sync_test_file(&db, &file, &[&file])?.imported, 1);
+        assert_eq!(sync_test_file(&db, &file, &[&file])?.imported, 0);
+        assert_eq!(get_sync_state(&db, &file.to_string_lossy())?.1, 4);
+        Ok(())
+    }
+
     /// revert 产生的替换 rollout 是 `<threadId>_<rolloutId>` 双段文件名，
     /// root meta 的 id 是原线程 ID（第一个 UUID）、forked_from_id 为空。
     /// 旧校验只认末尾 UUID，会把这类文件永久 deferred，其后 resume 追加
@@ -2818,6 +3045,14 @@ mod tests {
             |row| row.get(0),
         )?;
         assert_eq!(offset, 3);
+        let byte_offset: i64 = conn.query_row(
+            "SELECT last_byte_offset FROM session_log_sync WHERE file_path = ?1",
+            [file.to_string_lossy().to_string()],
+            |row| row.get(0),
+        )?;
+        assert_eq!(byte_offset as u64, fs::metadata(&file).unwrap().len());
+        drop(conn);
+        assert_unchanged_codex_file_is_skipped(&db, &file)?;
         Ok(())
     }
 
@@ -2836,6 +3071,7 @@ mod tests {
                 file_path: filename,
                 last_modified: 1,
                 last_line_offset: 3,
+                last_byte_offset: None,
                 last_synced_at: 1,
             };
             assert_eq!(
@@ -4410,6 +4646,7 @@ mod tests {
             file_path: covered_cursor.to_string_lossy().to_string(),
             last_modified: 9,
             last_line_offset: 9,
+            last_byte_offset: None,
             last_synced_at: 9,
         };
         let (imported, skipped) = apply_staged_codex_usage(
@@ -4489,6 +4726,7 @@ mod tests {
                 file_path: cursor_path.to_string_lossy().to_string(),
                 last_modified: 9,
                 last_line_offset: 9,
+                last_byte_offset: None,
                 last_synced_at: 9,
             }],
             &HashSet::new(),
@@ -4544,6 +4782,7 @@ mod tests {
                 file_path: cursor_path.to_string_lossy().to_string(),
                 last_modified: 9,
                 last_line_offset: 9,
+                last_byte_offset: None,
                 last_synced_at: 9,
             }],
             &HashSet::new(),
@@ -4594,6 +4833,7 @@ mod tests {
                 file_path: cursor_path.to_string_lossy().to_string(),
                 last_modified: 10,
                 last_line_offset: 10,
+                last_byte_offset: None,
                 last_synced_at: 10,
             }],
             &HashSet::new(),
@@ -4741,6 +4981,7 @@ mod tests {
                 file_path: path.to_string_lossy().to_string(),
                 last_modified: 1,
                 last_line_offset: 3,
+                last_byte_offset: None,
                 last_synced_at: 1,
             })
             .collect::<Vec<_>>();
@@ -4772,6 +5013,7 @@ mod tests {
             file_path: file.to_string_lossy().to_string(),
             last_modified: 1,
             last_line_offset: 3,
+            last_byte_offset: None,
             last_synced_at: 1,
         };
 
@@ -4910,7 +5152,7 @@ mod tests {
 
     #[test]
     #[serial_test::serial]
-    fn unterminated_tail_is_blocked_and_reprocessed_after_same_line_completes(
+    fn unterminated_tail_is_excluded_from_rebuild_and_retried_after_completion(
     ) -> Result<(), AppError> {
         clear_codex_replay_caches();
         let db = Database::memory()?;
@@ -4938,7 +5180,8 @@ mod tests {
         let partial_mtime = fs::metadata(&file).unwrap().modified().unwrap();
         let partial = sync_test_file(&db, &file, &[&file])?;
         assert_eq!((partial.imported, partial.deferred), (0, true));
-        assert_eq!(get_sync_state(&db, &file.to_string_lossy())?, (0, 0));
+        assert_eq!(get_sync_state(&db, &file.to_string_lossy())?.1, 2);
+        assert_unchanged_codex_file_is_skipped(&db, &file)?;
 
         {
             let mut output = fs::OpenOptions::new().append(true).open(&file).unwrap();
@@ -5060,6 +5303,51 @@ mod tests {
 
     #[test]
     #[serial_test::serial]
+    fn safe_rebuild_does_not_apply_synced_prefix_of_incomplete_rollout() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        let staging = Database::memory()?;
+        let temp = tempdir().unwrap();
+        let file = rollout_path(temp.path(), PARENT_ID);
+        let timestamp = "2026-07-10T03:00:02Z";
+        let created_at = DateTime::parse_from_rfc3339(timestamp).unwrap().timestamp();
+        insert_live_codex_row(&db, PARENT_ID, 1, 10, "1", created_at)?;
+        write_jsonl(
+            &file,
+            &[
+                session_meta(PARENT_ID),
+                turn_context(),
+                token_count_at(100, 20, 10, timestamp),
+            ],
+        );
+        let mut writer = fs::OpenOptions::new().append(true).open(&file).unwrap();
+        writer.write_all(b"{\"type\":\"event_msg\"").unwrap();
+        let audit = audit_codex_rebuild_sources(std::slice::from_ref(&file));
+        let result = sync_test_file(&staging, &file, &[&file])?;
+        assert_eq!((result.imported, result.deferred), (1, true));
+        assert_unchanged_codex_file_is_skipped(&staging, &file)?;
+        let cursors = load_staged_codex_cursors(&staging)?;
+        let blocked = finalize_codex_rebuild_audit(audit, &cursors);
+        assert!(blocked.contains(PARENT_ID));
+        assert_eq!(
+            apply_staged_codex_usage(&db, load_staged_codex_rows(&staging)?, cursors, &blocked)?,
+            (0, 1)
+        );
+        let conn = lock_conn!(db.conn);
+        let live: (i64, String) = conn.query_row(
+            "SELECT input_tokens, total_cost_usd FROM proxy_request_logs WHERE request_id = ?1",
+            [thread_request_id(PARENT_ID, 1)],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        assert_eq!(live, (10, "1".to_string()));
+        let cursors: i64 = conn.query_row("SELECT COUNT(*) FROM session_log_sync", [], |row| {
+            row.get(0)
+        })?;
+        assert_eq!(cursors, 0);
+        Ok(())
+    }
+
+    #[test]
+    #[serial_test::serial]
     fn safe_rebuild_rolls_back_deleted_detail_when_insert_fails() -> Result<(), AppError> {
         let db = Database::memory()?;
         let temp = tempdir().unwrap();
@@ -5091,6 +5379,7 @@ mod tests {
                 file_path: cursor_path.to_string_lossy().to_string(),
                 last_modified: 9,
                 last_line_offset: 9,
+                last_byte_offset: None,
                 last_synced_at: 9,
             }],
             &HashSet::new(),
