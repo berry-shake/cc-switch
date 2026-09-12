@@ -219,9 +219,10 @@ describe("CodexCycleCapacityCard", () => {
     const panel = screen.getByTestId("codex-personal-credits-panel");
     expect(within(panel).getByText("$50.00")).toBeInTheDocument();
     expect(screen.getByTestId("codex-cycle-forecast")).toBeInTheDocument();
-    expect(
-      screen.queryByTestId("codex-capacity-metrics"),
-    ).not.toBeInTheDocument();
+    expect(screen.getByTestId("codex-capacity-metrics").children).toHaveLength(
+      6,
+    );
+    expect(within(panel).queryByRole("table")).not.toBeInTheDocument();
     expect(screen.queryByText("$691.48")).not.toBeInTheDocument();
   });
   it("analytics failure keeps a fresh quota forecast without showing local estimates", () => {

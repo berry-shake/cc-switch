@@ -37,28 +37,64 @@ const data: CodexPersonalCredits = {
   ],
 };
 const metric = (label: string) => screen.getByText(label).parentElement!;
+const rawCredits = () => screen.getByTestId("codex-personal-credits-total");
 describe("CodexPersonalCreditsPanel", () => {
   beforeEach(() => localStorage.clear());
+  it("keeps the original six metrics and emphasis without detail tables", () => {
+    const { container } = render(
+      <CodexPersonalCreditsPanel data={data} cycle={cycle} />,
+    );
+    const grid = screen.getByTestId("codex-capacity-metrics");
+    expect(grid.children).toHaveLength(6);
+    const expected = [
+      ["完整周期 Token 等效容量", "5K"],
+      ["已用额度 Token 等效容量", "1K"],
+      ["剩余额度 Token 等效容量", "4K"],
+      ["完整周期美元等效容量", "$250.00"],
+      ["已用额度美元等效容量", "$50.00"],
+      ["剩余额度美元等效容量", "$200.00"],
+    ];
+    expected.forEach(([label, value], index) => {
+      expect(grid.children[index]).toHaveTextContent(label);
+      expect(
+        within(grid.children[index] as HTMLElement).getByText(value),
+      ).toBeInTheDocument();
+    });
+    expect(metric("完整周期 Token 等效容量")).toHaveClass(
+      "border-emerald-500/20",
+    );
+    expect(metric("完整周期美元等效容量")).toHaveClass("border-emerald-500/20");
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+    expect(container.querySelector("details")).toBeNull();
+    expect(
+      screen.queryByText(/模型与每日 Credits 明细/),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("gpt-6-astra")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("spinbutton", {
+        name: "换算系数：每 1 USD 对应 Credits",
+      }),
+    ).toHaveAccessibleDescription("自定义等值，非官方账单汇率。");
+  });
   it("renders raw values without a price table and allows custom USD conversion", () => {
     render(<CodexPersonalCreditsPanel data={data} cycle={cycle} />);
+    expect(rawCredits()).toHaveTextContent("1,250");
     expect(
-      within(metric("已用 Credits（接口原始）")).getByText("1,250"),
+      within(metric("已用额度 Token 等效容量")).getByText("1K"),
     ).toBeInTheDocument();
     expect(
-      within(metric("已同步 Token（日桶合计）")).getByText("1K"),
-    ).toBeInTheDocument();
-    expect(
-      within(metric("已用美元等值（估算）")).getByText("$50.00"),
+      within(metric("已用额度美元等效容量")).getByText("$50.00"),
     ).toBeInTheDocument();
     const input = screen.getByRole("spinbutton");
     fireEvent.change(input, { target: { value: "50" } });
     fireEvent.blur(input);
     expect(
-      within(metric("已用美元等值（估算）")).getByText("$25.00"),
+      within(metric("已用额度美元等效容量")).getByText("$25.00"),
     ).toBeInTheDocument();
     expect(localStorage.getItem(CREDITS_PER_USD_STORAGE_KEY)).toBe("50");
+    expect(rawCredits()).toHaveTextContent("1,250");
     expect(
-      within(metric("已用 Credits（接口原始）")).getByText("1,250"),
+      within(metric("已用额度 Token 等效容量")).getByText("1K"),
     ).toBeInTheDocument();
   });
   it("invalid conversion cannot turn into zero dollars", () => {
@@ -68,11 +104,9 @@ describe("CodexPersonalCreditsPanel", () => {
     });
     expect(screen.getByRole("alert")).toBeInTheDocument();
     expect(
-      within(metric("已用美元等值（估算）")).getByText("待同步 / 待估算"),
+      within(metric("已用额度美元等效容量")).getByText("待同步 / 待估算"),
     ).toBeInTheDocument();
-    expect(
-      within(metric("已用 Credits（接口原始）")).getByText("1,250"),
-    ).toBeInTheDocument();
+    expect(rawCredits()).toHaveTextContent("1,250");
   });
   it("preserves totals when model endpoint fails", () => {
     render(
@@ -81,9 +115,11 @@ describe("CodexPersonalCreditsPanel", () => {
         cycle={cycle}
       />,
     );
-    expect(screen.getByText(/模型明细缺失或校验失败/)).toBeInTheDocument();
     expect(
-      within(metric("100% 周期美元等值（估算）")).getByText("$250.00"),
+      screen.queryByText(/模型明细缺失或校验失败/),
+    ).not.toBeInTheDocument();
+    expect(
+      within(metric("完整周期美元等效容量")).getByText("$250.00"),
     ).toBeInTheDocument();
   });
   it("unknown or invalid data remains visibly unavailable", () => {
@@ -96,8 +132,27 @@ describe("CodexPersonalCreditsPanel", () => {
     expect(screen.getByTestId("credits-totals-warning")).toHaveTextContent(
       "校验失败",
     );
+    expect(rawCredits()).toHaveTextContent("待同步 / 待估算");
     expect(
-      within(metric("已用 Credits（接口原始）")).getByText("待同步 / 待估算"),
+      within(metric("已用额度美元等效容量")).getByText("待同步 / 待估算"),
+    ).toBeInTheDocument();
+  });
+  it("keeps warnings that affect totals while hiding model-only details", () => {
+    render(
+      <CodexPersonalCreditsPanel
+        data={{ ...data, days: [{ ...data.days[0], credits: null }] }}
+        cycle={{ ...cycle, startMs: Date.UTC(2026, 8, 10, 12) }}
+      />,
+    );
+    expect(screen.getByText(/仅合计已知部分/)).toHaveTextContent("2026-09-10");
+    expect(screen.getByText(/周期边界日计入整日数据/)).toHaveTextContent(
+      "2026-09-10",
+    );
+    expect(
+      within(metric("完整周期美元等效容量")).getByText("待同步 / 待估算"),
+    ).toBeInTheDocument();
+    expect(
+      within(metric("完整周期 Token 等效容量")).getByText("5K"),
     ).toBeInTheDocument();
   });
 });
