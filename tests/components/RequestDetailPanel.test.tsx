@@ -77,4 +77,19 @@ describe("RequestDetailPanel token metrics", () => {
       "usage.outputCost()",
     ]);
   });
+
+  it("adds output speed without replacing the separate cache-write metric", () => {
+    render(<RequestDetailPanel requestId="request-1" onClose={() => {}} />);
+
+    const tokenSection = screen.getByText("usage.tokenUsage").parentElement;
+    const metrics = new Map(
+      Array.from(tokenSection?.querySelectorAll("dt") ?? []).map((label) => [
+        label.textContent,
+        label.nextElementSibling?.textContent,
+      ]),
+    );
+    expect(metrics.get("usage.cacheCreationTokens")).toBe("202");
+    expect(metrics.get("usage.cacheReadTokens")).toBe("303");
+    expect(metrics.get("usage.outputTokens")).toBe("404(404 tps)");
+  });
 });

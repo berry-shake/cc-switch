@@ -11,6 +11,7 @@ import {
   hasKnownCacheWriteTokens,
   isUnpricedUsage,
 } from "@/types/usage";
+import { formatOutputTokensPerSecond } from "./format";
 
 interface RequestDetailPanelProps {
   requestId: string;
@@ -61,6 +62,7 @@ export function RequestDetailPanel({
   const isCacheInclusive = request.inputTokens !== freshInput;
   const cacheWriteKnown = hasKnownCacheWriteTokens(request);
   const unpriced = isUnpricedUsage(request);
+  const outputTps = formatOutputTokensPerSecond(request);
 
   return (
     <Dialog open onOpenChange={onClose}>
@@ -209,6 +211,11 @@ export function RequestDetailPanel({
                 </dt>
                 <dd className="font-mono">
                   {request.outputTokens.toLocaleString()}
+                  {outputTps != null && (
+                    <span className="ml-2 text-xs text-muted-foreground font-normal">
+                      ({outputTps} tps)
+                    </span>
+                  )}
                 </dd>
               </div>
               <div className="col-span-2">

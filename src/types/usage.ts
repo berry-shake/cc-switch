@@ -198,7 +198,8 @@ export type AppType =
   | "grokbuild"
   | "opencode"
   | "pi"
-  | "omp";
+  | "omp"
+  | "mcode";
 
 export type AppTypeFilter = "all" | AppType;
 
@@ -210,6 +211,7 @@ export const KNOWN_APP_TYPES: ReadonlyArray<AppType> = [
   "opencode",
   "pi",
   "omp",
+  "mcode",
 ];
 
 /**
@@ -237,6 +239,7 @@ const PARTIAL_CACHE_WRITE_APP_TYPES: ReadonlySet<string> = new Set([
   "codex",
   "pi",
   "omp",
+  "mcode",
 ]);
 
 export type CacheWriteAvailability = "ok" | "partial" | "na";

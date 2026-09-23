@@ -138,7 +138,7 @@ impl ConfigService {
             AppType::Hermes => {
                 // Hermes uses additive mode, no live sync needed
             }
-            AppType::Pi | AppType::Omp => {
+            AppType::Pi | AppType::Omp | AppType::Mcode => {
                 // Native model catalogs are managed by their dedicated adapters;
                 // this legacy single-provider path must not rewrite them.
             }

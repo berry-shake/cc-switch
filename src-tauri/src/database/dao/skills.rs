@@ -23,7 +23,7 @@ impl Database {
             .prepare(
                 "SELECT id, name, description, directory, repo_owner, repo_name, repo_branch,
                         readme_url, enabled_claude, enabled_codex, enabled_gemini, enabled_grokbuild,
-                        enabled_opencode, enabled_hermes, enabled_omp, installed_at, content_hash, updated_at
+                        enabled_opencode, enabled_hermes, enabled_omp, installed_at, content_hash, updated_at, enabled_mcode
                  FROM skills ORDER BY name ASC",
             )
             .map_err(|e| AppError::Database(e.to_string()))?;
@@ -48,6 +48,7 @@ impl Database {
                         hermes: row.get(13)?,
                         pi: false,
                         omp: row.get(14)?,
+                        mcode: row.get(18)?,
                     },
                     installed_at: row.get(15)?,
                     content_hash: row.get(16)?,
@@ -71,7 +72,7 @@ impl Database {
             .prepare(
                 "SELECT id, name, description, directory, repo_owner, repo_name, repo_branch,
                         readme_url, enabled_claude, enabled_codex, enabled_gemini, enabled_grokbuild,
-                        enabled_opencode, enabled_hermes, enabled_omp, installed_at, content_hash, updated_at
+                        enabled_opencode, enabled_hermes, enabled_omp, installed_at, content_hash, updated_at, enabled_mcode
                  FROM skills WHERE id = ?1",
             )
             .map_err(|e| AppError::Database(e.to_string()))?;
@@ -95,6 +96,7 @@ impl Database {
                     hermes: row.get(13)?,
                     pi: false,
                     omp: row.get(14)?,
+                    mcode: row.get(18)?,
                 },
                 installed_at: row.get(15)?,
                 content_hash: row.get(16)?,
@@ -116,8 +118,8 @@ impl Database {
             "INSERT OR REPLACE INTO skills
              (id, name, description, directory, repo_owner, repo_name, repo_branch,
               readme_url, enabled_claude, enabled_codex, enabled_gemini, enabled_grokbuild, enabled_opencode, enabled_hermes, enabled_omp,
-              installed_at, content_hash, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
+              installed_at, content_hash, updated_at, enabled_mcode)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
             params![
                 skill.id,
                 skill.name,
@@ -137,6 +139,7 @@ impl Database {
                 skill.installed_at,
                 skill.content_hash,
                 skill.updated_at,
+                skill.apps.mcode,
             ],
         )
         .map_err(|e| AppError::Database(e.to_string()))?;
@@ -205,8 +208,8 @@ impl Database {
         let conn = lock_conn!(self.conn);
         let affected = conn
             .execute(
-                "UPDATE skills SET enabled_claude = ?1, enabled_codex = ?2, enabled_gemini = ?3, enabled_grokbuild = ?4, enabled_opencode = ?5, enabled_hermes = ?6, enabled_omp = ?7 WHERE id = ?8",
-                params![apps.claude, apps.codex, apps.gemini, apps.grokbuild, apps.opencode, apps.hermes, apps.omp, id],
+                "UPDATE skills SET enabled_claude = ?1, enabled_codex = ?2, enabled_gemini = ?3, enabled_grokbuild = ?4, enabled_opencode = ?5, enabled_hermes = ?6, enabled_omp = ?7, enabled_mcode = ?8 WHERE id = ?9",
+                params![apps.claude, apps.codex, apps.gemini, apps.grokbuild, apps.opencode, apps.hermes, apps.omp, apps.mcode, id],
             )
             .map_err(|e| AppError::Database(e.to_string()))?;
         Ok(affected > 0)
@@ -327,6 +330,32 @@ mod tests {
             installed_at: 1,
             content_hash: Some(format!("{name}-hash")),
             updated_at: 2,
+        }
+    }
+
+    #[test]
+    fn omp_and_mcode_flags_round_trip_independently() {
+        let db = Database::memory().expect("memory db");
+        let mut original = skill("shared", "original", SkillApps::only(&AppType::Omp));
+        for (omp, mcode) in [(true, false), (false, true), (true, true), (false, false)] {
+            original.apps.omp = omp;
+            original.apps.mcode = mcode;
+            db.save_skill(&original).expect("save independent flags");
+            let single = db.get_installed_skill("shared").unwrap().unwrap();
+            let all = db.get_all_installed_skills().unwrap();
+            for stored in [&single, &all["shared"]] {
+                assert_eq!(stored.apps, original.apps);
+                assert_eq!(stored.installed_at, original.installed_at);
+                assert_eq!(stored.content_hash, original.content_hash);
+                assert_eq!(stored.updated_at, original.updated_at);
+            }
+            let mut toggled = original.apps.clone();
+            toggled.mcode = !mcode;
+            assert!(db.update_skill_apps("shared", &toggled).unwrap());
+            assert_eq!(
+                db.get_installed_skill("shared").unwrap().unwrap().apps,
+                toggled
+            );
         }
     }
 

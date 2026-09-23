@@ -160,6 +160,7 @@ pub(crate) fn parse_mcp_apps(apps_str: &str) -> Result<McpApps, AppError> {
         opencode: false,
         hermes: false,
         omp: false,
+        mcode: false,
     };
 
     for app in apps_str.split(',') {
@@ -175,6 +176,7 @@ pub(crate) fn parse_mcp_apps(apps_str: &str) -> Result<McpApps, AppError> {
             }
             "hermes" => apps.hermes = true,
             "omp" => apps.omp = true,
+            "mcode" => apps.mcode = true,
             other => {
                 return Err(AppError::InvalidInput(format!(
                     "Invalid app in 'apps': {other}"

@@ -70,12 +70,14 @@ const McpFormModal: React.FC<McpFormModalProps> = ({
     openclaw: boolean;
     hermes: boolean;
     omp: boolean;
+    mcode: boolean;
   }>(() => {
     if (initialData?.apps) {
       return {
         ...initialData.apps,
         grokbuild: initialData.apps.grokbuild ?? false,
         omp: initialData.apps.omp ?? false,
+        mcode: initialData.apps.mcode ?? false,
       };
     }
     return {
@@ -87,6 +89,7 @@ const McpFormModal: React.FC<McpFormModalProps> = ({
       openclaw: defaultEnabledApps.includes("openclaw"),
       hermes: defaultEnabledApps.includes("hermes"),
       omp: defaultEnabledApps.includes("omp"),
+      mcode: defaultEnabledApps.includes("mcode"),
     };
   });
 
@@ -642,6 +645,21 @@ const McpFormModal: React.FC<McpFormModalProps> = ({
                     className="text-sm text-foreground cursor-pointer select-none"
                   >
                     {t("mcp.unifiedPanel.apps.omp", { defaultValue: "OMP" })}
+                  </label>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    id="enable-mcode"
+                    checked={enabledApps.mcode}
+                    onCheckedChange={(checked: boolean) =>
+                      setEnabledApps({ ...enabledApps, mcode: checked })
+                    }
+                  />
+                  <label
+                    htmlFor="enable-mcode"
+                    className="text-sm text-foreground cursor-pointer select-none"
+                  >
+                    {t("mcp.unifiedPanel.apps.mcode")}
                   </label>
                 </div>
               </div>
