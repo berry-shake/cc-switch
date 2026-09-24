@@ -1217,6 +1217,30 @@ fn model_pricing_seed_includes_claude_5_1_and_standard_sonnet_5_prices() {
 }
 
 #[test]
+fn model_pricing_seed_includes_gpt_6_sol_luna_standard_api_rates() {
+    let db = Database::memory().expect("create memory db");
+    let conn = db.conn.lock().expect("lock conn");
+    for (model, expected) in [
+        ("gpt-6-sol", ("2", "10", "0.20", "2.50")),
+        ("gpt-6-luna", ("0.10", "0.50", "0.01", "0.125")),
+    ] {
+        let rates: (String, String, String, String) = conn.query_row(
+            "SELECT input_cost_per_million, output_cost_per_million, cache_read_cost_per_million, cache_creation_cost_per_million FROM model_pricing WHERE model_id = ?1",
+            [model], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        ).expect("new model price");
+        assert_eq!(
+            rates,
+            (
+                expected.0.into(),
+                expected.1.into(),
+                expected.2.into(),
+                expected.3.into()
+            )
+        );
+    }
+}
+
+#[test]
 fn model_pricing_seed_includes_gpt_6_astra() {
     let db = Database::memory().expect("create memory db");
     let conn = db.conn.lock().expect("lock conn");

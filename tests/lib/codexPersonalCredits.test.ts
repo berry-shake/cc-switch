@@ -43,15 +43,20 @@ function data(): CodexPersonalCredits {
 
 describe("personal raw Credits", () => {
   beforeEach(() => localStorage.clear());
-  it("uses raw credits without a price table, cache correction or another Fast multiplier", () => {
-    const result = summarizePersonalCredits(data(), cycle, 25)!;
-    expect(result.credits).toBe(1250.25);
-    expect(result.usedUsd).toBe(50.01);
-    expect(result.totalUsd).toBeCloseTo(250.05);
-    expect(result.remainingUsd).toBeCloseTo(200.04);
-    expect(result.totalTokens).toBe(5000);
-    expect(result.models[0].credits).toBe(1250.25);
-  });
+  it.each(["gpt-6-astra", "gpt-6-sol", "gpt-6-luna"])(
+    "uses %s raw credits without another Fast multiplier",
+    (model) => {
+      const value = data();
+      value.days[0].models[0].model = model;
+      const result = summarizePersonalCredits(value, cycle, 25)!;
+      expect(result.credits).toBe(1250.25);
+      expect(result.usedUsd).toBe(50.01);
+      expect(result.totalUsd).toBeCloseTo(250.05);
+      expect(result.remainingUsd).toBeCloseTo(200.04);
+      expect(result.totalTokens).toBe(5000);
+      expect(result.models[0].credits).toBe(1250.25);
+    },
+  );
   it("keeps Credits and USD even when all tokens are missing", () => {
     const value = data();
     value.days[0].tokens.totalTokens = null;

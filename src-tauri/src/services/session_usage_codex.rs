@@ -46,7 +46,7 @@ use windows_sys::Win32::Storage::FileSystem::{
 const CODEX_THREAD_REQUEST_ID_PREFIX: &str = "codex_session:thread-v1";
 
 /// Codex rollout 里记录的是请求时应用的 service tier，不保证等同于上游最终
-/// served tier。个人版额度估算按用户脚本口径把 Fast 记为 Standard 的 2.5 倍；
+/// served tier。订阅额度估算按官方 Speed 价表使用模型对应的 Fast 倍率；
 /// 无法识别的旧日志保持 Unknown，并保守使用 Standard 倍率。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CodexServiceTier {
@@ -74,6 +74,8 @@ impl CodexServiceTier {
                 if matches!(
                     family,
                     "gpt-6-astra"
+                        | "gpt-6-sol"
+                        | "gpt-6-luna"
                         | "gpt-5.6"
                         | "gpt-5.6-sol"
                         | "gpt-5.6-terra"
@@ -2456,7 +2458,16 @@ fn insert_codex_session_entry_on_conn(
 
 /// 查找 Codex 模型定价（带归一化）
 fn find_codex_pricing(conn: &rusqlite::Connection, model_id: &str) -> Option<ModelPricing> {
-    find_model_pricing(conn, &normalize_codex_model(model_id))
+    let model_id = normalize_codex_model(model_id);
+    let mut pricing = find_model_pricing(conn, &model_id)?;
+    // This importer estimates subscription quota, not an API invoice. Codex
+    // Credits have no separate cache-write charge. Keep the API price table and
+    // recorded cache-write tokens intact; only this quota estimate is adjusted.
+    // https://learn.chatgpt.com/docs/pricing#token-rates
+    if CodexServiceTier::Fast.quota_cost_multiplier(&model_id) > Decimal::ONE {
+        pricing.cache_creation_cost_per_million = Decimal::ZERO;
+    }
+    Some(pricing)
 }
 
 #[cfg(test)]
@@ -3343,7 +3354,15 @@ mod tests {
 
     #[test]
     fn test_quota_multiplier_matches_personal_script_rates() {
-        for model in ["gpt-6-astra", "gpt-6-astra-high", "gpt-6-astra-xhigh"] {
+        for model in [
+            "gpt-6-astra",
+            "gpt-6-astra-high",
+            "gpt-6-astra-xhigh",
+            "gpt-6-sol",
+            "gpt-6-sol-high",
+            "gpt-6-luna",
+            "gpt-6-luna-xhigh",
+        ] {
             assert_eq!(
                 CodexServiceTier::Fast.quota_cost_multiplier(model),
                 Decimal::new(25, 1)
@@ -4463,7 +4482,8 @@ mod tests {
 
     #[test]
     #[serial_test::serial]
-    fn test_fast_cache_write_is_persisted_and_costed() -> Result<(), AppError> {
+    fn test_fast_keeps_cache_write_tokens_without_subscription_write_charge() -> Result<(), AppError>
+    {
         clear_codex_replay_caches();
         let db = Database::memory()?;
         let temp = tempdir().unwrap();
@@ -4512,7 +4532,7 @@ mod tests {
         assert_eq!(row.4.parse::<Decimal>().unwrap(), Decimal::new(32, 1));
         assert_eq!(row.5.parse::<Decimal>().unwrap(), Decimal::new(2, 1));
         assert_eq!(row.6.parse::<Decimal>().unwrap(), Decimal::new(4, 2));
-        assert_eq!(row.7.parse::<Decimal>().unwrap(), Decimal::new(5, 1));
+        assert_eq!(row.7.parse::<Decimal>().unwrap(), Decimal::ZERO);
 
         let base_cost = row.4.parse::<Decimal>().unwrap()
             + row.5.parse::<Decimal>().unwrap()
@@ -4527,9 +4547,61 @@ mod tests {
             )?
             .parse()
             .unwrap();
-        assert_eq!(base_cost, Decimal::new(394, 2));
-        assert_eq!(total_cost, Decimal::new(985, 2));
+        assert_eq!(base_cost, Decimal::new(344, 2));
+        assert_eq!(total_cost, Decimal::new(86, 1));
         assert_eq!(total_cost, base_cost * Decimal::new(25, 1));
+        Ok(())
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn gpt_6_sol_luna_import_prices_fast_and_standard_without_changing_api_rates(
+    ) -> Result<(), AppError> {
+        clear_codex_replay_caches();
+        for (model, tier, expected) in [
+            ("gpt-6-sol", "priority", "4.3"),
+            ("gpt-6-sol-high", "fast", "4.3"),
+            ("gpt-6-luna", "fast", "0.215"),
+            ("gpt-6-luna-xhigh", "default", "0.086"),
+        ] {
+            let db = Database::memory()?;
+            let temp = tempdir().unwrap();
+            let file = rollout_path(temp.path(), PARENT_ID);
+            write_jsonl(
+                &file,
+                &[
+                    session_meta(PARENT_ID),
+                    thread_settings_at(Some(tier), model, "2026-09-24T03:00:01Z"),
+                    token_count_with_cache_write_at(
+                        1_000_000,
+                        100_000,
+                        100_000,
+                        10_000,
+                        "2026-09-24T03:00:02Z",
+                    ),
+                ],
+            );
+            assert_eq!(sync_test_file(&db, &file, &[&file])?.imported, 1);
+            assert_eq!(sync_test_file(&db, &file, &[&file])?.imported, 0);
+            let conn = lock_conn!(db.conn);
+            let (total, write_tokens, write_cost): (String, i64, String) = conn.query_row(
+                "SELECT total_cost_usd, cache_creation_tokens, cache_creation_cost_usd FROM proxy_request_logs WHERE data_source='codex_session'",
+                [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?;
+            assert_eq!(
+                total.parse::<Decimal>().unwrap(),
+                expected.parse::<Decimal>().unwrap(),
+                "{model}"
+            );
+            assert_eq!(write_tokens, 100_000);
+            assert_eq!(write_cost.parse::<Decimal>().unwrap(), Decimal::ZERO);
+            // The shared price table still retains the nonzero API write fee.
+            assert!(
+                find_model_pricing(&conn, model)
+                    .unwrap()
+                    .cache_creation_cost_per_million
+                    > Decimal::ZERO
+            );
+        }
         Ok(())
     }
 
@@ -4563,8 +4635,8 @@ mod tests {
         assert_eq!(multiplier.parse::<Decimal>().unwrap(), Decimal::new(25, 1));
         assert_eq!(cache_write, 100_000);
         // Total input includes cached reads and writes: 800k uncached, 100k read,
-        // 100k write and 10k output, all at the 2.5x quota-equivalent multiplier.
-        assert_eq!(total.parse::<Decimal>().unwrap(), Decimal::new(24625, 3));
+        // 100k write (no separate credit charge) and 10k output, at 2.5x.
+        assert_eq!(total.parse::<Decimal>().unwrap(), Decimal::new(215, 1));
         Ok(())
     }
 

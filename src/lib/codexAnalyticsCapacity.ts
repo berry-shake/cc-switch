@@ -121,13 +121,15 @@ function modelFamily(modelName: string): string {
   return normalized;
 }
 
-/** 与 usage.js 及本地 Codex JSONL 导入保持一致的额度倍数。 */
+/** 官方订阅 Credits 倍率；不是 API Fast 的美元计价倍率。 */
 function fastMultiplier(modelName: string, speed: string): number {
-  if (normalizeSpeed(speed) !== "fast") return 1;
+  if (!["fast", "priority"].includes(normalizeSpeed(speed))) return 1;
   const family = modelFamily(modelName);
   if (
     [
       "gpt-6-astra",
+      "gpt-6-sol",
+      "gpt-6-luna",
       "gpt-5.6",
       "gpt-5.6-sol",
       "gpt-5.6-terra",
@@ -173,7 +175,12 @@ function getModelPrice(
   return {
     uncachedInput: base.uncachedInput * multiplier,
     cachedInput: base.cachedInput * multiplier,
-    cacheWriteInput: base.cacheWriteInput * multiplier,
+    // Codex credit billing has no separate cache-write charge. Preserve token
+    // counts and API pricing, but do not import the API write fee into quota.
+    cacheWriteInput:
+      fastMultiplier(modelName, "fast") > 1
+        ? 0
+        : base.cacheWriteInput * multiplier,
     output: base.output * multiplier,
   };
 }

@@ -74,7 +74,58 @@ function tokens(
 }
 
 describe("codexAnalyticsCapacity", () => {
-  it("applies Astra Fast 2.5x to token-priced usage including cache writes", () => {
+  it.each([
+    ["gpt-6-sol", "priority", "2", "10", "0.2", "2.5", 3.05],
+    ["gpt-6-luna-xhigh", "fast", "0.1", "0.5", "0.01", "0.125", 0.1525],
+    ["gpt-6-sol-high", "standard", "2", "10", "0.2", "2.5", 1.22],
+  ])(
+    "prices %s %s using subscription rates while keeping token counts",
+    (model, speed, input, output, read, write, expected) => {
+      const counts = tokens(100_000, 100_000, 100_000, 100_000);
+      const analytics: CodexAnalyticsUsage = {
+        accountMode: "workspace",
+        queriedAt,
+        days: [
+          {
+            date: "2026-08-22",
+            missingTokenData: false,
+            missingModelBreakdown: false,
+            totals: counts,
+            models: [
+              {
+                model: String(model),
+                speed: String(speed),
+                credits: 0,
+                tokens: counts,
+              },
+            ],
+          },
+        ],
+      };
+      const pricing = [
+        {
+          modelId: String(model).replace(/-(high|xhigh)$/, ""),
+          displayName: String(model),
+          inputCostPerMillion: String(input),
+          outputCostPerMillion: String(output),
+          cacheReadCostPerMillion: String(read),
+          cacheCreationCostPerMillion: String(write),
+        },
+      ];
+      const result = deriveCodexAnalyticsCycleCapacity(
+        quota,
+        analytics,
+        pricing,
+        queriedAt,
+      );
+      expect(result?.usedUsd).toBeCloseTo(Number(expected), 8);
+      expect(result?.usedTokens).toBe(400_000);
+      expect(result?.hasUnknownPricing).toBe(false);
+      expect(pricing[0].cacheCreationCostPerMillion).toBe(write);
+    },
+  );
+
+  it("applies Astra Fast 2.5x without charging subscription cache writes", () => {
     const analytics: CodexAnalyticsUsage = {
       accountMode: "workspace",
       queriedAt,
@@ -108,12 +159,12 @@ describe("codexAnalyticsCapacity", () => {
     expect(
       deriveCodexAnalyticsCycleCapacity(quota, analytics, pricing, queriedAt)
         ?.usedUsd,
-    ).toBe(183.75);
+    ).toBe(152.5);
     analytics.days[0].models[0].speed = "standard";
     expect(
       deriveCodexAnalyticsCycleCapacity(quota, analytics, pricing, queriedAt)
         ?.usedUsd,
-    ).toBe(73.5);
+    ).toBe(61);
   });
   it("never silently falls back to token pricing for incomplete raw Credits", () => {
     const analytics: CodexAnalyticsUsage = {
@@ -134,7 +185,7 @@ describe("codexAnalyticsCapacity", () => {
       ),
     ).toBeNull();
   });
-  it("prices workspace model buckets directly, including GPT-5.6 cache writes", () => {
+  it("preserves workspace cache-write tokens without importing API write fees", () => {
     const analytics: CodexAnalyticsUsage = {
       accountMode: "workspace",
       queriedAt,
@@ -165,9 +216,9 @@ describe("codexAnalyticsCapacity", () => {
 
     expect(result).not.toBeNull();
     expect(result?.usedTokens).toBe(3_600_000);
-    expect(result?.usedUsd).toBeCloseTo(15.3, 6);
+    expect(result?.usedUsd).toBeCloseTo(14.8, 6);
     expect(result?.totalTokens).toBe(14_400_000);
-    expect(result?.totalUsd).toBeCloseTo(61.2, 6);
+    expect(result?.totalUsd).toBeCloseTo(59.2, 6);
     expect(result?.hasUnknownPricing).toBe(false);
     expect(result?.hasEstimatedAllocation).toBe(false);
   });
