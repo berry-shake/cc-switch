@@ -2461,11 +2461,12 @@ fn find_codex_pricing(conn: &rusqlite::Connection, model_id: &str) -> Option<Mod
     let model_id = normalize_codex_model(model_id);
     let mut pricing = find_model_pricing(conn, &model_id)?;
     // This importer estimates subscription quota, not an API invoice. Codex
-    // Credits have no separate cache-write charge. Keep the API price table and
-    // recorded cache-write tokens intact; only this quota estimate is adjusted.
+    // Credits have no separate cache-write charge. This calculator splits writes
+    // out of total input, so bill them at the ordinary input rate, not zero or
+    // the API write premium. Keep shared prices and recorded tokens intact.
     // https://learn.chatgpt.com/docs/pricing#token-rates
     if CodexServiceTier::Fast.quota_cost_multiplier(&model_id) > Decimal::ONE {
-        pricing.cache_creation_cost_per_million = Decimal::ZERO;
+        pricing.cache_creation_cost_per_million = pricing.input_cost_per_million;
     }
     Some(pricing)
 }
@@ -4482,8 +4483,7 @@ mod tests {
 
     #[test]
     #[serial_test::serial]
-    fn test_fast_keeps_cache_write_tokens_without_subscription_write_charge() -> Result<(), AppError>
-    {
+    fn test_fast_bills_cache_write_tokens_as_ordinary_subscription_input() -> Result<(), AppError> {
         clear_codex_replay_caches();
         let db = Database::memory()?;
         let temp = tempdir().unwrap();
@@ -4532,7 +4532,7 @@ mod tests {
         assert_eq!(row.4.parse::<Decimal>().unwrap(), Decimal::new(32, 1));
         assert_eq!(row.5.parse::<Decimal>().unwrap(), Decimal::new(2, 1));
         assert_eq!(row.6.parse::<Decimal>().unwrap(), Decimal::new(4, 2));
-        assert_eq!(row.7.parse::<Decimal>().unwrap(), Decimal::ZERO);
+        assert_eq!(row.7.parse::<Decimal>().unwrap(), Decimal::new(4, 1));
 
         let base_cost = row.4.parse::<Decimal>().unwrap()
             + row.5.parse::<Decimal>().unwrap()
@@ -4547,8 +4547,8 @@ mod tests {
             )?
             .parse()
             .unwrap();
-        assert_eq!(base_cost, Decimal::new(344, 2));
-        assert_eq!(total_cost, Decimal::new(86, 1));
+        assert_eq!(base_cost, Decimal::new(384, 2));
+        assert_eq!(total_cost, Decimal::new(96, 1));
         assert_eq!(total_cost, base_cost * Decimal::new(25, 1));
         Ok(())
     }
@@ -4559,10 +4559,10 @@ mod tests {
     ) -> Result<(), AppError> {
         clear_codex_replay_caches();
         for (model, tier, expected) in [
-            ("gpt-6-sol", "priority", "4.3"),
-            ("gpt-6-sol-high", "fast", "4.3"),
-            ("gpt-6-luna", "fast", "0.215"),
-            ("gpt-6-luna-xhigh", "default", "0.086"),
+            ("gpt-6-sol", "priority", "4.8"),
+            ("gpt-6-sol-high", "fast", "4.8"),
+            ("gpt-6-luna", "fast", "0.24"),
+            ("gpt-6-luna-xhigh", "default", "0.096"),
         ] {
             let db = Database::memory()?;
             let temp = tempdir().unwrap();
@@ -4593,13 +4593,14 @@ mod tests {
                 "{model}"
             );
             assert_eq!(write_tokens, 100_000);
-            assert_eq!(write_cost.parse::<Decimal>().unwrap(), Decimal::ZERO);
-            // The shared price table still retains the nonzero API write fee.
+            let api_pricing = find_model_pricing(&conn, model).unwrap();
+            assert_eq!(
+                write_cost.parse::<Decimal>().unwrap(),
+                Decimal::new(1, 1) * api_pricing.input_cost_per_million
+            );
+            // The shared price table still retains the API write premium.
             assert!(
-                find_model_pricing(&conn, model)
-                    .unwrap()
-                    .cache_creation_cost_per_million
-                    > Decimal::ZERO
+                api_pricing.cache_creation_cost_per_million > api_pricing.input_cost_per_million
             );
         }
         Ok(())
@@ -4635,8 +4636,8 @@ mod tests {
         assert_eq!(multiplier.parse::<Decimal>().unwrap(), Decimal::new(25, 1));
         assert_eq!(cache_write, 100_000);
         // Total input includes cached reads and writes: 800k uncached, 100k read,
-        // 100k write (no separate credit charge) and 10k output, at 2.5x.
-        assert_eq!(total.parse::<Decimal>().unwrap(), Decimal::new(215, 1));
+        // 100k write (ordinary input rate) and 10k output, at 2.5x.
+        assert_eq!(total.parse::<Decimal>().unwrap(), Decimal::new(24, 0));
         Ok(())
     }
 

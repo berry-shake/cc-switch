@@ -75,9 +75,9 @@ function tokens(
 
 describe("codexAnalyticsCapacity", () => {
   it.each([
-    ["gpt-6-sol", "priority", "2", "10", "0.2", "2.5", 3.05],
-    ["gpt-6-luna-xhigh", "fast", "0.1", "0.5", "0.01", "0.125", 0.1525],
-    ["gpt-6-sol-high", "standard", "2", "10", "0.2", "2.5", 1.22],
+    ["gpt-6-sol", "priority", "2", "10", "0.2", "2.5", 3.55],
+    ["gpt-6-luna-xhigh", "fast", "0.1", "0.5", "0.01", "0.125", 0.1775],
+    ["gpt-6-sol-high", "standard", "2", "10", "0.2", "2.5", 1.42],
   ])(
     "prices %s %s using subscription rates while keeping token counts",
     (model, speed, input, output, read, write, expected) => {
@@ -125,7 +125,7 @@ describe("codexAnalyticsCapacity", () => {
     },
   );
 
-  it("applies Astra Fast 2.5x without charging subscription cache writes", () => {
+  it("applies Astra Fast 2.5x with cache writes billed as ordinary input", () => {
     const analytics: CodexAnalyticsUsage = {
       accountMode: "workspace",
       queriedAt,
@@ -159,12 +159,25 @@ describe("codexAnalyticsCapacity", () => {
     expect(
       deriveCodexAnalyticsCycleCapacity(quota, analytics, pricing, queriedAt)
         ?.usedUsd,
-    ).toBe(152.5);
+    ).toBe(177.5);
     analytics.days[0].models[0].speed = "standard";
     expect(
       deriveCodexAnalyticsCycleCapacity(quota, analytics, pricing, queriedAt)
         ?.usedUsd,
-    ).toBe(61);
+    ).toBe(71);
+    // Splitting ordinary input into a write bucket must not change the charge.
+    const unsplit = tokens(2_000_000, 1_000_000, 0, 1_000_000);
+    analytics.days[0].totals = unsplit;
+    analytics.days[0].models[0].tokens = unsplit;
+    expect(
+      deriveCodexAnalyticsCycleCapacity(quota, analytics, pricing, queriedAt)
+        ?.usedUsd,
+    ).toBe(71);
+    analytics.days[0].models[0].speed = "fast";
+    expect(
+      deriveCodexAnalyticsCycleCapacity(quota, analytics, pricing, queriedAt)
+        ?.usedUsd,
+    ).toBe(177.5);
   });
   it("never silently falls back to token pricing for incomplete raw Credits", () => {
     const analytics: CodexAnalyticsUsage = {
@@ -216,9 +229,9 @@ describe("codexAnalyticsCapacity", () => {
 
     expect(result).not.toBeNull();
     expect(result?.usedTokens).toBe(3_600_000);
-    expect(result?.usedUsd).toBeCloseTo(14.8, 6);
+    expect(result?.usedUsd).toBeCloseTo(15.2, 6);
     expect(result?.totalTokens).toBe(14_400_000);
-    expect(result?.totalUsd).toBeCloseTo(59.2, 6);
+    expect(result?.totalUsd).toBeCloseTo(60.8, 6);
     expect(result?.hasUnknownPricing).toBe(false);
     expect(result?.hasEstimatedAllocation).toBe(false);
   });

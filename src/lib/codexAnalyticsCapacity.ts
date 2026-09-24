@@ -175,11 +175,12 @@ function getModelPrice(
   return {
     uncachedInput: base.uncachedInput * multiplier,
     cachedInput: base.cachedInput * multiplier,
-    // Codex credit billing has no separate cache-write charge. Preserve token
-    // counts and API pricing, but do not import the API write fee into quota.
+    // Write tokens are split out of uncached input. Credit billing has no
+    // separate write charge, so price them as ordinary input, not as free tokens
+    // or at the API write premium. Preserve the token counts and shared prices.
     cacheWriteInput:
       fastMultiplier(modelName, "fast") > 1
-        ? 0
+        ? base.uncachedInput * multiplier
         : base.cacheWriteInput * multiplier,
     output: base.output * multiplier,
   };
