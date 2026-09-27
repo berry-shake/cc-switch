@@ -24,6 +24,8 @@ pub struct SessionMeta {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_config_dir: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub resume_command: Option<String>,
 }
 
@@ -115,7 +117,17 @@ pub fn load_messages(provider_id: &str, source_path: &str) -> Result<Vec<Session
     let path = Path::new(source_path);
     match provider_id {
         "codex" => codex::load_messages(path),
-        "claude" => claude::load_messages(path),
+        "claude" => {
+            let path = crate::claude_session_roots::roots()
+                .iter()
+                .find_map(|root| {
+                    crate::claude_session_roots::canonical_file(&root.projects_dir, path)
+                })
+                .ok_or_else(|| {
+                    "Claude session is outside the configured scan directories".to_string()
+                })?;
+            claude::load_messages(&path)
+        }
         "opencode" => opencode::load_messages(path),
         "openclaw" => openclaw::load_messages(path),
         "gemini" => gemini::load_messages(path),
@@ -217,7 +229,10 @@ fn delete_session_with_roots(
 fn provider_roots(provider_id: &str) -> Result<Vec<PathBuf>, String> {
     let roots = match provider_id {
         "codex" => codex::session_roots(),
-        "claude" => vec![crate::config::get_claude_config_dir().join("projects")],
+        "claude" => crate::claude_session_roots::roots()
+            .into_iter()
+            .map(|root| root.projects_dir)
+            .collect(),
         "opencode" => vec![opencode::get_opencode_data_dir()],
         "openclaw" => vec![crate::openclaw_config::get_openclaw_dir().join("agents")],
         "gemini" => vec![crate::gemini_config::get_gemini_dir().join("tmp")],

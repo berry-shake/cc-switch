@@ -378,6 +378,25 @@ describe("useSettings hook", () => {
     expect(invalidatePiDirectoryCachesMock).toHaveBeenCalledTimes(1);
   });
 
+  it("saves additional Claude scan roots without projecting providers or requiring restart", async () => {
+    settingsFormMock = createSettingsFormMock({
+      settings: {
+        ...serverSettings,
+        claudeAdditionalConfigDirs: ["/claude-work"],
+      },
+    });
+    const { result } = renderHook(() => useSettings());
+    let saved;
+    await act(async () => {
+      saved = await result.current.saveSettings(undefined, { silent: true });
+    });
+    expect(
+      (mutateAsyncMock.mock.calls[0][0] as Settings).claudeAdditionalConfigDirs,
+    ).toEqual(["/claude-work"]);
+    expect(syncCurrentProvidersLiveMock).not.toHaveBeenCalled();
+    expect(saved).toEqual({ requiresRestart: false });
+  });
+
   it("shows toast when Claude plugin sync fails but continues flow", async () => {
     // 设置服务器状态为 false,本地状态为 true,触发状态变化
     serverSettings = {

@@ -1,6 +1,6 @@
 //! Claude Code 会话日志使用追踪
 //!
-//! 从 ~/.claude/projects/ 下的 JSONL 会话文件中提取 token 使用数据，
+//! 从主配置与额外扫描目录的 projects/ 下提取 JSONL token 使用数据，
 //! 实现无代理模式下的使用统计。
 //!
 //! ## 数据流
@@ -8,7 +8,8 @@
 //! ~/.claude/projects/*/*.jsonl → 增量解析 → 去重 → 费用计算 → proxy_request_logs 表
 //! ```
 
-use crate::config::get_claude_config_dir;
+use super::claude_usage_ledger;
+use crate::claude_session_roots::{self, ClaudeSessionRoot};
 use crate::database::{lock_conn, Database};
 use crate::error::AppError;
 use crate::proxy::usage::calculator::{CostCalculator, ModelPricing};
@@ -19,7 +20,7 @@ use crate::services::usage_stats::{
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
@@ -190,30 +191,62 @@ struct ParsedAssistantUsage {
 
 /// 同步 Claude Code 会话日志到使用统计数据库
 pub fn sync_claude_session_logs(db: &Database) -> Result<SessionSyncResult, AppError> {
-    let projects_dir = get_claude_config_dir().join("projects");
-    if !projects_dir.exists() {
-        return Ok(SessionSyncResult {
-            imported: 0,
-            skipped: 0,
-            files_scanned: 0,
-            suspected_duplicates: 0,
-            deferred_files: 0,
-            errors: vec![],
-        });
-    }
+    sync_claude_roots(db, &claude_session_roots::roots())
+}
 
+fn sync_claude_roots(
+    db: &Database,
+    roots: &[ClaudeSessionRoot],
+) -> Result<SessionSyncResult, AppError> {
     let mut result = SessionSyncResult {
         imported: 0,
         skipped: 0,
         files_scanned: 0,
         suspected_duplicates: 0,
         deferred_files: 0,
-        errors: vec![],
+        errors: claude_usage_ledger::bootstrap(db)?,
     };
 
     // 收集所有 .jsonl 文件
-    let jsonl_files = collect_jsonl_files(&projects_dir);
-    let cursors = load_sync_cursors(db)?;
+    let mut jsonl_files = Vec::new();
+    let mut seen = HashSet::new();
+    for root in roots {
+        if let Err(error) = fs::read_dir(&root.projects_dir) {
+            if error.kind() != std::io::ErrorKind::NotFound
+                || root.config_dir != crate::config::get_home_dir().join(".claude")
+            {
+                result.errors.push(format!(
+                    "{}: 扫描目录不可用: {error}",
+                    root.projects_dir.display()
+                ));
+            }
+            continue;
+        }
+        for file in collect_jsonl_files(&root.projects_dir) {
+            if let Some(file) = claude_session_roots::canonical_file(&root.projects_dir, &file) {
+                if seen.insert(file.clone()) {
+                    jsonl_files.push(file);
+                }
+            }
+        }
+    }
+    // Preserve old cursors stored with a symlink or a non-canonical spelling.
+    let mut cursors: HashMap<String, SyncCursor> = HashMap::new();
+    for (path, cursor) in load_sync_cursors(db)? {
+        let key = fs::canonicalize(&path)
+            .map(|path| path.to_string_lossy().into_owned())
+            .unwrap_or(path);
+        cursors
+            .entry(key)
+            .and_modify(|old| {
+                if (cursor.last_byte_offset, cursor.last_line_offset)
+                    > (old.last_byte_offset, old.last_line_offset)
+                {
+                    *old = cursor;
+                }
+            })
+            .or_insert(cursor);
+    }
 
     for file_path in &jsonl_files {
         result.files_scanned += 1;
@@ -223,8 +256,15 @@ pub fn sync_claude_session_logs(db: &Database) -> Result<SessionSyncResult, AppE
             Ok(file_sync) => {
                 result.imported += file_sync.imported;
                 result.skipped += file_sync.skipped;
-                if file_sync.incomplete_tail || file_sync.read_error.is_some() {
+                if file_sync.incomplete_tail
+                    || file_sync.read_error.is_some()
+                    || file_sync.historical_deferred > 0
+                {
                     result.deferred_files += 1;
+                }
+                if file_sync.historical_deferred > 0 {
+                    result.suspected_duplicates += file_sync.historical_deferred;
+                    result.errors.push(format!("{}: {} 条旧请求无法确认是否已计入历史汇总，暂停导入且保留断点；未重算历史费用", file_path.display(), file_sync.historical_deferred));
                 }
                 if let Some(err) = file_sync.read_error {
                     let msg = format!(
@@ -276,6 +316,13 @@ pub fn sync_claude_session_logs(db: &Database) -> Result<SessionSyncResult, AppE
 /// 会被 `sync_single_file` 天然跳过，因此这里无需按文件名过滤。
 fn collect_jsonl_files(projects_dir: &Path) -> Vec<PathBuf> {
     let mut files = Vec::new();
+    let Ok(canonical_root) = projects_dir.canonicalize() else {
+        return files;
+    };
+    let within_root = |path: &Path| {
+        path.canonicalize()
+            .is_ok_and(|path| path.starts_with(&canonical_root))
+    };
 
     let entries = match fs::read_dir(projects_dir) {
         Ok(e) => e,
@@ -284,30 +331,33 @@ fn collect_jsonl_files(projects_dir: &Path) -> Vec<PathBuf> {
 
     for entry in entries.flatten() {
         let path = entry.path();
-        if !path.is_dir() {
+        if !path.is_dir() || !within_root(&path) {
             continue;
         }
         // 每个项目目录下的 .jsonl 文件
         if let Ok(sub_entries) = fs::read_dir(&path) {
             for sub_entry in sub_entries.flatten() {
                 let sub_path = sub_entry.path();
+                if !within_root(&sub_path) {
+                    continue;
+                }
                 if sub_path.extension().and_then(|e| e.to_str()) == Some("jsonl") {
                     // 主会话 JSONL 文件
                     files.push(sub_path);
                 } else if sub_path.is_dir() {
                     // 扫描子 agent 目录: 项目/SESSION_ID/subagents/*.jsonl
                     let subagents_dir = sub_path.join("subagents");
-                    if subagents_dir.is_dir() {
+                    if subagents_dir.is_dir() && within_root(&subagents_dir) {
                         push_jsonl_children(&subagents_dir, &mut files);
 
                         // 额外下探 Workflow 子 agent:
                         // 项目/SESSION_ID/subagents/workflows/wf_<ID>/*.jsonl
                         let workflows_dir = subagents_dir.join("workflows");
-                        if workflows_dir.is_dir() {
+                        if workflows_dir.is_dir() && within_root(&workflows_dir) {
                             if let Ok(wf_entries) = fs::read_dir(&workflows_dir) {
                                 for wf_entry in wf_entries.flatten() {
                                     let wf_path = wf_entry.path();
-                                    if wf_path.is_dir() {
+                                    if wf_path.is_dir() && within_root(&wf_path) {
                                         push_jsonl_children(&wf_path, &mut files);
                                     }
                                 }
@@ -337,6 +387,7 @@ fn push_jsonl_children(dir: &Path, files: &mut Vec<PathBuf>) {
 /// 单文件同步结果
 #[derive(Debug, Default)]
 struct ClaudeFileSync {
+    historical_deferred: u32,
     imported: u32,
     skipped: u32,
     /// 文件尾部有未以 `\n` 终结的残段（写入方可能正在追加）。残段若能
@@ -357,7 +408,7 @@ struct ClaudeFileSync {
 const TAIL_FINGERPRINT_BYTES: i64 = 4096;
 
 /// 游标边界前尾部字节的指纹。域标签防止与其他用途的哈希混淆。
-fn claude_tail_fingerprint(tail: &[u8]) -> i64 {
+pub(super) fn claude_tail_fingerprint(tail: &[u8]) -> i64 {
     let mut hasher = Sha256::new();
     hasher.update(b"claude-session-tail-v1");
     hasher.update(tail);
@@ -369,7 +420,7 @@ fn claude_tail_fingerprint(tail: &[u8]) -> i64 {
 
 /// 读取 `end` 之前最多 [`TAIL_FINGERPRINT_BYTES`] 字节；返回后文件位置
 /// 恰好停在 `end`，增量路径可直接从这里继续读。
-fn read_tail_before(file: &mut fs::File, end: i64) -> Result<Vec<u8>, AppError> {
+pub(super) fn read_tail_before(file: &mut fs::File, end: i64) -> Result<Vec<u8>, AppError> {
     let len = end.clamp(0, TAIL_FINGERPRINT_BYTES);
     let mut tail = vec![0u8; len as usize];
     file.seek(SeekFrom::Start((end - len) as u64))
@@ -509,6 +560,8 @@ fn sync_single_file(
         skipped_legacy_lines += 1;
     }
 
+    let checkpoint_offset = committed_offset;
+    let checkpoint_fingerprint = claude_tail_fingerprint(&tail_buf);
     let mut read_error: Option<String> = None;
     let mut messages: HashMap<String, ParsedAssistantUsage> = HashMap::new();
     let mut current_session_id: Option<String> = None;
@@ -634,6 +687,8 @@ fn sync_single_file(
     let tx = conn
         .unchecked_transaction()
         .map_err(|e| AppError::Database(format!("启动会话用量导入事务失败: {e}")))?;
+    let protected_before = claude_usage_ledger::protected_before(&tx)?;
+    let mut historical_deferred = 0;
 
     for msg in messages.values() {
         // 只要产生了真实计费 token 就导入，不再强制要求 stop_reason 或 output>0。
@@ -662,20 +717,31 @@ fn sync_single_file(
             msg.message_id
         );
 
-        match insert_session_log_entry_on_conn(&tx, &request_id, msg) {
-            Ok(true) => imported += 1,
-            Ok(false) => skipped += 1,
-            Err(e) => {
-                log::warn!("[SESSION-SYNC] 插入失败 ({}): {e}", msg.message_id);
-                skipped += 1;
+        if let Some(before) = protected_before {
+            let timestamp = msg
+                .timestamp
+                .as_deref()
+                .and_then(|ts| chrono::DateTime::parse_from_rfc3339(ts).ok())
+                .map(|dt| dt.timestamp());
+            if timestamp.is_none_or(|time| time < before)
+                && !claude_usage_ledger::contains(&tx, &request_id)?
+            {
+                historical_deferred += 1;
+                continue;
             }
+        }
+        // Failure must roll back the cursor too; otherwise this request is lost.
+        if insert_session_log_entry_on_conn(&tx, &request_id, msg)? {
+            imported += 1;
+        } else {
+            skipped += 1;
         }
     }
 
     // 更新同步状态（字节游标）。读错误时盖旧 mtime 而非当前值：盖当前值
     // 会让下轮在 mtime 门被跳过，未读完的完整行要等文件再次变化才有机会。
     // incomplete_tail 无需此处理——半行补全必然伴随 append 抬高 mtime。
-    let stamped_modified = if read_error.is_some() {
+    let stamped_modified = if read_error.is_some() || historical_deferred > 0 {
         last_modified
     } else {
         file_modified
@@ -687,13 +753,22 @@ fn sync_single_file(
         &tx,
         &file_path_str,
         stamped_modified,
-        committed_offset,
-        Some(fingerprint),
+        if historical_deferred > 0 {
+            checkpoint_offset
+        } else {
+            committed_offset
+        },
+        Some(if historical_deferred > 0 {
+            checkpoint_fingerprint
+        } else {
+            fingerprint
+        }),
     )?;
     tx.commit()
         .map_err(|e| AppError::Database(format!("提交会话用量导入事务失败: {e}")))?;
 
     Ok(ClaudeFileSync {
+        historical_deferred,
         imported,
         skipped,
         incomplete_tail,
@@ -806,6 +881,9 @@ fn insert_session_log_entry_on_conn(
     request_id: &str,
     msg: &ParsedAssistantUsage,
 ) -> Result<bool, AppError> {
+    if claude_usage_ledger::contains(conn, request_id)? {
+        return Ok(false);
+    }
     let created_at = msg
         .timestamp
         .as_ref()
@@ -832,6 +910,7 @@ fn insert_session_log_entry_on_conn(
         created_at,
     };
     if should_skip_session_insert(conn, request_id, &dedup_key)? {
+        claude_usage_ledger::remember(conn, request_id)?;
         return Ok(false);
     }
 
@@ -906,6 +985,7 @@ fn insert_session_log_entry_on_conn(
         )
         .map_err(|e| AppError::Database(format!("插入会话日志失败: {e}")))?;
 
+    claude_usage_ledger::remember(conn, request_id)?;
     Ok(inserted_rows > 0)
 }
 
@@ -1173,6 +1253,165 @@ mod tests {
         )
     }
 
+    #[test]
+    fn claude_multi_roots_dedup_copies_even_after_prune_and_readd() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        let tmp = tempfile::tempdir().unwrap();
+        let a = tmp.path().join("a");
+        let b = tmp.path().join("b");
+        for config in [&a, &b] {
+            fs::create_dir_all(config.join("projects/p/s/subagents/workflows/wf_1")).unwrap();
+            fs::write(
+                config.join("projects/p/main.jsonl"),
+                format!("{}\n", assistant_line("main", 10)),
+            )
+            .unwrap();
+            fs::write(
+                config.join("projects/p/s/subagents/agent.jsonl"),
+                format!("{}\n", assistant_line("agent", 10)),
+            )
+            .unwrap();
+            fs::write(
+                config.join("projects/p/s/subagents/workflows/wf_1/agent.jsonl"),
+                format!("{}\n", assistant_line("workflow", 10)),
+            )
+            .unwrap();
+        }
+        let roots =
+            claude_session_roots::resolve_roots(a.clone(), &[b.to_string_lossy().into_owned()]);
+        let first = sync_claude_roots(&db, &roots[..1])?;
+        assert_eq!(first.imported, 3);
+        assert_eq!(db.rollup_and_prune(0)?, 3);
+        let second = sync_claude_roots(&db, &roots)?;
+        assert_eq!((second.imported, second.skipped), (0, 3));
+        assert!(second.errors.is_empty());
+        assert_eq!(sync_claude_roots(&db, &roots[..1])?.imported, 0);
+        assert_eq!(sync_claude_roots(&db, &roots)?.imported, 0);
+        let conn = lock_conn!(db.conn);
+        let count: i64 = conn.query_row(
+            "SELECT SUM(request_count) FROM usage_daily_rollups WHERE app_type='claude'",
+            [],
+            |r| r.get(0),
+        )?;
+        assert_eq!(count, 3);
+        Ok(())
+    }
+
+    #[test]
+    fn claude_legacy_migration_recovers_ids_without_repricing_and_defers_unknown_history(
+    ) -> Result<(), AppError> {
+        let db = Database::memory()?;
+        let tmp = tempfile::tempdir().unwrap();
+        let original = tmp.path().join("original.jsonl");
+        fs::write(&original, format!("{}\n", assistant_line("old", 10))).unwrap();
+        assert_eq!(sync_with_cursor(&db, &original)?.imported, 1);
+        db.rollup_and_prune(0)?;
+        {
+            let conn = lock_conn!(db.conn);
+            conn.execute(
+                "DELETE FROM session_usage_dedup WHERE data_source='session_log'",
+                [],
+            )?;
+            Database::set_user_version(&conn, 20)?;
+            Database::apply_schema_migrations_on_conn(&conn)?;
+            assert_eq!(
+                Database::get_user_version(&conn)?,
+                crate::database::SCHEMA_VERSION
+            );
+        }
+        assert!(claude_usage_ledger::bootstrap(&db)?.is_empty());
+        let copy = tmp.path().join("copy.jsonl");
+        let new_line =
+            assistant_line("new", 5).replace("2026-06-07T13:01:23Z", "2099-01-01T00:00:00Z");
+        fs::write(
+            &copy,
+            format!(
+                "{}\n{}\n{new_line}\n",
+                assistant_line("old", 10),
+                assistant_line("unknown-old", 10)
+            ),
+        )
+        .unwrap();
+        let result = sync_with_cursor(&db, &copy)?;
+        assert_eq!(
+            (result.imported, result.skipped, result.historical_deferred),
+            (1, 1, 1)
+        );
+        assert_eq!(byte_cursor(&db, &copy), Some(0));
+        let again = sync_with_cursor(&db, &copy)?;
+        assert_eq!((again.imported, again.historical_deferred), (0, 1));
+        let conn = lock_conn!(db.conn);
+        assert!(claude_usage_ledger::contains(&conn, "session:old")?);
+        let count: i64 = conn.query_row(
+            "SELECT SUM(request_count) FROM usage_daily_rollups WHERE app_type='claude'",
+            [],
+            |r| r.get(0),
+        )?;
+        assert_eq!(count, 1);
+        Ok(())
+    }
+
+    #[test]
+    fn claude_missing_legacy_source_is_reported_and_can_recover() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        let tmp = tempfile::tempdir().unwrap();
+        let source = tmp.path().join("source.jsonl");
+        let content = format!("{}\n", assistant_line("recover", 7));
+        fs::write(&source, &content).unwrap();
+        sync_with_cursor(&db, &source)?;
+        db.rollup_and_prune(0)?;
+        {
+            let conn = lock_conn!(db.conn);
+            conn.execute("DELETE FROM session_usage_dedup", [])?;
+            claude_usage_ledger::migrate_legacy(&conn)?;
+        }
+        fs::remove_file(&source).unwrap();
+        assert_eq!(claude_usage_ledger::bootstrap(&db)?.len(), 1);
+        let copy = tmp.path().join("copy.jsonl");
+        fs::write(&copy, &content).unwrap();
+        assert_eq!(sync_with_cursor(&db, &copy)?.historical_deferred, 1);
+        fs::write(&source, &content).unwrap();
+        assert!(claude_usage_ledger::bootstrap(&db)?.is_empty());
+        let result = sync_with_cursor(&db, &copy)?;
+        assert_eq!(
+            (result.imported, result.skipped, result.historical_deferred),
+            (0, 1, 0)
+        );
+        assert_eq!(byte_cursor(&db, &copy), Some(content.len() as i64));
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn claude_usage_aliases_and_missing_roots_do_not_duplicate_or_block_good_roots(
+    ) -> Result<(), AppError> {
+        let db = Database::memory()?;
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("root");
+        fs::create_dir_all(root.join("projects/p")).unwrap();
+        fs::write(
+            root.join("projects/p/main.jsonl"),
+            format!("{}\n", assistant_line("unique", 4)),
+        )
+        .unwrap();
+        let outside = tmp.path().join("outside.jsonl");
+        fs::write(&outside, format!("{}\n", assistant_line("outside", 4))).unwrap();
+        std::os::unix::fs::symlink(&outside, root.join("projects/p/escape.jsonl")).unwrap();
+        let alias = tmp.path().join("alias");
+        std::os::unix::fs::symlink(&root, &alias).unwrap();
+        let roots = claude_session_roots::resolve_roots(
+            root,
+            &[
+                alias.to_string_lossy().into_owned(),
+                tmp.path().join("missing").to_string_lossy().into_owned(),
+            ],
+        );
+        let result = sync_claude_roots(&db, &roots)?;
+        assert_eq!((result.imported, result.files_scanned), (1, 1));
+        assert_eq!(result.errors.len(), 1);
+        Ok(())
+    }
+
     fn byte_cursor(db: &Database, path: &Path) -> Option<i64> {
         load_sync_cursors(db)
             .unwrap()
@@ -1184,6 +1423,46 @@ mod tests {
         let cursors = load_sync_cursors(db)?;
         let cursor = cursors.get(path.to_string_lossy().as_ref()).copied();
         sync_single_file(db, path, cursor.as_ref())
+    }
+
+    #[test]
+    fn claude_ledger_failure_rolls_back_usage_and_cursor_together() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("atomic.jsonl");
+        fs::write(&path, format!("{}\n", assistant_line("atomic", 8))).unwrap();
+        {
+            let conn = lock_conn!(db.conn);
+            conn.execute_batch("CREATE TRIGGER fail_ledger BEFORE INSERT ON session_usage_dedup BEGIN SELECT RAISE(ABORT, 'test failure'); END;")?;
+        }
+        assert!(sync_with_cursor(&db, &path).is_err());
+        assert!(byte_cursor(&db, &path).is_none());
+        {
+            let conn = lock_conn!(db.conn);
+            let count: i64 =
+                conn.query_row("SELECT COUNT(*) FROM proxy_request_logs", [], |r| r.get(0))?;
+            assert_eq!(count, 0);
+            conn.execute_batch("DROP TRIGGER fail_ledger;")?;
+        }
+        assert_eq!(sync_with_cursor(&db, &path)?.imported, 1);
+        Ok(())
+    }
+
+    #[test]
+    fn claude_pruned_proxy_identity_blocks_later_log_copy() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        {
+            let conn = lock_conn!(db.conn);
+            conn.execute("INSERT INTO proxy_request_logs (request_id, provider_id, app_type, model, latency_ms, status_code, created_at, data_source)
+                VALUES ('session:proxy-old', 'provider', 'claude-desktop', 'claude-opus-4-8', 0, 200, 1, 'proxy')", [])?;
+        }
+        assert_eq!(db.rollup_and_prune(0)?, 1);
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("copy.jsonl");
+        fs::write(&path, format!("{}\n", assistant_line("proxy-old", 5))).unwrap();
+        let result = sync_with_cursor(&db, &path)?;
+        assert_eq!((result.imported, result.skipped), (0, 1));
+        Ok(())
     }
 
     fn bump_mtime(path: &Path) {

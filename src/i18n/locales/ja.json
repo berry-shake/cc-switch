@@ -780,6 +780,20 @@
     "appConfigDirDescription": "CC Switch の保存場所をカスタマイズします（クラウド同期フォルダを指定すると設定を同期できます）",
     "browsePlaceholderApp": "例: C:\\\\Users\\\\Administrator\\\\.cc-switch",
     "claudeConfigDir": "Claude Code 設定ディレクトリ",
+    "claudeScan": {
+      "title": "Claude の追加スキャンディレクトリ",
+      "description": "セッションと使用量のみを読み取り、プロバイダー・MCP・Skills 設定は変更しません。projects を含む設定ルートを選択してください。削除してもファイルや過去の統計は残ります。保存後に適用されます。",
+      "placeholder": "例：~/.claude-work（projects 自体ではありません）",
+      "add": "スキャンディレクトリを追加",
+      "remove": "スキャンディレクトリを削除：{{path}}",
+      "status": {
+        "ready": "スキャン可能",
+        "missing": "projects がまだありません",
+        "unavailable": "読み取り不可",
+        "duplicate": "登録済みのディレクトリ",
+        "invalid": "絶対パスまたは ~/ パスを入力してください"
+      }
+    },
     "claudeConfigDirDescription": "Claude の設定ディレクトリ（settings.json）を上書きします。カスタムディレクトリでは .claude.json（MCP）をその中に保存し、既定の ~/.claude では Claude Code の既定どおり ~/.claude.json を使います。",
     "codexConfigDir": "Codex 設定ディレクトリ",
     "codexConfigDirDescription": "Codex の設定ディレクトリを上書きします。",

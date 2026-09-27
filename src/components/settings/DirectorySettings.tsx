@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { useTranslation } from "react-i18next";
 import type { AppId } from "@/lib/api";
 import type { ResolvedDirectories } from "@/hooks/useSettings";
+import { ClaudeScanDirectories } from "./ClaudeScanDirectories";
 
 type DirectoryAppId = Exclude<AppId, "claude-desktop" | "mcode">;
 
@@ -15,6 +16,8 @@ interface DirectorySettingsProps {
   onBrowseAppConfig: () => Promise<void>;
   onResetAppConfig: () => Promise<void>;
   claudeDir?: string;
+  claudeAdditionalDirs?: string[];
+  onClaudeAdditionalDirsChange?: (dirs: string[]) => void;
   codexDir?: string;
   geminiDir?: string;
   grokDir?: string;
@@ -35,6 +38,8 @@ export function DirectorySettings({
   onBrowseAppConfig,
   onResetAppConfig,
   claudeDir,
+  claudeAdditionalDirs,
+  onClaudeAdditionalDirsChange,
   codexDir,
   geminiDir,
   grokDir,
@@ -109,6 +114,14 @@ export function DirectorySettings({
           onBrowse={() => onBrowseDirectory("claude")}
           onReset={() => onResetDirectory("claude")}
         />
+
+        {onClaudeAdditionalDirsChange && (
+          <ClaudeScanDirectories
+            primary={claudeDir}
+            dirs={claudeAdditionalDirs ?? []}
+            onChange={onClaudeAdditionalDirsChange}
+          />
+        )}
 
         <DirectoryInput
           label={t("settings.codexConfigDir")}

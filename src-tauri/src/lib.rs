@@ -9,6 +9,7 @@ mod codex_history_migration;
 mod codex_state_db;
 mod commands;
 mod config;
+mod claude_session_roots;
 mod database;
 mod deeplink;
 mod error;
@@ -1437,6 +1438,7 @@ pub fn run() {
             commands::extract_common_config_snippet,
             commands::read_live_provider_settings,
             commands::get_settings,
+            commands::inspect_claude_scan_directories,
             commands::save_settings,
             commands::has_codex_unify_history_backup,
             commands::restore_codex_unified_history,

@@ -103,6 +103,14 @@ export function SessionItem({
               ? formatRelativeTime(lastActive, t)
               : t("common.unknown")}
           </span>
+          {session.sourceConfigDir && (
+            <span
+              className="ml-auto max-w-[45%] truncate rounded bg-muted px-1.5"
+              title={session.sourceConfigDir}
+            >
+              {session.sourceConfigDir.split(/[\\/]/).filter(Boolean).pop()}
+            </span>
+          )}
         </div>
       </button>
     </div>

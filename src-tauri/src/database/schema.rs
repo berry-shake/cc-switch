@@ -340,6 +340,18 @@ impl Database {
         )
         .map_err(|e| AppError::Database(e.to_string()))?;
 
+        // Snapshot pre-ledger Claude cursors for read-only request-ID recovery.
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS claude_usage_legacy_cursors (
+                file_path TEXT PRIMARY KEY,
+                last_line_offset INTEGER NOT NULL,
+                last_byte_offset INTEGER,
+                last_tail_fingerprint INTEGER,
+                last_synced_at INTEGER NOT NULL,
+                completed INTEGER NOT NULL DEFAULT 0
+            );",
+        )?;
+
         // 19. Profiles 表（全应用共享的项目实体，payload 按 app 分槽快照
         //     供应商/MCP/Skills/Prompt；各应用分组的 current 标记在 settings 表）
         conn.execute(
@@ -579,6 +591,12 @@ impl Database {
                             }
                         }
                         Self::set_user_version(conn, 20)?;
+                    }
+                    20 => {
+                        // Upstream and fork v19 databases may differ in cursor columns.
+                        Self::migrate_v17_to_v18(conn)?;
+                        crate::services::claude_usage_ledger::migrate_legacy(conn)?;
+                        Self::set_user_version(conn, 21)?;
                     }
                     _ => {
                         return Err(AppError::Database(format!(

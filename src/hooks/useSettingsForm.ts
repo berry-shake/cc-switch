@@ -120,6 +120,13 @@ export function useSettingsForm(): UseSettingsFormResult {
         data.preserveCodexOfficialAuthOnSwitch ?? false,
       unifyCodexSessionHistory: data.unifyCodexSessionHistory ?? false,
       claudeConfigDir: sanitizeDir(data.claudeConfigDir),
+      claudeAdditionalConfigDirs: [
+        ...new Set(
+          (data.claudeAdditionalConfigDirs ?? [])
+            .map((dir) => dir.trim())
+            .filter(Boolean),
+        ),
+      ],
       codexConfigDir: sanitizeDir(data.codexConfigDir),
       geminiConfigDir: sanitizeDir(data.geminiConfigDir),
       grokConfigDir: sanitizeDir(data.grokConfigDir),
@@ -188,6 +195,13 @@ export function useSettingsForm(): UseSettingsFormResult {
           serverData.preserveCodexOfficialAuthOnSwitch ?? false,
         unifyCodexSessionHistory: serverData.unifyCodexSessionHistory ?? false,
         claudeConfigDir: sanitizeDir(serverData.claudeConfigDir),
+        claudeAdditionalConfigDirs: [
+          ...new Set(
+            (serverData.claudeAdditionalConfigDirs ?? [])
+              .map((dir) => dir.trim())
+              .filter(Boolean),
+          ),
+        ],
         codexConfigDir: sanitizeDir(serverData.codexConfigDir),
         geminiConfigDir: sanitizeDir(serverData.geminiConfigDir),
         grokConfigDir: sanitizeDir(serverData.grokConfigDir),

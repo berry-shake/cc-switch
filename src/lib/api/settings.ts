@@ -14,6 +14,11 @@ export interface ConfigTransferResult {
   backupId?: string;
 }
 
+export interface ClaudeScanDirectoryStatus {
+  path: string;
+  status: "ready" | "missing" | "unavailable" | "duplicate" | "invalid";
+}
+
 export interface WebDavTestResult {
   success: boolean;
   message?: string;
@@ -31,6 +36,12 @@ export interface WebDavSyncResult {
 }
 
 export const settingsApi = {
+  async inspectClaudeScanDirectories(
+    dirs: string[],
+    primary?: string,
+  ): Promise<ClaudeScanDirectoryStatus[]> {
+    return await invoke("inspect_claude_scan_directories", { dirs, primary });
+  },
   async get(): Promise<Settings> {
     return await invoke("get_settings");
   },

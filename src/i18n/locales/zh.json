@@ -780,6 +780,20 @@
     "appConfigDirDescription": "自定义 CC Switch 的配置存储位置（指定到云同步文件夹即可云同步配置）",
     "browsePlaceholderApp": "例如：C:\\Users\\Administrator\\.cc-switch",
     "claudeConfigDir": "Claude Code 配置目录",
+    "claudeScan": {
+      "title": "Claude 额外扫描目录",
+      "description": "仅扫描会话和用量，不写入供应商、MCP 或 Skills 配置。选择配置根目录（其下应有 projects）；移除不会删除文件或历史统计。保存后生效。",
+      "placeholder": "例如 ~/.claude-work（不是 projects 子目录）",
+      "add": "添加扫描目录",
+      "remove": "移除扫描目录：{{path}}",
+      "status": {
+        "ready": "可扫描",
+        "missing": "projects 暂不存在",
+        "unavailable": "目录不可读",
+        "duplicate": "与已有目录重复",
+        "invalid": "请输入绝对路径或 ~/ 路径"
+      }
+    },
     "claudeConfigDirDescription": "覆盖 Claude 配置目录 (settings.json)。真正自定义目录会在目录内存放 Claude MCP 的 .claude.json；默认 ~/.claude 目录仍使用 Claude 默认的 ~/.claude.json。",
     "codexConfigDir": "Codex 配置目录",
     "codexConfigDirDescription": "覆盖 Codex 配置目录。",

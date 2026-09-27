@@ -451,9 +451,25 @@ export const useSaveSettingsMutation = () => {
 
   return useMutation({
     mutationFn: async (settings: Settings) => {
+      const previous = queryClient.getQueryData<Settings>(["settings"]);
+      const rootsChanged =
+        !previous ||
+        previous.claudeConfigDir !== settings.claudeConfigDir ||
+        JSON.stringify(previous.claudeAdditionalConfigDirs ?? []) !==
+          JSON.stringify(settings.claudeAdditionalConfigDirs ?? []);
       await settingsApi.save(settings);
+      return rootsChanged;
     },
-    onSuccess: async () => {
+    onSuccess: async (rootsChanged) => {
+      // Discard in-flight scans of the old roots before requesting a fresh list.
+      if (rootsChanged) {
+        await queryClient.cancelQueries({ queryKey: ["sessions"] });
+        await queryClient.cancelQueries({
+          queryKey: ["sessionMessages", "claude"],
+        });
+        queryClient.removeQueries({ queryKey: ["sessionMessages", "claude"] });
+        await queryClient.invalidateQueries({ queryKey: ["sessions"] });
+      }
       await queryClient.invalidateQueries({ queryKey: ["settings"] });
       await queryClient.invalidateQueries({
         queryKey: ["opencode", "runtime-models"],

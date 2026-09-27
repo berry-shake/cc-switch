@@ -23,6 +23,7 @@ pub mod s3;
 pub mod s3_auto_sync;
 pub mod s3_sync;
 pub mod session_usage;
+pub(crate) mod claude_usage_ledger;
 pub mod session_usage_codex;
 pub mod session_usage_gemini;
 pub mod session_usage_grokbuild;

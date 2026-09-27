@@ -53,6 +53,7 @@ fn scan(conn: &Connection, data_dir: &Path) -> rusqlite::Result<Vec<SessionMeta>
         Ok(SessionMeta {
             provider_id: "mcode".into(),
             source_path: Some(format!("mcode:{id}")),
+            source_config_dir: None,
             resume_command: id
                 .chars()
                 .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-'))

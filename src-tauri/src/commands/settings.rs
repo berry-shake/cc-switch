@@ -57,6 +57,23 @@ pub async fn get_settings() -> Result<crate::settings::AppSettings, String> {
     Ok(crate::settings::get_settings_for_frontend())
 }
 
+/// 只读检查拟添加的 Claude 扫描目录，不保存设置或创建目录。
+#[tauri::command]
+pub async fn inspect_claude_scan_directories(
+    dirs: Vec<String>,
+    primary: Option<String>,
+) -> Result<Vec<crate::claude_session_roots::ClaudeScanDirectoryStatus>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let primary = primary
+            .filter(|path| !path.trim().is_empty())
+            .map(|path| crate::settings::resolve_override_path(path.trim()))
+            .unwrap_or_else(|| crate::config::get_home_dir().join(".claude"));
+        crate::claude_session_roots::inspect_directories(primary, &dirs)
+    })
+    .await
+    .map_err(|error| error.to_string())
+}
+
 /// 保存设置
 #[tauri::command]
 pub async fn save_settings(
@@ -64,7 +81,10 @@ pub async fn save_settings(
     settings: crate::settings::AppSettings,
 ) -> Result<bool, String> {
     let existing = crate::settings::get_settings();
-    let merged = merge_settings_for_save(settings, &existing);
+    let mut merged = merge_settings_for_save(settings, &existing);
+    crate::claude_session_roots::normalize_directories(&mut merged.claude_additional_config_dirs);
+    crate::claude_session_roots::validate_directories(&merged.claude_additional_config_dirs)?;
+    let schedule_claude_scan = should_schedule_claude_scan(&merged, &existing);
     let unify_codex_changed =
         merged.unify_codex_session_history != existing.unify_codex_session_history;
     let unify_codex_enabled = merged.unify_codex_session_history;
@@ -123,7 +143,40 @@ pub async fn save_settings(
             }
         }
     }
+    if schedule_claude_scan {
+        let db = state.db.clone();
+        tauri::async_runtime::spawn(async move {
+            let _guard = crate::services::session_usage::session_sync_mutex()
+                .lock()
+                .await;
+            if !crate::settings::get_settings().session_auto_sync_enabled {
+                return;
+            }
+            let result = tauri::async_runtime::spawn_blocking(move || {
+                crate::services::session_usage::sync_claude_session_logs(&db)
+            })
+            .await;
+            match result {
+                Ok(Ok(result)) => {
+                    for error in &result.errors {
+                        log::warn!("Claude 扫描: {error}");
+                    }
+                    crate::services::session_usage::notify_sync_result(&result);
+                }
+                other => log::warn!("Claude 扫描失败: {other:?}"),
+            }
+        });
+    }
     Ok(true)
+}
+
+fn should_schedule_claude_scan(
+    next: &crate::settings::AppSettings,
+    previous: &crate::settings::AppSettings,
+) -> bool {
+    next.session_auto_sync_enabled
+        && (next.claude_config_dir != previous.claude_config_dir
+            || next.claude_additional_config_dirs != previous.claude_additional_config_dirs)
 }
 
 #[derive(serde::Serialize)]
@@ -314,6 +367,17 @@ pub async fn set_auto_launch(enabled: bool) -> Result<bool, String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn claude_scan_save_obeys_manual_mode_and_only_reacts_to_root_changes() {
+        let previous = crate::settings::AppSettings::default();
+        let mut next = previous.clone();
+        assert!(!super::should_schedule_claude_scan(&next, &previous));
+        next.claude_additional_config_dirs = vec!["/tmp/work".into()];
+        assert!(super::should_schedule_claude_scan(&next, &previous));
+        next.session_auto_sync_enabled = false;
+        assert!(!super::should_schedule_claude_scan(&next, &previous));
+        assert_eq!(next.claude_config_dir, previous.claude_config_dir);
+    }
     use super::merge_settings_for_save;
     use crate::settings::{
         AppSettings, CodexOfficialHistoryUnifyMigration, CodexProviderTemplateMigration,

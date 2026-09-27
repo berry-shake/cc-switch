@@ -35,6 +35,7 @@ describe("useSettingsForm Hook", () => {
         minimizeToTrayOnClose: undefined,
         enableClaudePluginIntegration: undefined,
         claudeConfigDir: "  /Users/demo  ",
+        claudeAdditionalConfigDirs: [" /work ", "", "/work", "~/personal"],
         codexConfigDir: "   ",
         language: "en",
       },
@@ -52,6 +53,10 @@ describe("useSettingsForm Hook", () => {
     expect(settings.minimizeToTrayOnClose).toBe(true);
     expect(settings.enableClaudePluginIntegration).toBe(false);
     expect(settings.claudeConfigDir).toBe("/Users/demo");
+    expect(settings.claudeAdditionalConfigDirs).toEqual([
+      "/work",
+      "~/personal",
+    ]);
     expect(settings.codexConfigDir).toBeUndefined();
     expect(settings.language).toBe("en");
     expect(result.current.initialLanguage).toBe("en");

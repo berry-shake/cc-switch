@@ -149,6 +149,7 @@ fn scan_sessions_sqlite() -> Vec<SessionMeta> {
             created_at: Some(created),
             last_active_at: Some(updated),
             source_path: Some(format!("sqlite:{db_display}:{session_id}")),
+            source_config_dir: None,
             resume_command: Some(format!("opencode -s {session_id}")),
         });
     }
@@ -473,6 +474,7 @@ fn parse_session(storage: &Path, path: &Path) -> Option<SessionMeta> {
         created_at,
         last_active_at: updated_at.or(created_at),
         source_path: Some(source_path),
+        source_config_dir: None,
         resume_command: Some(format!("opencode -s {session_id}")),
     })
 }

@@ -427,6 +427,9 @@ pub struct AppSettings {
     // ===== 设备级目录覆盖 =====
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub claude_config_dir: Option<String>,
+    /// Additional read-only discovery roots, never provider configuration targets.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub claude_additional_config_dirs: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub codex_config_dir: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -553,6 +556,7 @@ impl Default for AppSettings {
             language: None,
             visible_apps: None,
             claude_config_dir: None,
+            claude_additional_config_dirs: Vec::new(),
             codex_config_dir: None,
             gemini_config_dir: None,
             grok_config_dir: None,
@@ -593,6 +597,7 @@ impl AppSettings {
     }
 
     fn normalize_paths(&mut self) {
+        crate::claude_session_roots::normalize_directories(&mut self.claude_additional_config_dirs);
         self.claude_config_dir = self
             .claude_config_dir
             .as_ref()
@@ -1212,6 +1217,23 @@ pub fn update_s3_sync_status(status: WebDavSyncStatus) -> Result<(), AppError> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn claude_extra_roots_are_optional_local_settings_and_do_not_override_primary() {
+        let mut settings = AppSettings::default();
+        let old = serde_json::to_value(&settings).unwrap();
+        assert!(old.get("claudeAdditionalConfigDirs").is_none());
+        let decoded: AppSettings = serde_json::from_value(old).unwrap();
+        assert!(decoded.claude_additional_config_dirs.is_empty());
+        settings.claude_additional_config_dirs =
+            vec![" /tmp/a ".into(), "".into(), "/tmp/a".into()];
+        settings.normalize_paths();
+        assert_eq!(settings.claude_additional_config_dirs, vec!["/tmp/a"]);
+        assert!(settings.claude_config_dir.is_none());
+        assert_eq!(
+            serde_json::to_value(settings).unwrap()["claudeAdditionalConfigDirs"],
+            serde_json::json!(["/tmp/a"])
+        );
+    }
     use super::*;
     use crate::app_config::AppType;
 

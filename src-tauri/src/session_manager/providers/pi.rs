@@ -440,6 +440,7 @@ fn parse_session_with_title_slot(
         created_at: header.timestamp,
         last_active_at: summary.last_active_at.or(header.timestamp),
         source_path: Some(source_path.clone()),
+        source_config_dir: None,
         resume_command: Some(format!(
             "pi --session {}",
             crate::session_manager::terminal::shell_escape(&source_path)

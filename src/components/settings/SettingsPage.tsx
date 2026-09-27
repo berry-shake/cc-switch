@@ -350,6 +350,14 @@ export function SettingsPage({
                             onBrowseAppConfig={browseAppConfigDir}
                             onResetAppConfig={resetAppConfigDir}
                             claudeDir={settings.claudeConfigDir}
+                            claudeAdditionalDirs={
+                              settings.claudeAdditionalConfigDirs
+                            }
+                            onClaudeAdditionalDirsChange={(dirs) =>
+                              updateSettings({
+                                claudeAdditionalConfigDirs: dirs,
+                              })
+                            }
                             codexDir={settings.codexConfigDir}
                             geminiDir={settings.geminiConfigDir}
                             grokDir={settings.grokConfigDir}

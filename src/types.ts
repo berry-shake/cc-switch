@@ -409,6 +409,8 @@ export interface Settings {
   // ===== 设备级目录覆盖 =====
   // 覆盖 Claude Code 配置目录（可选）
   claudeConfigDir?: string;
+  /** Additional read-only Claude session/usage scan roots; not provider write targets. */
+  claudeAdditionalConfigDirs?: string[];
   // 覆盖 Codex 配置目录（可选）
   codexConfigDir?: string;
   // 覆盖 Gemini 配置目录（可选）
@@ -474,6 +476,7 @@ export interface Settings {
 }
 
 export interface SessionMeta {
+  sourceConfigDir?: string;
   providerId: string;
   sessionId: string;
   title?: string;

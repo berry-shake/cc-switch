@@ -780,6 +780,20 @@
     "appConfigDirDescription": "Customize the storage location for CC Switch configuration (point to cloud sync folder to enable config sync)",
     "browsePlaceholderApp": "e.g., C:\\Users\\Administrator\\.cc-switch",
     "claudeConfigDir": "Claude Code Configuration Directory",
+    "claudeScan": {
+      "title": "Additional Claude scan directories",
+      "description": "Scan sessions and usage only; no provider, MCP or Skills configuration writes. Choose a configuration root containing projects. Removing it does not delete files or historical usage. Takes effect on save.",
+      "placeholder": "e.g. ~/.claude-work (not the projects subdirectory)",
+      "add": "Add scan directory",
+      "remove": "Remove scan directory: {{path}}",
+      "status": {
+        "ready": "Ready",
+        "missing": "projects not found yet",
+        "unavailable": "Directory unreadable",
+        "duplicate": "Directory already included",
+        "invalid": "Enter an absolute path or ~/ path"
+      }
+    },
     "claudeConfigDirDescription": "Override Claude configuration directory (settings.json). Custom directories store .claude.json (MCP) inside the directory; the default ~/.claude directory keeps Claude Code's split ~/.claude.json path.",
     "codexConfigDir": "Codex Configuration Directory",
     "codexConfigDirDescription": "Override Codex configuration directory.",

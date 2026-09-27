@@ -1,10 +1,11 @@
+use std::collections::HashSet;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use serde_json::Value;
 
-use crate::config::get_claude_config_dir;
+use crate::claude_session_roots::{self, ClaudeSessionRoot};
 use crate::session_manager::{SessionMessage, SessionMeta};
 
 use super::utils::{
@@ -15,14 +16,35 @@ use super::utils::{
 const PROVIDER_ID: &str = "claude";
 
 pub fn scan_sessions() -> Vec<SessionMeta> {
-    let root = get_claude_config_dir().join("projects");
-    let mut files = Vec::new();
-    collect_jsonl_files(&root, &mut files);
+    scan_roots(&claude_session_roots::roots())
+}
 
+fn scan_roots(roots: &[ClaudeSessionRoot]) -> Vec<SessionMeta> {
     let mut sessions = Vec::new();
-    for path in files {
-        if let Some(meta) = parse_session(&path) {
-            sessions.push(meta);
+    let mut seen = HashSet::new();
+    for root in roots {
+        let files = match claude_session_roots::collect_files(&root.projects_dir) {
+            Ok(files) => files,
+            Err(error) => {
+                log::debug!(
+                    "Claude 扫描目录不可读 {}: {error}",
+                    root.projects_dir.display()
+                );
+                continue;
+            }
+        };
+        for path in files {
+            if !seen.insert(path.clone()) {
+                continue;
+            }
+            if let Some(mut meta) = parse_session(&path) {
+                meta.source_config_dir = Some(root.config_dir.to_string_lossy().into_owned());
+                meta.resume_command = Some(claude_session_roots::resume_command(
+                    &root.config_dir,
+                    &meta.session_id,
+                ));
+                sessions.push(meta);
+            }
         }
     }
 
@@ -248,6 +270,7 @@ fn parse_session(path: &Path) -> Option<SessionMeta> {
         created_at,
         last_active_at,
         source_path: Some(path.to_string_lossy().to_string()),
+        source_config_dir: None,
         resume_command: Some(format!("claude --resume {session_id}")),
     })
 }
@@ -265,28 +288,8 @@ fn infer_session_id_from_filename(path: &Path) -> Option<String> {
         .map(|stem| stem.to_string())
 }
 
-fn collect_jsonl_files(root: &Path, files: &mut Vec<PathBuf>) {
-    if !root.exists() {
-        return;
-    }
-
-    let entries = match std::fs::read_dir(root) {
-        Ok(entries) => entries,
-        Err(_) => return,
-    };
-
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_dir() {
-            collect_jsonl_files(&path, files);
-        } else if path.extension().and_then(|ext| ext.to_str()) == Some("jsonl") {
-            files.push(path);
-        }
-    }
-}
-
 fn remove_path_if_exists(path: &Path) -> std::io::Result<()> {
-    match std::fs::metadata(path) {
+    match std::fs::symlink_metadata(path) {
         Ok(meta) => {
             if meta.is_dir() {
                 std::fs::remove_dir_all(path)
@@ -303,6 +306,53 @@ fn remove_path_if_exists(path: &Path) -> std::io::Result<()> {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[test]
+    fn multiple_roots_keep_copies_separate_and_delete_only_selected_source() {
+        let tmp = tempdir().unwrap();
+        let a = tmp.path().join("account-a");
+        let b = tmp.path().join("account-b");
+        let content = "{\"sessionId\":\"same-id\",\"cwd\":\"/tmp/project\",\"message\":{\"role\":\"user\",\"content\":\"hello\"}}\n";
+        for config in [&a, &b] {
+            std::fs::create_dir_all(config.join("projects/project")).unwrap();
+            std::fs::write(config.join("projects/project/session.jsonl"), content).unwrap();
+        }
+        let roots =
+            claude_session_roots::resolve_roots(a.clone(), &[b.to_string_lossy().into_owned()]);
+        let sessions = scan_roots(&roots);
+        assert_eq!(sessions.len(), 2);
+        assert_ne!(sessions[0].source_path, sessions[1].source_path);
+        assert_eq!(sessions[0].source_config_dir.as_deref(), a.to_str());
+        assert_eq!(sessions[1].source_config_dir.as_deref(), b.to_str());
+        assert!(sessions[1]
+            .resume_command
+            .as_ref()
+            .unwrap()
+            .contains(b.to_str().unwrap()));
+        delete_session(
+            &roots[0].projects_dir,
+            Path::new(sessions[0].source_path.as_ref().unwrap()),
+            "same-id",
+        )
+        .unwrap();
+        assert!(b.join("projects/project/session.jsonl").exists());
+        assert_eq!(scan_roots(&roots).len(), 1);
+        assert!(scan_roots(&roots[..1]).is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn deleting_sidecar_symlink_does_not_delete_external_target() {
+        let tmp = tempdir().unwrap();
+        let outside = tmp.path().join("outside");
+        std::fs::create_dir(&outside).unwrap();
+        std::fs::write(outside.join("keep.txt"), "keep").unwrap();
+        let path = tmp.path().join("session.jsonl");
+        std::fs::write(&path, "{\"sessionId\":\"id\"}\n").unwrap();
+        std::os::unix::fs::symlink(&outside, tmp.path().join("session")).unwrap();
+        delete_session(tmp.path(), &path, "id").unwrap();
+        assert!(outside.join("keep.txt").exists());
+    }
 
     #[test]
     fn delete_session_removes_main_file_and_sidecar_directory() {

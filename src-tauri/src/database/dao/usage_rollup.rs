@@ -172,6 +172,7 @@ impl Database {
 
         // INSERT uses the effective-log filter to exclude duplicate session rows.
         // DELETE intentionally prunes all old details so those duplicates are discarded.
+        crate::services::claude_usage_ledger::seed_detail_ids(conn)?;
         let deleted = conn
             .execute(
                 "DELETE FROM proxy_request_logs WHERE created_at < ?1",
