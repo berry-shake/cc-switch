@@ -69,7 +69,8 @@ impl Database {
             enabled_opencode BOOLEAN NOT NULL DEFAULT 0,
             enabled_hermes BOOLEAN NOT NULL DEFAULT 0,
             enabled_omp BOOLEAN NOT NULL DEFAULT 0,
-            enabled_mcode BOOLEAN NOT NULL DEFAULT 0
+            enabled_mcode BOOLEAN NOT NULL DEFAULT 0,
+            enabled_pi BOOLEAN NOT NULL DEFAULT 0
         )",
             [],
         )
@@ -597,6 +598,30 @@ impl Database {
                         Self::migrate_v17_to_v18(conn)?;
                         crate::services::claude_usage_ledger::migrate_legacy(conn)?;
                         Self::set_user_version(conn, 21)?;
+                    }
+                    21 => {
+                        // Reconcile upstream v20 and fork v20/v21 without resetting
+                        // independent application flags or imported usage history.
+                        Self::migrate_v18_to_v19(conn)?;
+                        for table in ["mcp_servers", "skills"] {
+                            if Self::table_exists(conn, table)? {
+                                Self::add_column_if_missing(
+                                    conn,
+                                    table,
+                                    "enabled_mcode",
+                                    "BOOLEAN NOT NULL DEFAULT 0",
+                                )?;
+                            }
+                        }
+                        if Self::table_exists(conn, "mcp_servers")? {
+                            Self::add_column_if_missing(
+                                conn,
+                                "mcp_servers",
+                                "enabled_pi",
+                                "BOOLEAN NOT NULL DEFAULT 0",
+                            )?;
+                        }
+                        Self::set_user_version(conn, 22)?;
                     }
                     _ => {
                         return Err(AppError::Database(format!(
@@ -1715,6 +1740,9 @@ impl Database {
                 "1.00",
                 "12.50",
             ),
+            // Claude Opus 5.5（2026-09-23 发布；缓存读为 0.05x = $0.20，非常规 0.1x 的
+            // $0.40，也非 Opus 5 的 $0.50；fast mode $8/$40 不入表）
+            ("claude-opus-5-5", "Claude Opus 5.5", "4", "20", "0.20", "5"),
             // Claude Opus 5（与 Opus 4.8 同价位；fast mode $10/$50 不入表）
             ("claude-opus-5", "Claude Opus 5", "5", "25", "0.50", "6.25"),
             // Claude 4.8 系列
@@ -1845,14 +1873,18 @@ impl Database {
                 "0.30",
                 "3.75",
             ),
-            // GPT-6 系列（Astra，2026-09-04 发布，1.05M 窗口）
-            // 官方价页 + 模型页 + models.dev 三源一致：10/50，cache read 1，cache write 1.25× 输入 = 12.50。
-            // >272K 长上下文档（20/75/2/25）本表无法表达，与 gpt-5.5 同样忽略。
+            // GPT-6 系列（Astra 2026-09-04 发布，1.05M 窗口；Sol / Luna 2026-09-22 发布）
+            // 2026-09-23 核对官方价页 + 模型页 + models.dev：录入 Standard 短上下文价，
+            // cache read 0.1×、cache write 1.25× 输入价。>272K 长上下文档（输入与缓存 2×、输出 1.5×）、
+            // Batch/Flex、Fast mode、区域加价本表无法表达，与 gpt-5.5 同样忽略。
             // effort 档 low/medium/high/xhigh 由查价剥后缀回落到本行；max 不在剥离列表
             //（会与 *-max 真 id 撞名），不另加后缀行。
             ("gpt-6-astra", "GPT-6 Astra", "10", "50", "1", "12.5"),
             // 2026-09-22: Standard API rates; subscription Fast is applied
             // separately by the Codex quota estimator, never baked into prices.
+            // GPT-6.1 Sol: Standard short-context pricing; cached input is 0.05× input.
+            // https://developers.openai.com/api/docs/models/gpt-6.1-sol
+            ("gpt-6.1-sol", "GPT-6.1 Sol", "2", "10", "0.10", "2.50"),
             ("gpt-6-sol", "GPT-6 Sol", "2", "10", "0.20", "2.50"),
             ("gpt-6-luna", "GPT-6 Luna", "0.10", "0.50", "0.01", "0.125"),
             // GPT-5.6 系列（Sol / Terra / Luna，2026-06 发布）
@@ -1869,6 +1901,17 @@ impl Database {
                 "1.20",
                 "0.02",
                 "0.25",
+            ),
+            // GPT-5.6 Cyber（Daybreak 计划的网安模型，需 Trusted Access；2026-09-23 核对官方价页）。
+            // 别名 gpt-daybreak-red-latest / gpt-daybreak-blue-latest 当前分别指向 gpt-5.6-cyber /
+            // gpt-5.6-sol，官方明说别名改指向时价格随之改变，故别名不入表。
+            (
+                "gpt-5.6-cyber",
+                "GPT-5.6 Cyber",
+                "12.50",
+                "75",
+                "1.25",
+                "15.625",
             ),
             // 裸名 gpt-5.6 是 sol 的官方别名；effort 后缀对齐 gpt-5.5 系列的记账形态。
             // 查价先精确匹配 id 再剥 effort 后缀，这些行必须与 sol 同步改价，否则旧价会压过基础行。
@@ -2064,6 +2107,17 @@ impl Database {
             ("gpt-4.1", "GPT-4.1", "2", "8", "0.50", "0"),
             ("gpt-4.1-mini", "GPT-4.1 Mini", "0.40", "1.60", "0.10", "0"),
             ("gpt-4.1-nano", "GPT-4.1 Nano", "0.10", "0.40", "0.025", "0"),
+            // OpenAI 文本模型补全（2026-09-23）：各模型页的标准 token 价。
+            // 来源：https://developers.openai.com/api/docs/models/<model_id>
+            // 已按 /api/docs/deprecations 排除弃用模型；不含工具调用费及多模态价格。
+            // Pro 系列未提供缓存折扣，与 o3-pro 一样将未支持的缓存价格记为 0。
+            // 有意不收：chat-latest 是滚动别名（改指向即改价）；gpt-rosalind-research 官方
+            // 2026-10-05 才开始计费且仅限 Trusted Access，提前入表会给免费期用量记账。
+            ("gpt-5.5-pro", "GPT-5.5 Pro", "30", "180", "0", "0"),
+            ("gpt-5.4-pro", "GPT-5.4 Pro", "30", "180", "0", "0"),
+            ("gpt-5.2-pro", "GPT-5.2 Pro", "21", "168", "0", "0"),
+            ("gpt-4o", "GPT-4o", "2.50", "10", "1.25", "0"),
+            ("gpt-4o-mini", "GPT-4o Mini", "0.15", "0.60", "0.075", "0"),
             // Gemini 3.8 系列（2026-09-02 发布，1M 窗口）
             // 介绍价 0.75/3.75/0.075 至 2026-12-31，2027-01-01 起挂牌价 1.50/7.50/0.15；口径同 3.7 Flash，勿加豁免。
             (
@@ -2192,7 +2246,16 @@ impl Database {
                 "0.025",
                 "0",
             ),
-            // StepFun 系列
+            // StepFun 系列：CNY 按 1 USD ≈ 7.14 CNY 折算，保留两位小数。
+            // Step 5 Preview 官方输入 / 输出 / 缓存读取：7 / 20 / 0.35 元。
+            (
+                "step-5-preview",
+                "Step 5 Preview",
+                "0.98",
+                "2.80",
+                "0.05",
+                "0",
+            ),
             (
                 "step-3.7-flash",
                 "Step 3.7 Flash",
@@ -2534,7 +2597,7 @@ impl Database {
                 "0",
             ),
             ("mimo-v2-pro", "MiMo V2 Pro", "0.435", "0.87", "0.0036", "0"),
-            ("mimo-v2.5", "MiMo V2.5", "0.14", "0.29", "0.0028", "0"),
+            ("mimo-v2.5", "MiMo V2.5", "0.14", "0.28", "0.0028", "0"),
             (
                 "mimo-v2.5-pro",
                 "MiMo V2.5 Pro",
@@ -2781,12 +2844,37 @@ impl Database {
             ("command-r", "Cohere Command R", "0.15", "0.60", "0", "0"),
             // OpenAI 补充
             ("o3-pro", "OpenAI o3-pro", "20", "80", "0", "0"),
-            ("o3-mini", "OpenAI o3-mini", "0.55", "2.20", "0.55", "0"),
+            ("o3-mini", "OpenAI o3-mini", "1.10", "4.40", "0.55", "0"),
             ("o1", "OpenAI o1", "15", "60", "7.50", "0"),
             ("o1-mini", "OpenAI o1-mini", "0.55", "2.20", "0.55", "0"),
             ("codex-mini", "Codex Mini", "0.75", "3", "0.025", "0"),
             ("gpt-5-mini", "GPT-5 Mini", "0.25", "2", "0.025", "0"),
             ("gpt-5-nano", "GPT-5 Nano", "0.05", "0.40", "0.005", "0"),
+            // MiMo 2.6：2026-09-23 核对官方标准价格，单位 USD / 百万 tokens。
+            (
+                "mimo-v2.6-pro",
+                "MiMo V2.6 Pro",
+                "0.435",
+                "0.87",
+                "0.0036",
+                "0",
+            ),
+            (
+                "mimo-v2.6-flash",
+                "MiMo V2.6 Flash",
+                "0.14",
+                "0.28",
+                "0.0028",
+                "0",
+            ),
+            (
+                "mimo-v2.6-pro-ultraspeed",
+                "MiMo V2.6 Pro UltraSpeed",
+                "4.35",
+                "8.7",
+                "0.036",
+                "0",
+            ),
         ];
 
         let mut stmt = conn
@@ -3565,6 +3653,31 @@ impl Database {
                 "0.006",
                 "0",
             ),
+            // 2026-09-23 核对标准价格，仅修正仍匹配旧内置值的记录。
+            (
+                "mimo-v2.5",
+                "MiMo V2.5",
+                "0.14",
+                "0.28",
+                "0.0028",
+                "0",
+                "0.14",
+                "0.29",
+                "0.0028",
+                "0",
+            ),
+            (
+                "o3-mini",
+                "OpenAI o3-mini",
+                "1.10",
+                "4.40",
+                "0.55",
+                "0",
+                "0.55",
+                "2.20",
+                "0.55",
+                "0",
+            ),
         ];
 
         for (
@@ -3844,6 +3957,31 @@ mod tests {
     }
 
     #[test]
+    fn migrate_v19_to_v20_adds_pi_mcp_flag_and_keeps_existing_flags() -> Result<(), AppError> {
+        let conn = Connection::open_in_memory()?;
+        conn.execute_batch(
+            "CREATE TABLE mcp_servers (
+                id TEXT PRIMARY KEY,
+                enabled_codex BOOLEAN NOT NULL DEFAULT 0,
+                enabled_mcode BOOLEAN NOT NULL DEFAULT 0
+            );
+            INSERT INTO mcp_servers (id, enabled_codex, enabled_mcode) VALUES ('mcp-1', 1, 1);",
+        )?;
+        Database::set_user_version(&conn, 19)?;
+
+        Database::apply_schema_migrations_on_conn(&conn)?;
+
+        assert_eq!(Database::get_user_version(&conn)?, SCHEMA_VERSION);
+        let values: (i64, i64, i64) = conn.query_row(
+            "SELECT enabled_codex, enabled_mcode, enabled_pi FROM mcp_servers WHERE id = 'mcp-1'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )?;
+        assert_eq!(values, (1, 1, 0));
+        Ok(())
+    }
+
+    #[test]
     fn migrate_v14_to_v15_adds_grokbuild_skill_and_mcp_flags() -> Result<(), AppError> {
         let conn = Connection::open_in_memory()?;
         conn.execute_batch(
@@ -4036,6 +4174,65 @@ mod tests {
         assert_eq!(mcp_flags, (1, 0));
         assert_eq!(skill_flags, (1, 0));
         Ok(())
+    }
+
+    fn assert_v4_app_flags_and_history_migrate(upstream: bool) -> Result<(), AppError> {
+        let conn = Connection::open_in_memory()?;
+        Database::create_tables_on_conn(&conn)?;
+        // Model both real version layouts, including the fork's independent OMP flag.
+        conn.execute_batch("INSERT INTO mcp_servers (id, name, server_config, enabled_omp, enabled_mcode, enabled_pi)
+            VALUES ('existing', 'keep', '{}', 1, 1, 1);
+            INSERT INTO proxy_request_logs
+                (request_id, provider_id, app_type, model, latency_ms, status_code, created_at, total_cost_usd)
+                VALUES ('session:existing', 'p', 'claude', 'kept-model', 100, 200, 123456, '12.345678');
+            INSERT INTO session_log_sync (file_path, last_modified, last_line_offset, last_byte_offset, last_tail_fingerprint, last_synced_at)
+                VALUES ('/fixture/.claude/projects/project/existing.jsonl', 123456, 42, 12345, 876, 123456);")?;
+        if upstream {
+            conn.execute_batch(
+                "ALTER TABLE mcp_servers DROP COLUMN enabled_omp;
+                ALTER TABLE skills DROP COLUMN enabled_omp;",
+            )?;
+            Database::set_user_version(&conn, 20)?;
+        } else {
+            conn.execute_batch("ALTER TABLE mcp_servers DROP COLUMN enabled_pi;")?;
+            Database::set_user_version(&conn, 21)?;
+        }
+        for _ in 0..2 {
+            Database::apply_schema_migrations_on_conn(&conn)?;
+            assert_eq!(Database::get_user_version(&conn)?, 22);
+            let flags: (bool, bool, bool) = conn.query_row(
+                "SELECT enabled_omp, enabled_mcode, enabled_pi FROM mcp_servers WHERE id='existing'",
+                [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )?;
+            assert_eq!(flags, (!upstream, true, upstream));
+            let history: (String, String) = conn.query_row(
+                "SELECT model, total_cost_usd FROM proxy_request_logs WHERE request_id='session:existing'",
+                [], |row| Ok((row.get(0)?, row.get(1)?)),
+            )?;
+            assert_eq!(history, ("kept-model".to_string(), "12.345678".to_string()));
+            let cursor: (i64, i64, i64) = conn.query_row(
+                "SELECT last_line_offset, last_byte_offset, last_tail_fingerprint FROM session_log_sync",
+                [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )?;
+            assert_eq!(cursor, (42, 12345, 876));
+            if upstream {
+                assert!(crate::services::claude_usage_ledger::contains(
+                    &conn,
+                    "session:existing"
+                )?);
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn migrate_fork_v21_to_v22_preserves_flags_cursors_and_costs() -> Result<(), AppError> {
+        assert_v4_app_flags_and_history_migrate(false)
+    }
+
+    #[test]
+    fn migrate_upstream_v20_to_v22_preserves_flags_cursors_and_costs() -> Result<(), AppError> {
+        assert_v4_app_flags_and_history_migrate(true)
     }
 
     fn assert_v19_app_flags_migrate(

@@ -8,6 +8,7 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   PiPromptTemplates,
@@ -20,6 +21,11 @@ import {
   type PiPromptFileKind,
 } from "@/lib/api/prompts";
 
+const toastMocks = vi.hoisted(() => ({
+  success: vi.fn(),
+  error: vi.fn(),
+}));
+
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (key: string) => key,
@@ -28,47 +34,10 @@ vi.mock("react-i18next", () => ({
 
 vi.mock("sonner", () => ({
   toast: {
-    success: vi.fn(),
-    error: vi.fn(),
+    success: toastMocks.success,
+    error: toastMocks.error,
+    dismiss: vi.fn(),
   },
-}));
-
-vi.mock("@/components/MarkdownEditor", () => ({
-  default: ({
-    value,
-    onChange,
-    placeholder,
-  }: {
-    value: string;
-    onChange?: (value: string) => void;
-    placeholder?: string;
-  }) => (
-    <textarea
-      value={value}
-      placeholder={placeholder}
-      onChange={(event) => onChange?.(event.target.value)}
-    />
-  ),
-}));
-
-vi.mock("@/components/common/FullScreenPanel", () => ({
-  FullScreenPanel: ({
-    isOpen,
-    title,
-    children,
-    footer,
-  }: {
-    isOpen: boolean;
-    title: string;
-    children: ReactNode;
-    footer?: ReactNode;
-  }) =>
-    isOpen ? (
-      <section aria-label={title}>
-        {children}
-        <footer>{footer}</footer>
-      </section>
-    ) : null,
 }));
 
 const createClient = () =>
@@ -101,11 +70,17 @@ function TemplateHarness({ appId = "pi" }: { appId?: NativePromptAppId }) {
   );
 }
 
+function lastUndo(): (() => void) | undefined {
+  return toastMocks.success.mock.calls.at(-1)?.[1]?.action?.onClick;
+}
+
 describe("Pi native prompt resources", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    toastMocks.success.mockReset();
+    toastMocks.error.mockReset();
     vi.spyOn(promptsApi, "getNativePromptFile").mockImplementation(
-      async (_app, kind: PiPromptFileKind) => ({
+      async (_app: NativePromptAppId, kind: PiPromptFileKind) => ({
         exists: kind === "system_append",
         revision: kind === "system_append" ? "append-revision" : "missing",
         content: kind === "system_append" ? "append" : "",
@@ -132,22 +107,64 @@ describe("Pi native prompt resources", () => {
     );
   });
 
+  it("keeps OMP file edits and template queries separate from Pi", async () => {
+    const client = createClient();
+    client.setQueryData(["pi", "promptFile", "system_append"], {
+      exists: true,
+      revision: "pi-only",
+      content: "untouched Pi prompt",
+    });
+    renderWithQueryClient(
+      <>
+        <PiSystemPromptFiles appId="omp" />
+        <TemplateHarness appId="omp" />
+      </>,
+      client,
+    );
+    await screen.findByText("pi.prompts.configuredSize");
+    await screen.findByText("/empty");
+    expect(promptsApi.getNativePromptFile).toHaveBeenCalledWith(
+      "omp",
+      "system_append",
+    );
+    expect(promptsApi.listNativePromptTemplates).toHaveBeenCalledWith("omp");
+    fireEvent.click(
+      screen.getByRole("button", { name: "common.edit APPEND_SYSTEM.md" }),
+    );
+    fireEvent.change(
+      screen.getByPlaceholderText("pi.prompts.instructionPlaceholder"),
+      {
+        target: { value: "OMP-only prompt" },
+      },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "common.save" }));
+    await waitFor(() =>
+      expect(promptsApi.replaceNativePromptFile).toHaveBeenCalledWith(
+        "omp",
+        "system_append",
+        "append-revision",
+        "OMP-only prompt",
+      ),
+    );
+    expect(client.getQueryData(["pi", "promptFile", "system_append"])).toEqual({
+      exists: true,
+      revision: "pi-only",
+      content: "untouched Pi prompt",
+    });
+  });
+
   it("shows file configuration state and edits the recommended append file", async () => {
     renderWithQueryClient(<PiSystemPromptFiles />);
 
-    await screen.findByText("pi.prompts.configured");
+    await screen.findByText("pi.prompts.configuredSize");
     expect(screen.getByText("pi.prompts.notConfigured")).toBeInTheDocument();
-    expect(screen.queryByText("pi.prompts.active")).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByText("APPEND_SYSTEM.md").closest("button")!);
+    fireEvent.click(
+      screen.getByRole("button", { name: "common.edit APPEND_SYSTEM.md" }),
+    );
     const editor = screen.getByPlaceholderText(
       "pi.prompts.instructionPlaceholder",
     );
-    expect(
-      within(screen.getByLabelText("APPEND_SYSTEM.md")).queryByRole("button", {
-        name: "common.cancel",
-      }),
-    ).not.toBeInTheDocument();
     fireEvent.change(editor, { target: { value: "new append" } });
     fireEvent.click(screen.getByRole("button", { name: "common.save" }));
 
@@ -164,8 +181,10 @@ describe("Pi native prompt resources", () => {
   it("keeps the open draft and its base revision when the query refreshes", async () => {
     const { queryClient } = renderWithQueryClient(<PiSystemPromptFiles />);
 
-    await screen.findByText("pi.prompts.configured");
-    fireEvent.click(screen.getByText("APPEND_SYSTEM.md").closest("button")!);
+    await screen.findByText("pi.prompts.configuredSize");
+    fireEvent.click(
+      screen.getByRole("button", { name: "common.edit APPEND_SYSTEM.md" }),
+    );
     const editor = screen.getByPlaceholderText(
       "pi.prompts.instructionPlaceholder",
     );
@@ -191,6 +210,139 @@ describe("Pi native prompt resources", () => {
     );
   });
 
+  it("explains a blank system file only after a save attempt", async () => {
+    renderWithQueryClient(<PiSystemPromptFiles />);
+
+    await screen.findByText("pi.prompts.notConfigured");
+    fireEvent.click(
+      screen.getByRole("button", { name: "pi.prompts.create SYSTEM.md" }),
+    );
+    expect(
+      screen.queryByText("pi.prompts.blankInstruction"),
+    ).not.toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "pi.prompts.saveAndConfigureEllipsis",
+      }),
+    );
+
+    expect(screen.getByText("pi.prompts.blankInstruction")).toBeInTheDocument();
+    expect(promptsApi.replaceNativePromptFile).not.toHaveBeenCalled();
+  });
+
+  it("requires confirmation before creating SYSTEM.md", async () => {
+    renderWithQueryClient(<PiSystemPromptFiles />);
+
+    await screen.findByText("pi.prompts.notConfigured");
+    fireEvent.click(
+      screen.getByRole("button", { name: "pi.prompts.create SYSTEM.md" }),
+    );
+    fireEvent.change(
+      screen.getByPlaceholderText("pi.prompts.instructionPlaceholder"),
+      { target: { value: "replace the system prompt" } },
+    );
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "pi.prompts.saveAndConfigureEllipsis",
+      }),
+    );
+
+    expect(promptsApi.replaceNativePromptFile).not.toHaveBeenCalled();
+    const dialog = screen
+      .getByText("pi.prompts.activateOverrideTitle")
+      .closest('[role="dialog"]');
+    expect(dialog).not.toBeNull();
+    fireEvent.click(
+      within(dialog as HTMLElement).getByRole("button", {
+        name: "pi.prompts.saveAndConfigure",
+      }),
+    );
+
+    await waitFor(() =>
+      expect(promptsApi.replaceNativePromptFile).toHaveBeenCalledWith(
+        "pi",
+        "system_override",
+        "missing",
+        "replace the system prompt",
+      ),
+    );
+  });
+
+  it("deletes SYSTEM.md without a confirmation and writes it back on undo", async () => {
+    vi.spyOn(promptsApi, "getNativePromptFile").mockImplementation(
+      async (_app: NativePromptAppId, kind: PiPromptFileKind) => ({
+        exists: kind === "system_override",
+        revision: kind === "system_override" ? "system-revision" : "missing",
+        content: kind === "system_override" ? "custom system prompt" : "",
+      }),
+    );
+    const remove = vi
+      .spyOn(promptsApi, "deleteNativePromptFile")
+      .mockResolvedValue(true);
+    renderWithQueryClient(<PiSystemPromptFiles />);
+
+    await screen.findByText("pi.prompts.configuredSize");
+    fireEvent.click(
+      screen.getByRole("button", { name: "common.edit SYSTEM.md" }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "pi.prompts.deleteFile" }),
+    );
+
+    await waitFor(() =>
+      expect(remove).toHaveBeenCalledWith(
+        "pi",
+        "system_override",
+        "system-revision",
+      ),
+    );
+    await waitFor(() =>
+      expect(toastMocks.success).toHaveBeenCalledWith(
+        "pi.prompts.overrideDeleted",
+        expect.anything(),
+      ),
+    );
+    act(() => lastUndo()?.());
+    await waitFor(() =>
+      expect(promptsApi.replaceNativePromptFile).toHaveBeenCalledWith(
+        "pi",
+        "system_override",
+        "missing",
+        "custom system prompt",
+      ),
+    );
+  });
+
+  it("offers no undo when the deleted file was blank", async () => {
+    vi.spyOn(promptsApi, "getNativePromptFile").mockImplementation(
+      async (_app: NativePromptAppId, kind: PiPromptFileKind) => ({
+        exists: kind === "system_append",
+        revision: kind === "system_append" ? "blank-revision" : "missing",
+        content: kind === "system_append" ? "  \n" : "",
+      }),
+    );
+    vi.spyOn(promptsApi, "deleteNativePromptFile").mockResolvedValue(true);
+    renderWithQueryClient(<PiSystemPromptFiles />);
+
+    await screen.findByText("pi.prompts.configuredEmpty");
+    fireEvent.click(
+      screen.getByRole("button", { name: "common.edit APPEND_SYSTEM.md" }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "pi.prompts.deleteFile" }),
+    );
+
+    await waitFor(() =>
+      expect(toastMocks.success).toHaveBeenCalledWith(
+        "pi.prompts.appendDeleted",
+        expect.objectContaining({
+          description: expect.stringContaining("pi.prompts.deletedBlank"),
+        }),
+      ),
+    );
+    expect(lastUndo()).toBeUndefined();
+  });
+
   it("creates an empty native template from the contextual entry", async () => {
     renderWithQueryClient(<TemplateHarness />);
 
@@ -199,12 +351,9 @@ describe("Pi native prompt resources", () => {
     fireEvent.change(screen.getByPlaceholderText("pi.prompts.templateSlug"), {
       target: { value: "new-empty" },
     });
-
-    const create = screen.getByRole("button", {
-      name: "pi.prompts.createTemplate",
-    });
-    expect(create).toBeEnabled();
-    fireEvent.click(create);
+    fireEvent.click(
+      screen.getByRole("button", { name: "pi.prompts.createTemplate" }),
+    );
 
     await waitFor(() =>
       expect(promptsApi.upsertNativePromptTemplate).toHaveBeenCalledWith(
@@ -225,11 +374,13 @@ describe("Pi native prompt resources", () => {
     });
     renderWithQueryClient(<TemplateHarness />);
 
-    const edit = await screen.findByTitle("common.edit");
+    const edit = await screen.findByRole("button", {
+      name: "prompts.editAria",
+    });
     fireEvent.click(edit);
     const slug = screen.getByPlaceholderText("pi.prompts.templateSlug");
-    expect(slug).toBeEnabled();
     fireEvent.change(slug, { target: { value: "renamed" } });
+    expect(screen.getByText("pi.prompts.templateRename")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "common.save" }));
 
     await waitFor(() =>
@@ -261,8 +412,8 @@ describe("Pi native prompt resources", () => {
     renderWithQueryClient(<TemplateHarness />);
 
     expect(await screen.findByText("Existing note")).toBeInTheDocument();
-    expect(screen.queryByText("Review $1")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByTitle("common.edit"));
+    expect(screen.getByText("<target>")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "prompts.editAria" }));
 
     const notes = screen.getByPlaceholderText(
       "pi.prompts.templateDescriptionPlaceholder",
@@ -272,18 +423,6 @@ describe("Pi native prompt resources", () => {
     );
     expect(notes).toHaveValue("Existing note");
     expect(body).toHaveValue('---\nargument-hint: "<target>"\n---\nReview $1');
-    expect(
-      within(screen.getByLabelText("pi.prompts.editTemplate")).queryByRole(
-        "button",
-        { name: "common.delete" },
-      ),
-    ).not.toBeInTheDocument();
-    expect(
-      within(screen.getByLabelText("pi.prompts.editTemplate")).queryByRole(
-        "button",
-        { name: "common.cancel" },
-      ),
-    ).not.toBeInTheDocument();
 
     fireEvent.change(notes, { target: { value: "Updated note" } });
     fireEvent.click(screen.getByRole("button", { name: "common.save" }));
@@ -311,108 +450,62 @@ describe("Pi native prompt resources", () => {
 
     for (const invalid of ["release notes", "bad:name", "CON"]) {
       fireEvent.change(slug, { target: { value: invalid } });
-      expect(create).toBeDisabled();
+      fireEvent.click(create);
       expect(
         screen.getByText("pi.prompts.templateSlugInvalid"),
       ).toBeInTheDocument();
     }
+    fireEvent.change(slug, { target: { value: "empty" } });
+    expect(
+      screen.getByText("pi.prompts.templateSlugExists"),
+    ).toBeInTheDocument();
+    expect(promptsApi.upsertNativePromptTemplate).not.toHaveBeenCalled();
 
     fireEvent.change(slug, { target: { value: "release.v2" } });
-    expect(create).toBeEnabled();
-  });
-
-  it("requires confirmation before creating SYSTEM.md", async () => {
-    renderWithQueryClient(<PiSystemPromptFiles />);
-
-    await screen.findByText("pi.prompts.notConfigured");
-    fireEvent.click(screen.getByText("SYSTEM.md").closest("button")!);
-    fireEvent.change(
-      screen.getByPlaceholderText("pi.prompts.instructionPlaceholder"),
-      {
-        target: { value: "replace the system prompt" },
-      },
-    );
-    fireEvent.click(
-      screen.getByRole("button", {
-        name: "pi.prompts.saveAndConfigure",
-      }),
-    );
-
-    expect(promptsApi.replaceNativePromptFile).not.toHaveBeenCalled();
-    const dialogTitle = screen.getByText("pi.prompts.activateOverrideTitle");
-    const dialog = dialogTitle.closest('[role="dialog"]');
-    expect(dialog).not.toBeNull();
-    fireEvent.click(
-      within(dialog as HTMLElement).getByRole("button", {
-        name: "pi.prompts.saveAndConfigure",
-      }),
-    );
-
+    expect(screen.getByText("pi.prompts.templateSaveTo")).toBeInTheDocument();
+    fireEvent.click(create);
     await waitFor(() =>
-      expect(promptsApi.replaceNativePromptFile).toHaveBeenCalledWith(
+      expect(promptsApi.upsertNativePromptTemplate).toHaveBeenCalledWith(
         "pi",
-        "system_override",
+        "release.v2",
         "missing",
-        "replace the system prompt",
+        "",
+        undefined,
       ),
     );
   });
 
-  it("removes the global SYSTEM.md file through the native file API", async () => {
-    vi.spyOn(promptsApi, "getNativePromptFile").mockImplementation(
-      async (_app, kind: PiPromptFileKind) => ({
-        exists: kind === "system_override",
-        revision: kind === "system_override" ? "system-revision" : "missing",
-        content: kind === "system_override" ? "custom system prompt" : "",
-      }),
-    );
+  it("deletes a template from its row menu and writes it back on undo", async () => {
     const remove = vi
-      .spyOn(promptsApi, "deleteNativePromptFile")
+      .spyOn(promptsApi, "deleteNativePromptTemplate")
       .mockResolvedValue(true);
-    renderWithQueryClient(<PiSystemPromptFiles />);
+    renderWithQueryClient(<TemplateHarness />);
+    const user = userEvent.setup();
 
-    await screen.findByText("pi.prompts.configured");
-    fireEvent.click(screen.getByText("SYSTEM.md").closest("button")!);
-    fireEvent.click(
-      screen.getByRole("button", { name: "pi.prompts.removeGlobalFile" }),
+    await screen.findByText("/empty");
+    await user.click(
+      screen.getByRole("button", { name: "prompts.rowMoreActions" }),
     );
-
-    const dialog = screen
-      .getByText("pi.prompts.removeFileTitle")
-      .closest('[role="dialog"]');
-    expect(dialog).not.toBeNull();
-    fireEvent.click(
-      within(dialog as HTMLElement).getByRole("button", {
-        name: "common.delete",
-      }),
+    await user.click(
+      await screen.findByRole("menuitem", { name: "common.delete" }),
     );
 
     await waitFor(() =>
-      expect(remove).toHaveBeenCalledWith(
-        "pi",
-        "system_override",
-        "system-revision",
+      expect(remove).toHaveBeenCalledWith("pi", "empty", "empty-revision"),
+    );
+    await waitFor(() =>
+      expect(toastMocks.success).toHaveBeenCalledWith(
+        "pi.prompts.templateDeletedUndo",
+        expect.anything(),
       ),
     );
-  });
-
-  it("routes OMP instruction edits through OMP-native commands", async () => {
-    renderWithQueryClient(<PiSystemPromptFiles appId="omp" />);
-
-    await screen.findByText("omp.prompts.configured");
-    fireEvent.click(screen.getByText("APPEND_SYSTEM.md").closest("button")!);
-    fireEvent.change(
-      screen.getByPlaceholderText("omp.prompts.instructionPlaceholder"),
-      { target: { value: "OMP append instructions" } },
-    );
-    fireEvent.click(screen.getByRole("button", { name: "common.save" }));
-
+    act(() => lastUndo()?.());
     await waitFor(() =>
-      expect(promptsApi.replaceNativePromptFile).toHaveBeenCalledWith(
-        "omp",
-        "system_append",
-        "append-revision",
-        "OMP append instructions",
+      expect(promptsApi.upsertNativePromptTemplate).toHaveBeenCalledWith(
+        "pi",
+        "empty",
+        "missing",
+        "",
       ),
     );
   });

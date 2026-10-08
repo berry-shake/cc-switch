@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { UsageHero } from "@/components/usage/UsageHero";
@@ -52,14 +52,15 @@ describe("UsageHero token metrics", () => {
     expect(screen.getByText("379.66M")).toBeInTheDocument();
     expect(screen.getByText("2.95K")).toBeInTheDocument();
 
+    fireEvent.click(screen.getByRole("button", { name: "usage.metrics.more" }));
     const labels = screen.getAllByText(
-      /^usage\.(inputTokens|cacheCreationTokens|cacheReadTokens|outputTokens)$/,
+      /^usage\.(freshInput|cacheWrite|cacheRead|output)$/,
     );
     expect(labels.map((label) => label.textContent)).toEqual([
-      "usage.inputTokens",
-      "usage.cacheCreationTokens",
-      "usage.cacheReadTokens",
-      "usage.outputTokens",
+      "usage.freshInput",
+      "usage.cacheWrite",
+      "usage.cacheRead",
+      "usage.output",
     ]);
     expect(
       labels.map((label) => label.parentElement?.nextSibling?.textContent),

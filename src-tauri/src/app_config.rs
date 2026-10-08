@@ -23,6 +23,8 @@ pub struct McpApps {
     pub hermes: bool,
     #[serde(default)]
     pub omp: bool,
+    #[serde(default)]
+    pub pi: bool,
 }
 
 impl McpApps {
@@ -38,7 +40,7 @@ impl McpApps {
             AppType::Hermes => self.hermes,
             AppType::Omp => self.omp,
             AppType::Mcode => self.mcode,
-            AppType::Pi => false, // Pi core has no native MCP registry.
+            AppType::Pi => self.pi,
             AppType::ClaudeDesktop => false,
         }
     }
@@ -55,7 +57,7 @@ impl McpApps {
             AppType::Hermes => self.hermes = enabled,
             AppType::Omp => self.omp = enabled,
             AppType::Mcode => self.mcode = enabled,
-            AppType::Pi => {}            // Pi core has no native MCP registry.
+            AppType::Pi => self.pi = enabled,
             AppType::ClaudeDesktop => {} // Claude Desktop 3P provider config doesn't support MCP here
         }
     }
@@ -87,6 +89,9 @@ impl McpApps {
         if self.omp {
             apps.push(AppType::Omp);
         }
+        if self.pi {
+            apps.push(AppType::Pi);
+        }
         apps
     }
 
@@ -100,6 +105,7 @@ impl McpApps {
             && !self.hermes
             && !self.omp
             && !self.mcode
+            && !self.pi
     }
 }
 

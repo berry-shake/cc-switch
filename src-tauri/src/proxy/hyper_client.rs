@@ -869,6 +869,11 @@ mod tests {
                 }
                 written.fetch_add(n, Ordering::SeqCst);
                 remaining -= n;
+                // Pace the test producer so macOS loopback buffering cannot
+                // enqueue most of the body before the client task gets to
+                // observe the limit. A client that consumes the whole body
+                // still fails the assertion below.
+                tokio::time::sleep(std::time::Duration::from_millis(1)).await;
             }
         });
 

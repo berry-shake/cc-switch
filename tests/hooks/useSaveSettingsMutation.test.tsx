@@ -22,6 +22,13 @@ describe("settings session cache invalidation", () => {
       } as Settings;
       queryClient.setQueryData(["settings"], settings);
       queryClient.setQueryData(["sessions"], []);
+      for (const key of ["sessionTranscript", "sessionBlockContent"]) {
+        queryClient.setQueryData(
+          [key, "claude", "/a/file.jsonl"],
+          ["old-root"],
+        );
+        queryClient.setQueryData([key, "codex", "/codex/file.jsonl"], ["keep"]);
+      }
       queryClient.setQueryData(
         ["sessionMessages", "claude", "/a/file.jsonl"],
         [],
@@ -49,6 +56,14 @@ describe("settings session cache invalidation", () => {
       expect(queryClient.getQueryState(["sessions"])?.isInvalidated).toBe(
         changed,
       );
+      for (const key of ["sessionTranscript", "sessionBlockContent"]) {
+        expect(
+          queryClient.getQueryData([key, "claude", "/a/file.jsonl"]),
+        ).toEqual(changed ? undefined : ["old-root"]);
+        expect(
+          queryClient.getQueryData([key, "codex", "/codex/file.jsonl"]),
+        ).toEqual(["keep"]);
+      }
       expect(
         queryClient.getQueryData([
           "sessionMessages",
