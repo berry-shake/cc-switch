@@ -64,7 +64,12 @@ const getInitialLanguage = (): Language => {
 export function withOmpAliases<T>(value: T): T {
   const visit = (current: unknown, ompAlias: boolean): unknown => {
     if (typeof current === "string") {
-      return ompAlias ? current.split("Pi").join("OMP") : current;
+      return ompAlias
+        ? current
+            .split("Pi")
+            .join("OMP")
+            .replace(/([/\\])\.pi(?=[/\\]|$)/g, "$1.omp")
+        : current;
     }
     if (Array.isArray(current)) {
       return current.map((child) => visit(child, ompAlias));
