@@ -492,7 +492,7 @@ export function CodexCycleCapacityCard({
     <Collapsible asChild open={isExpanded} onOpenChange={handleExpandedChange}>
       <Card
         className={cn(
-          "overflow-hidden border border-border/50 bg-card/60 shadow-sm backdrop-blur-xl",
+          "shrink-0 overflow-hidden border border-border/50 bg-card/60 shadow-sm backdrop-blur-xl",
           className,
         )}
         data-testid="codex-cycle-capacity-card"

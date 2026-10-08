@@ -439,6 +439,46 @@ describe("CodexCycleCapacityCard", () => {
     expect(within(timingLine).getByText(formattedRefresh)).toBeInTheDocument();
   });
 
+  it.each(["local", "analytics"] as const)(
+    "keeps the %s card non-shrinking when expanded or collapsed",
+    (calculationMode) => {
+      render(
+        <div className="flex h-[600px] flex-col overflow-y-auto">
+          <CodexCycleCapacityCard
+            quota={quota}
+            usage={usage}
+            analyticsUsage={analyticsUsage}
+            modelPricing={modelPricing}
+            calculationMode={calculationMode}
+            nowMs={queriedAt}
+          />
+          <div className="h-[1200px] shrink-0">Long request log</div>
+        </div>,
+      );
+
+      // jsdom cannot measure flex layout. Guard the root sizing contract here;
+      // browser layout checks must also verify that the content is not clipped.
+      const card = screen.getByTestId("codex-cycle-capacity-card");
+      const toggle = within(card).getByTestId("codex-cycle-capacity-toggle");
+      expect(card).toHaveClass("shrink-0", "overflow-hidden");
+      expect(toggle).toHaveAttribute("aria-expanded", "true");
+      expect(
+        within(card).getByTestId("codex-cycle-forecast"),
+      ).toBeInTheDocument();
+
+      fireEvent.click(toggle);
+      expect(card).toHaveClass("shrink-0", "overflow-hidden");
+      expect(toggle).toHaveAttribute("aria-expanded", "false");
+
+      fireEvent.click(toggle);
+      expect(card).toHaveClass("shrink-0", "overflow-hidden");
+      expect(toggle).toHaveAttribute("aria-expanded", "true");
+      expect(
+        within(card).getByTestId("codex-cycle-forecast"),
+      ).toBeInTheDocument();
+    },
+  );
+
   it("defaults to expanded and restores the persisted collapse state", () => {
     const { unmount } = render(
       <CodexCycleCapacityCard quota={quota} usage={usage} nowMs={queriedAt} />,
