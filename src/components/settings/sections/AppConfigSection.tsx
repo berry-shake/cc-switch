@@ -150,6 +150,8 @@ export function AppConfigSection({
       {DIRECTORY_APPS.map((app) => (
         <SettingsBlock
           key={app}
+          id={`app-config-${app}`}
+          className="rounded-panel"
           title={blockTitle(app)}
           actions={saveButton(app)}
         >
@@ -183,7 +185,11 @@ export function AppConfigSection({
               </>
             )}
             {app === "codex" && (
-              <CodexAuthSettings settings={settings} onChange={onAutoSave} />
+              <CodexAuthSettings
+                settings={settings}
+                onChange={onAutoSave}
+                codexConfigDir={savedSettings?.codexConfigDir}
+              />
             )}
             {directoryRow(app)}
             {app === "claude" && onClaudeAdditionalDirsChange && (

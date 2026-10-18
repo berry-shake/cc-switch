@@ -5,6 +5,7 @@ pub(crate) mod codex_auth_credentials;
 pub mod codex_oauth_models;
 pub mod codex_official_usage;
 pub mod codex_personal_credits;
+pub mod codex_session_compression;
 pub mod codex_usage_analytics;
 pub mod coding_plan;
 pub mod config;

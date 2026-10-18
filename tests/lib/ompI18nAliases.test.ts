@@ -1,7 +1,20 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { withOmpAliases } from "@/i18n";
 
 describe("OMP translation aliases", () => {
+  it.each(["zh", "zh-TW", "en", "ja", "tr"])(
+    "provides OMP directory labels for %s without changing Pi",
+    async (language) => {
+      vi.resetModules();
+      const { default: i18n } = await import("@/i18n");
+      expect(
+        i18n.getResource(language, "translation", "settings.ompConfigDir"),
+      ).toContain("OMP");
+      expect(
+        i18n.getResource(language, "translation", "settings.piConfigDir"),
+      ).toContain("Pi");
+    },
+  );
   it("rewrites OMP path hints without changing the original Pi hints", () => {
     const pi = { restored: "Pi: ~/.pi/agent/APPEND_SYSTEM.md" };
     expect(withOmpAliases({ pi })).toEqual({

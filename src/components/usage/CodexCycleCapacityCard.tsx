@@ -49,7 +49,12 @@ import type {
 } from "@/types/subscription";
 import type { ModelPricing, UsageSummary } from "@/types/usage";
 
-import { fmtUsd, getLocaleFromLanguage, getResolvedLang } from "./format";
+import {
+  formatMoney,
+  USD_DISPLAY,
+  getLocaleFromLanguage,
+  getResolvedLang,
+} from "./format";
 import { CodexCycleForecastPanel } from "./CodexCycleForecastPanel";
 import { CodexPersonalCreditsPanel } from "./CodexPersonalCreditsPanel";
 import { CapacityMetric } from "./CapacityMetric";
@@ -486,7 +491,7 @@ export function CodexCycleCapacityCard({
   };
 
   const formatUsdEstimate = (value: number) =>
-    `${fmtUsd(value, 2)}${activeAnalyticsEstimate?.hasUnknownPricing ? "*" : ""}`;
+    `${formatMoney(value, 2, USD_DISPLAY)}${activeAnalyticsEstimate?.hasUnknownPricing ? "*" : ""}`;
 
   return (
     <Collapsible asChild open={isExpanded} onOpenChange={handleExpandedChange}>

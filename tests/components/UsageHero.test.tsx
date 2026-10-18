@@ -1,4 +1,5 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, screen } from "@testing-library/react";
+import { renderWithQueryClient as render } from "../utils/testQueryClient";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { UsageHero } from "@/components/usage/UsageHero";

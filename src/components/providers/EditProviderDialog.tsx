@@ -159,6 +159,7 @@ export function EditProviderDialog({
             asRecord(provider.settingsConfig) ?? {},
             provider.category,
             provider.id,
+            appId === "codex" ? provider.meta : undefined,
           );
           if (!cancelled) {
             setEditorView(view);
@@ -358,7 +359,9 @@ export function EditProviderDialog({
 
   return (
     <FullScreenPanel
-      isOpen={open}
+      // Keep the list visible until the initial projection is ready.
+      // Showing a loading page first causes a flash for fast local reads.
+      isOpen={open && !waitingForEditorView}
       trackUnsavedChanges
       title={t("provider.editProviderNamed", { name: provider.name })}
       subtitle={

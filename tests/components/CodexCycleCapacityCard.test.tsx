@@ -559,9 +559,9 @@ describe("CodexCycleCapacityCard", () => {
       "2.55B",
       "765.00M",
       "1.79B",
-      "$2304.93",
+      "$2,304.93",
       "$691.48",
-      "$1613.45",
+      "$1,613.45",
     ]);
     for (const label of metricLabels) {
       expect(label).not.toContain("估算");

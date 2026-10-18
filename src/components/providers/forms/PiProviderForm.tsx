@@ -986,7 +986,7 @@ export function PiProviderForm({
           ),
         );
       },
-      rowBaseUrl,
+      { baseUrl: rowBaseUrl },
     );
   };
 
