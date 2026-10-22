@@ -52,6 +52,55 @@ const LEGACY_SCHEMA_SQL: &str = r#"
     );
 "#;
 
+#[test]
+fn omp_and_agy_flags_round_trip_independently() -> Result<(), AppError> {
+    let db = Database::memory()?;
+    for (omp, agy, mcode) in [
+        (true, false, true),
+        (false, true, false),
+        (true, true, false),
+    ] {
+        let server: crate::app_config::McpServer = serde_json::from_value(json!({
+            "id": "independent", "name": "keep", "server": {"command": "test-only"},
+            "apps": {"omp": omp, "agy": agy, "mcode": mcode, "pi": true}
+        }))
+        .unwrap();
+        db.save_mcp_server(&server)?;
+        let servers = db.get_all_mcp_servers()?;
+        let apps = &servers["independent"].apps;
+        assert_eq!(
+            (apps.omp, apps.agy, apps.mcode, apps.pi),
+            (omp, agy, mcode, true)
+        );
+
+        let skill: crate::app_config::InstalledSkill = serde_json::from_value(json!({
+            "id": "independent", "name": "keep", "directory": "keep",
+            "apps": {"omp": omp, "agy": agy, "mcode": mcode},
+            "installedAt": 123, "contentHash": "keep-hash", "updatedAt": 456
+        }))
+        .unwrap();
+        db.save_skill(&skill)?;
+        let skills = db.get_all_installed_skills()?;
+        let stored = &skills["independent"];
+        assert_eq!(
+            (stored.apps.omp, stored.apps.agy, stored.apps.mcode),
+            (omp, agy, mcode)
+        );
+        assert_eq!((stored.installed_at, stored.updated_at), (123, 456));
+        assert_eq!(stored.content_hash.as_deref(), Some("keep-hash"));
+        let mut toggled = skill.apps.clone();
+        toggled.agy = !agy;
+        assert!(db.update_skill_apps("independent", &toggled)?);
+        let stored = db.get_installed_skill("independent")?.unwrap();
+        assert_eq!(
+            (stored.apps.omp, stored.apps.agy, stored.apps.mcode),
+            (omp, !agy, mcode)
+        );
+        assert_eq!((stored.installed_at, stored.updated_at), (123, 456));
+    }
+    Ok(())
+}
+
 // v3.8.x（schema v1）的真实表结构快照：用于验证从 v3.8.* 升级到当前版本的迁移链路
 // 参考：tag v3.8.3 的 src-tauri/src/database/schema.rs
 pub(super) const V3_8_SCHEMA_V1_SQL: &str = r#"
@@ -1141,6 +1190,7 @@ fn model_pricing_seed_covers_deepseek_v41_flash_aliases() {
     // 查价前缀兜底是 LIKE '{id}-%'，只命中更长的行，任一行缺失都会静默按 0 计费。
     for model_id in [
         "deepseek-flash",
+        "deepseek-v4.1-flash",
         "deepseek-v4-flash",
         "deepseek-v4-flash-0731",
         "deepseek-v4-flash-vision-exp",

@@ -67,6 +67,7 @@ impl Database {
             enabled_claude BOOLEAN NOT NULL DEFAULT 0, enabled_codex BOOLEAN NOT NULL DEFAULT 0,
             enabled_gemini BOOLEAN NOT NULL DEFAULT 0, enabled_grokbuild BOOLEAN NOT NULL DEFAULT 0,
             enabled_opencode BOOLEAN NOT NULL DEFAULT 0,
+            enabled_agy BOOLEAN NOT NULL DEFAULT 0,
             enabled_hermes BOOLEAN NOT NULL DEFAULT 0,
             enabled_omp BOOLEAN NOT NULL DEFAULT 0,
             enabled_mcode BOOLEAN NOT NULL DEFAULT 0,
@@ -100,6 +101,7 @@ impl Database {
             enabled_grokbuild BOOLEAN NOT NULL DEFAULT 0,
             enabled_opencode BOOLEAN NOT NULL DEFAULT 0,
             enabled_mcode BOOLEAN NOT NULL DEFAULT 0,
+            enabled_agy BOOLEAN NOT NULL DEFAULT 0,
             enabled_hermes BOOLEAN NOT NULL DEFAULT 0,
             enabled_omp BOOLEAN NOT NULL DEFAULT 0,
             installed_at INTEGER NOT NULL DEFAULT 0,
@@ -602,6 +604,13 @@ impl Database {
                     21 => {
                         // Reconcile upstream v20 and fork v20/v21 without resetting
                         // independent application flags or imported usage history.
+                        // Upstream v21 has Antigravity but not the fork's OMP/Claude
+                        // ledger migration. create_tables already creates the empty
+                        // ledger table, so table existence alone cannot detect it.
+                        if !Self::has_column(conn, "mcp_servers", "enabled_omp")? {
+                            Self::migrate_v17_to_v18(conn)?;
+                            crate::services::claude_usage_ledger::migrate_legacy(conn)?;
+                        }
                         Self::migrate_v18_to_v19(conn)?;
                         for table in ["mcp_servers", "skills"] {
                             if Self::table_exists(conn, table)? {
@@ -622,6 +631,21 @@ impl Database {
                             )?;
                         }
                         Self::set_user_version(conn, 22)?;
+                    }
+                    22 => {
+                        // Reconcile upstream v21 (Antigravity) and fork v22.
+                        // Do not re-bootstrap completed fork Claude cursors.
+                        for table in ["mcp_servers", "skills"] {
+                            if Self::table_exists(conn, table)? {
+                                Self::add_column_if_missing(
+                                    conn,
+                                    table,
+                                    "enabled_agy",
+                                    "BOOLEAN NOT NULL DEFAULT 0",
+                                )?;
+                            }
+                        }
+                        Self::set_user_version(conn, 23)?;
                     }
                     _ => {
                         return Err(AppError::Database(format!(
@@ -2284,13 +2308,14 @@ impl Database {
                 "0",
             ),
             // StepFun 系列：CNY 按 1 USD ≈ 7.14 CNY 折算，保留两位小数。
-            // Step 5 Preview 官方输入 / 输出 / 缓存读取：7 / 20 / 0.35 元。
+            // Step 5 Preview 官方输入 / 输出 / 缓存读取：7 / 20 / 0.70 元（缓存读取 2026-10-14
+            // 起由 0.35 元上调；此前已按量调用过的老用户仍按 0.35 元计，表里取现行挂牌价）。
             (
                 "step-5-preview",
                 "Step 5 Preview",
                 "0.98",
                 "2.80",
-                "0.05",
+                "0.10",
                 "0",
             ),
             (
@@ -2452,6 +2477,17 @@ impl Database {
                 "0.006",
                 "0",
             ),
+            // 第三方上游（OpenCode Go、OpenRouter 的 deepseek/ 命名空间、Hermes 预设等）用带版本号的
+            // deepseek-v4.1-flash。点号版本既剥不成 deepseek-flash，前缀兜底也只命中更长的行，
+            // 不单列会显示「未定价」并按 0 计费
+            (
+                "deepseek-v4.1-flash",
+                "DeepSeek V4.1 Flash",
+                "0.3",
+                "1.2",
+                "0.006",
+                "0",
+            ),
             (
                 "deepseek-v4-flash",
                 "DeepSeek V4 Flash",
@@ -2531,9 +2567,10 @@ impl Database {
                 "0.38",
                 "0",
             ),
-            ("kimi-k3", "Kimi K3", "3.00", "15.00", "0.30", "0"),
+            // 2026-10-19 官方价页：K3 缓存写入按 TTL 计费，默认 5 分钟档 $3（1 小时档 $6，取默认档）
+            ("kimi-k3", "Kimi K3", "3.00", "15.00", "0.30", "3.00"),
             // Kimi For Coding 套餐里 K3 的裸名（无 kimi- 前缀），同标准 list 价
-            ("k3", "Kimi K3", "3.00", "15.00", "0.30", "0"),
+            ("k3", "Kimi K3", "3.00", "15.00", "0.30", "3.00"),
             // 腾讯混元 (Tencent Hunyuan)（官方 CNY 1/4/0.25 按 1 USD ≈ 7.14 折算；Hy3 阶梯计价取最低档）
             ("hunyuan-hy3", "Hunyuan Hy3", "0.14", "0.56", "0.035", "0"),
             ("hy3", "Hunyuan Hy3", "0.14", "0.56", "0.035", "0"),
@@ -2599,6 +2636,14 @@ impl Database {
                 "0.375",
             ),
             ("minimax-m3", "MiniMax M3", "0.30", "1.20", "0.06", "0"),
+            (
+                "minimax-m3.1-flash",
+                "MiniMax M3.1 Flash",
+                "0.15",
+                "0.60",
+                "0.015",
+                "0",
+            ),
             // GLM (智谱)
             ("glm-4.7", "GLM-4.7", "0.6", "2.2", "0.11", "0"),
             ("glm-4.6", "GLM-4.6", "0.6", "2.2", "0.11", "0"),
@@ -2668,6 +2713,26 @@ impl Database {
             ("qwen3.8-27b", "Qwen3.8 27B", "0.50", "3", "0.10", "0.625"),
             ("qwen3.7-max", "Qwen3.7 Max", "2.50", "7.50", "0.25", "0"),
             ("qwen3.7-plus", "Qwen3.7 Plus", "0.40", "1.60", "0.08", "0"),
+            // 2026-10-19：阿里国际站（新加坡）价页。qwen3.7-flash 阶梯计价取最低档（≤32K），
+            // 缓存两列按 qwen3.8 同口径（隐式命中 20%、显式创建 125%）；qwen3.6-27b 无阶梯、
+            // 价页未列缓存价；qwen3.8-omni-flash 取文本价，价页只列缓存命中价
+            (
+                "qwen3.7-flash",
+                "Qwen3.7 Flash",
+                "0.03",
+                "0.13",
+                "0.006",
+                "0.0375",
+            ),
+            ("qwen3.6-27b", "Qwen3.6 27B", "0.60", "3.60", "0", "0"),
+            (
+                "qwen3.8-omni-flash",
+                "Qwen3.8 Omni Flash",
+                "0.15",
+                "0.47",
+                "0.016",
+                "0",
+            ),
             (
                 "qwen3.6-plus",
                 "Qwen3.6 Plus",
@@ -2940,6 +3005,26 @@ impl Database {
 
     fn repair_current_model_pricing(conn: &Connection) -> Result<(), AppError> {
         let pricing_fixes = [
+            // 2026-10-19 models.dev 审计核价：Kimi K3 官方价页列有缓存写入（默认 5 分钟档 $3），
+            // 早先按 0 录入；Step 5 Preview 缓存读取 2026-10-14 起由 0.35 元上调至 0.70 元
+            (
+                "kimi-k3", "Kimi K3", "3.00", "15.00", "0.30", "3.00", "3.00", "15.00", "0.30", "0",
+            ),
+            (
+                "k3", "Kimi K3", "3.00", "15.00", "0.30", "3.00", "3.00", "15.00", "0.30", "0",
+            ),
+            (
+                "step-5-preview",
+                "Step 5 Preview",
+                "0.98",
+                "2.80",
+                "0.10",
+                "0",
+                "0.98",
+                "2.80",
+                "0.05",
+                "0",
+            ),
             // 2026-09-02 官方定价页确认 Sonnet 5 $2/$10 介绍价转为正式价、原定 09-01 涨至
             // $3/$15 取消：早先按 list 价 seed 的行改回正式价（用户手改过的行不匹配旧值，不动）
             (
@@ -3994,6 +4079,48 @@ mod tests {
     }
 
     #[test]
+    fn agy_migration_preserves_existing_flags_and_defaults_to_disabled() -> Result<(), AppError> {
+        let conn = Connection::open_in_memory()?;
+        conn.execute_batch("CREATE TABLE mcp_servers(id TEXT PRIMARY KEY, enabled_gemini BOOLEAN); CREATE TABLE skills(id TEXT PRIMARY KEY, enabled_codex BOOLEAN); INSERT INTO mcp_servers VALUES ('m',1); INSERT INTO skills VALUES ('s',1);")?;
+        Database::set_user_version(&conn, 20)?;
+        Database::apply_schema_migrations_on_conn(&conn)?;
+        assert_eq!(Database::get_user_version(&conn)?, SCHEMA_VERSION);
+        for (table, flag) in [
+            ("mcp_servers", "enabled_gemini"),
+            ("skills", "enabled_codex"),
+        ] {
+            let row = conn.query_row(
+                &format!("SELECT {flag}, enabled_agy FROM {table}"),
+                [],
+                |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?)),
+            )?;
+            assert_eq!(row, (1, 0));
+        }
+        Database::apply_schema_migrations_on_conn(&conn)?;
+        Ok(())
+    }
+
+    #[test]
+    fn agy_clean_database_persists_independent_mcp_and_skill_flags() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        let mut server: crate::app_config::McpServer = serde_json::from_value(serde_json::json!({"id":"m", "name":"m", "server":{"command":"echo"}, "apps":{"gemini":true,"agy":true}})).unwrap();
+        db.save_mcp_server(&server)?;
+        server.apps.agy = false;
+        db.update_mcp_server_app_enabled("m", &crate::app_config::AppType::Agy, false)?;
+        assert_eq!(db.get_all_mcp_servers()?["m"].apps, server.apps);
+        let skill: crate::app_config::InstalledSkill = serde_json::from_value(serde_json::json!({"id":"s", "name":"s", "directory":"s", "installedAt":0, "apps":{"agy":true,"gemini":true}})).unwrap();
+        db.save_skill(&skill)?;
+        assert!(db.get_installed_skill("s")?.unwrap().apps.agy);
+        let mut apps = skill.apps;
+        apps.agy = false;
+        db.update_skill_apps("s", &apps)?;
+        let read = db.get_all_installed_skills()?;
+        assert!(!read["s"].apps.agy);
+        assert!(read["s"].apps.gemini);
+        Ok(())
+    }
+
+    #[test]
     fn migrate_v19_to_v20_adds_pi_mcp_flag_and_keeps_existing_flags() -> Result<(), AppError> {
         let conn = Connection::open_in_memory()?;
         conn.execute_batch(
@@ -4236,7 +4363,7 @@ mod tests {
         }
         for _ in 0..2 {
             Database::apply_schema_migrations_on_conn(&conn)?;
-            assert_eq!(Database::get_user_version(&conn)?, 22);
+            assert_eq!(Database::get_user_version(&conn)?, SCHEMA_VERSION);
             let flags: (bool, bool, bool) = conn.query_row(
                 "SELECT enabled_omp, enabled_mcode, enabled_pi FROM mcp_servers WHERE id='existing'",
                 [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
@@ -4270,6 +4397,75 @@ mod tests {
     #[test]
     fn migrate_upstream_v20_to_v22_preserves_flags_cursors_and_costs() -> Result<(), AppError> {
         assert_v4_app_flags_and_history_migrate(true)
+    }
+
+    #[test]
+    fn migrate_upstream_v21_and_fork_v22_to_v23_preserves_independent_flags_and_history(
+    ) -> Result<(), AppError> {
+        for upstream in [false, true] {
+            let conn = Connection::open_in_memory()?;
+            Database::create_tables_on_conn(&conn)?;
+            conn.execute_batch(
+                "INSERT INTO mcp_servers (id, name, server_config, enabled_omp, enabled_agy, enabled_pi)
+                 VALUES ('existing', 'keep', '{}', 1, 1, 1);
+                 INSERT INTO skills (id, name, directory, enabled_omp, enabled_agy, installed_at)
+                 VALUES ('existing', 'keep', 'keep', 1, 1, 123);
+                 INSERT INTO proxy_request_logs
+                   (request_id, provider_id, app_type, model, latency_ms, status_code, created_at, total_cost_usd)
+                 VALUES ('session:existing', 'p', 'claude', 'kept-model', 100, 200, 123456, '12.345678');
+                 INSERT INTO session_log_sync
+                   (file_path, last_modified, last_line_offset, last_byte_offset, last_tail_fingerprint, last_synced_at)
+                 VALUES ('/fixture/.claude/projects/project/existing.jsonl', 123456, 42, 12345, 876, 123456);",
+            )?;
+            let missing = if upstream {
+                "enabled_omp"
+            } else {
+                "enabled_agy"
+            };
+            for table in ["mcp_servers", "skills"] {
+                conn.execute_batch(&format!("ALTER TABLE {table} DROP COLUMN {missing};"))?;
+            }
+            if !upstream {
+                crate::services::claude_usage_ledger::migrate_legacy(&conn)?;
+                conn.execute("UPDATE claude_usage_legacy_cursors SET completed=1", [])?;
+            }
+            Database::set_user_version(&conn, if upstream { 21 } else { 22 })?;
+            for _ in 0..2 {
+                Database::apply_schema_migrations_on_conn(&conn)?;
+                assert_eq!(Database::get_user_version(&conn)?, 23);
+                for table in ["mcp_servers", "skills"] {
+                    let flags: (bool, bool) = conn.query_row(
+                        &format!(
+                            "SELECT enabled_omp, enabled_agy FROM {table} WHERE id='existing'"
+                        ),
+                        [],
+                        |r| Ok((r.get(0)?, r.get(1)?)),
+                    )?;
+                    assert_eq!(flags, (!upstream, upstream));
+                }
+                assert!(crate::services::claude_usage_ledger::contains(
+                    &conn,
+                    "session:existing"
+                )?);
+                let cost: String = conn.query_row(
+                    "SELECT total_cost_usd FROM proxy_request_logs WHERE request_id='session:existing'",
+                    [], |r| r.get(0),
+                )?;
+                assert_eq!(cost, "12.345678");
+                let cursor: (i64, i64, i64) = conn.query_row(
+                    "SELECT last_line_offset, last_byte_offset, last_tail_fingerprint FROM session_log_sync",
+                    [], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                )?;
+                assert_eq!(cursor, (42, 12345, 876));
+                let completed: bool = conn.query_row(
+                    "SELECT completed FROM claude_usage_legacy_cursors",
+                    [],
+                    |r| r.get(0),
+                )?;
+                assert_eq!(completed, !upstream);
+            }
+        }
+        Ok(())
     }
 
     fn assert_v19_app_flags_migrate(

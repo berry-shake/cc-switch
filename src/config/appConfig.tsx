@@ -28,6 +28,7 @@ export const APP_IDS: AppId[] = [
   "pi",
   "omp",
   "mcode",
+  "agy",
 ];
 
 export const DEFAULT_VISIBLE_APPS: VisibleApps = {
@@ -42,6 +43,7 @@ export const DEFAULT_VISIBLE_APPS: VisibleApps = {
   pi: true,
   omp: true,
   mcode: true,
+  agy: true,
 };
 
 /** App IDs shown in Skills panels. */
@@ -55,6 +57,7 @@ export const SKILLS_APP_IDS: AppId[] = [
   "pi",
   "omp",
   "mcode",
+  "agy",
 ];
 
 export type ProxyAppId = Extract<
@@ -147,10 +150,15 @@ export const MCP_APP_IDS: McpAppId[] = [
   "omp",
   "pi",
   "mcode",
+  "agy",
 ];
 
 export function isMcpAppId(appId: string): appId is McpAppId {
   return (MCP_APP_IDS as string[]).includes(appId);
+}
+
+export function usesGeminiStyleForm(appId: string): boolean {
+  return appId === "gemini" || appId === "agy";
 }
 
 export const APP_ICON_MAP: Record<AppId, AppConfig> = {
@@ -261,6 +269,21 @@ export const APP_ICON_MAP: Record<AppId, AppConfig> = {
       "bg-orange-500/10 ring-1 ring-orange-500/20 hover:bg-orange-500/20 text-orange-600 dark:text-orange-400",
     badgeClass:
       "bg-orange-500/10 text-orange-700 dark:text-orange-300 hover:bg-orange-500/20 border-0 gap-1.5",
+  },
+  agy: {
+    label: "Antigravity",
+    icon: (
+      <ProviderIcon
+        icon="antigravity"
+        name="Antigravity"
+        size={14}
+        showFallback={false}
+      />
+    ),
+    activeClass:
+      "bg-sky-500/10 ring-1 ring-sky-500/20 hover:bg-sky-500/20 text-sky-700 dark:text-sky-300",
+    badgeClass:
+      "bg-sky-500/10 text-sky-700 dark:text-sky-300 hover:bg-sky-500/20 border-0 gap-1.5",
   },
 };
 

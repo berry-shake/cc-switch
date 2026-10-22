@@ -10,4 +10,5 @@ export type AppId =
   | "hermes"
   | "pi"
   | "omp"
-  | "mcode";
+  | "mcode"
+  | "agy";

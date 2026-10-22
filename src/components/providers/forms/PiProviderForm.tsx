@@ -42,7 +42,12 @@ import { BasicFormFields } from "./BasicFormFields";
 import { ProviderPresetSelector } from "./ProviderPresetSelector";
 import { RequestHeadersEditor } from "./RequestHeadersEditor";
 import { StructuredOptionsEditor } from "./StructuredOptionsEditor";
-import { ApiKeySection, EndpointField, ModelDropdown } from "./shared";
+import {
+  ApiKeySection,
+  EndpointField,
+  GptContextWindowHint,
+  ModelDropdown,
+} from "./shared";
 import {
   findRequestHeaderValue,
   normalizeRequestHeaders,
@@ -1537,11 +1542,6 @@ export function PiProviderForm({
                   )}
                 </SelectContent>
               </Select>
-              <p className="text-xs text-fg-2">
-                {t("opencode.npmPackageHint", {
-                  defaultValue: "选择 AI 服务的 API 接口格式",
-                })}
-              </p>
             </Field>
 
             <ApiKeySection
@@ -1564,11 +1564,6 @@ export function PiProviderForm({
                 onChange={handleBaseUrlChange}
                 placeholder="https://api.example.com/v1"
               />
-              <p className="text-xs text-fg-2">
-                {t("opencode.baseUrlHint", {
-                  defaultValue: "自定义 API 端点地址",
-                })}
-              </p>
             </div>
 
             <RequestHeadersEditor
@@ -1814,6 +1809,10 @@ export function PiProviderForm({
                                   })
                                 }
                                 placeholder="128000"
+                              />
+                              <GptContextWindowHint
+                                modelId={model.id}
+                                contextWindow={model.contextWindow}
                               />
                             </Field>
                             <Field
@@ -2101,12 +2100,6 @@ export function PiProviderForm({
                   })}
                 </div>
               )}
-
-              <p className="text-xs text-fg-2">
-                {t("opencode.modelsHint", {
-                  defaultValue: "配置可用的模型及其显示名称。",
-                })}
-              </p>
             </div>
           </fieldset>
         )}

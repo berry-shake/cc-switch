@@ -1149,7 +1149,13 @@ fn codex_usage_response_to_tiers(body: &CodexUsageResponse) -> Vec<QuotaTier> {
                     .unwrap_or_else(|| "unknown".to_string()),
                 window_seconds,
                 utilization: used,
-                resets_at: window.reset_at.and_then(unix_ts_to_iso),
+                // Zero-use windows can carry a moving placeholder reset time.
+                // Keep raw windows for the fork's cycle logic, hide the tier countdown.
+                resets_at: if used == 0.0 {
+                    None
+                } else {
+                    window.reset_at.and_then(unix_ts_to_iso)
+                },
                 used_value_usd: None,
                 max_value_usd: None,
             });
@@ -1743,6 +1749,7 @@ pub async fn get_subscription_quota(tool: &str) -> Result<SubscriptionQuota, Str
             }
         }
         "grokbuild" => crate::services::subscription_grok::get_grok_subscription_quota().await,
+        "agy" => crate::services::subscription_agy::get_agy_subscription_quota().await,
         _ => Ok(SubscriptionQuota::not_found(tool)),
     }
 }

@@ -12,6 +12,7 @@
 //! - `session_meta` → 提取唯一 thread_id（子代理的 session_id 指向父线程）
 //! - `turn_context` / `event_msg` (type=thread_settings_applied) → 提取当前 model 和请求速度
 //! - `event_msg` (type=token_count) → 提取累计 token 用量，计算 delta
+//! - `token_usage_record` → 随后的 token_count last 为 0 时补记这次用量
 
 use crate::codex_config::get_codex_config_dir;
 use crate::codex_rollout_file;
@@ -255,6 +256,9 @@ struct ParsedTokenEvent {
     signature: TokenUsageSignature,
     delta: DeltaTokens,
     event_index: Option<u32>,
+    /// 不占用 `token_count` 序号的用量。远程压缩只写 `token_usage_record` 时用它，
+    /// 避免把后面每次请求的 `event_index` 都往后挤。
+    request_suffix: Option<String>,
     model: String,
     service_tier: CodexServiceTier,
     timestamp: Option<String>,
@@ -512,6 +516,8 @@ struct ParsedCodexFile {
     root_timestamp: Option<DateTime<Utc>>,
     parent: ParentResolution,
     token_events: Vec<ParsedTokenEvent>,
+    /// `token_usage_record` 后面紧跟 last 全 0 的 `token_count` 时补记的用量。
+    usage_record_events: Vec<ParsedTokenEvent>,
     line_offset: i64,
     has_unterminated_tail: bool,
     /// Bytes actually read, including an incomplete final record. Persisted in
@@ -604,6 +610,7 @@ struct CodexRebuildEventFingerprint {
     cache_write_reported: bool,
     output: u32,
     event_index: Option<u32>,
+    request_suffix: Option<String>,
     model: String,
     service_tier: CodexServiceTier,
     timestamp: CodexRebuildTimestampFingerprint,
@@ -620,14 +627,19 @@ struct CodexRebuildFileFingerprint {
 
 impl CodexRebuildFileFingerprint {
     fn from_parsed(parsed: &ParsedCodexFile) -> Self {
+        let mut events: Vec<_> = parsed
+            .token_events
+            .iter()
+            .chain(parsed.usage_record_events.iter())
+            .collect();
+        events.sort_by_key(|event| event.line_offset);
         Self {
             root_meta_seen: parsed.root_meta_seen,
             meta_thread_id: parsed.meta_thread_id.clone(),
             root_timestamp: parsed.root_timestamp,
             parent: parsed.parent.clone(),
-            events: parsed
-                .token_events
-                .iter()
+            events: events
+                .into_iter()
                 .map(|event| CodexRebuildEventFingerprint {
                     signature: event.signature.clone(),
                     input: event.delta.input,
@@ -636,6 +648,7 @@ impl CodexRebuildFileFingerprint {
                     cache_write_reported: event.delta.cache_write_reported,
                     output: event.delta.output,
                     event_index: event.event_index,
+                    request_suffix: event.request_suffix.clone(),
                     model: event.model.clone(),
                     service_tier: event.service_tier,
                     timestamp: CodexRebuildTimestampFingerprint::from_raw(
@@ -1013,6 +1026,80 @@ fn compute_delta(prev: &Option<CumulativeTokens>, current: &CumulativeTokens) ->
             output: current.output.saturating_sub(p.output) as u32,
         },
     }
+}
+
+fn usage_matches(last: &CumulativeTokens, usage: &CumulativeTokens) -> bool {
+    last.input == usage.input
+        && last.cached_input == usage.cached_input
+        && last.cache_write_input == usage.cache_write_input
+        && last.output == usage.output
+}
+
+fn usage_is_zero(usage: &CumulativeTokens) -> bool {
+    usage.input == 0 && usage.cached_input == 0 && usage.cache_write_input == 0 && usage.output == 0
+}
+
+fn delta_from_usage(usage: &CumulativeTokens) -> DeltaTokens {
+    let input = usage.input.min(u32::MAX as u64) as u32;
+    let cached_input = usage.cached_input.min(usage.input).min(u32::MAX as u64) as u32;
+    let fresh_input = input.saturating_sub(cached_input);
+    DeltaTokens {
+        input,
+        cached_input,
+        cache_write_input: (usage.cache_write_input.min(u32::MAX as u64) as u32).min(fresh_input),
+        cache_write_reported: usage.cache_write_reported,
+        output: usage.output.min(u32::MAX as u64) as u32,
+    }
+}
+
+fn signature_for_last_usage(usage: &CumulativeTokens) -> TokenUsageSignature {
+    TokenUsageSignature {
+        total: None,
+        last: Some(TokenCountersSignature {
+            input: Some(usage.input),
+            cached_input: Some(usage.cached_input),
+            cache_write_input: usage
+                .cache_write_reported
+                .then_some(usage.cache_write_input),
+            output: Some(usage.output),
+            reasoning_output: None,
+            total: Some(usage.input.saturating_add(usage.output)),
+        }),
+    }
+}
+
+struct PendingUsageRecord {
+    key: String,
+    usage: CumulativeTokens,
+    timestamp: Option<String>,
+    model: String,
+    service_tier: CodexServiceTier,
+}
+
+fn push_unmatched_usage(
+    events: &mut Vec<ParsedTokenEvent>,
+    pending: PendingUsageRecord,
+    confirmed_line_offset: i64,
+    has_billable_tokens: &mut bool,
+) {
+    let delta = delta_from_usage(&pending.usage);
+    if delta.is_zero() {
+        return;
+    }
+    *has_billable_tokens = true;
+    events.push(ParsedTokenEvent {
+        // The zero token_count confirms this usage. If it arrives in the next
+        // scan, the usage_record itself is already behind the persisted cursor.
+        line_offset: confirmed_line_offset,
+        signature: signature_for_last_usage(&pending.usage),
+        delta,
+        event_index: None,
+        request_suffix: Some(format!("usage:{}", pending.key)),
+        model: pending.model,
+        service_tier: pending.service_tier,
+        timestamp: pending.timestamp,
+        timing: None,
+    });
 }
 
 fn update_high_water(high_water: &mut CumulativeTokens, current: &CumulativeTokens) {
@@ -1930,6 +2017,8 @@ fn parse_codex_file_with_index(
     let mut history_base_thread_id = None;
     let mut event_index = 0u32;
     let mut token_events = Vec::new();
+    let mut usage_record_events = Vec::new();
+    let mut pending_usage: Option<PendingUsageRecord> = None;
     let mut line_offset = 0i64;
     let mut observed_bytes = 0i64;
     let mut has_unterminated_tail = false;
@@ -1977,7 +2066,8 @@ fn parse_codex_file_with_index(
         let is_event_msg = line.contains("\"event_msg\"");
         let is_turn_context = line.contains("\"turn_context\"");
         let is_session_meta = line.contains("\"session_meta\"");
-        if !is_event_msg && !is_turn_context && !is_session_meta {
+        let is_usage_record = line.contains("\"token_usage_record\"");
+        if !is_event_msg && !is_turn_context && !is_session_meta && !is_usage_record {
             continue;
         }
         if is_event_msg
@@ -2152,6 +2242,22 @@ fn parse_codex_file_with_index(
                 let last = info
                     .get("last_token_usage")
                     .and_then(parse_cumulative_tokens);
+                if let Some(pending) = pending_usage.take() {
+                    // 对得上的 last 已经由这条 token_count 入账。last 为 0 是远程压缩
+                    // 把本次用量只写在 token_usage_record 里之后的空快照。其它对不上的
+                    // 记录只用于耗时，不能再记一行。
+                    let covered = last
+                        .as_ref()
+                        .is_some_and(|last| usage_matches(last, &pending.usage));
+                    if !covered && last.as_ref().is_some_and(usage_is_zero) {
+                        push_unmatched_usage(
+                            &mut usage_record_events,
+                            pending,
+                            line_offset,
+                            &mut has_billable_tokens,
+                        );
+                    }
+                }
                 if total.is_none() && last.is_none() {
                     continue;
                 }
@@ -2267,10 +2373,42 @@ fn parse_codex_file_with_index(
                     signature,
                     delta,
                     event_index: nonzero_index,
+                    request_suffix: None,
                     model: current_model.clone(),
                     service_tier: current_service_tier,
                     timestamp,
                     timing,
+                });
+            }
+            "token_usage_record" => {
+                pending_usage = None;
+                let Some(payload) = value.get("payload") else {
+                    continue;
+                };
+                let Some(usage) = payload.get("usage").and_then(parse_cumulative_tokens) else {
+                    continue;
+                };
+                if usage_is_zero(&usage) {
+                    continue;
+                }
+                let response_id = payload
+                    .get("response_id")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("");
+                let key = if response_id.is_empty() {
+                    format!("line{line_offset}")
+                } else {
+                    response_id.to_string()
+                };
+                pending_usage = Some(PendingUsageRecord {
+                    key,
+                    usage,
+                    timestamp: value
+                        .get("timestamp")
+                        .and_then(serde_json::Value::as_str)
+                        .map(str::to_owned),
+                    model: current_model.clone(),
+                    service_tier: current_service_tier,
                 });
             }
             _ => {}
@@ -2284,6 +2422,7 @@ fn parse_codex_file_with_index(
         root_timestamp,
         parent,
         token_events,
+        usage_record_events,
         line_offset,
         has_unterminated_tail,
         observed_bytes: compressed_size
@@ -2831,7 +2970,7 @@ fn sync_single_codex_file(
         deferred: parsed.has_unterminated_tail,
         ..CodexFileSyncResult::default()
     };
-    let mut to_insert: Vec<(&ParsedTokenEvent, u32)> = Vec::new();
+    let mut to_insert: Vec<(&ParsedTokenEvent, String)> = Vec::new();
     for (token_offset, event) in parsed.token_events.iter().enumerate() {
         let Some(event_index) = event.event_index else {
             continue;
@@ -2845,7 +2984,16 @@ fn sync_single_codex_file(
         if event.line_offset <= last_offset {
             continue;
         }
-        to_insert.push((event, event_index));
+        to_insert.push((event, event_index.to_string()));
+    }
+    for event in &parsed.usage_record_events {
+        let Some(suffix) = event.request_suffix.as_deref() else {
+            continue;
+        };
+        if event.line_offset <= last_offset {
+            continue;
+        }
+        to_insert.push((event, suffix.to_string()));
     }
 
     // 分批事务写库：逐行 autocommit（journal_mode=delete 下每行一整套
@@ -2869,9 +3017,8 @@ fn sync_single_codex_file(
         let mut batch_imported = 0u32;
         let mut batch_skipped = 0u32;
         let mut batch_suspected = 0u32;
-        for (event, event_index) in batch {
-            let request_id =
-                format!("{CODEX_THREAD_REQUEST_ID_PREFIX}:{root_thread_id}:{event_index}");
+        for (event, suffix) in batch {
+            let request_id = format!("{CODEX_THREAD_REQUEST_ID_PREFIX}:{root_thread_id}:{suffix}");
             match insert_codex_session_entry_on_conn(
                 &tx,
                 &request_id,
@@ -3366,6 +3513,234 @@ mod tests {
                 "rate_limits": { "limit_id": limit_id }
             }
         })
+    }
+
+    fn token_usage_record_at(
+        response_id: &str,
+        input: u64,
+        cached: u64,
+        output: u64,
+        timestamp: &str,
+    ) -> serde_json::Value {
+        serde_json::json!({
+            "timestamp": timestamp,
+            "type": "token_usage_record",
+            "payload": {
+                "response_id": response_id,
+                "usage": {
+                    "input_tokens": input,
+                    "cached_input_tokens": cached,
+                    "cache_write_input_tokens": 0,
+                    "output_tokens": output,
+                    "reasoning_output_tokens": 0,
+                    "total_tokens": input + output
+                }
+            }
+        })
+    }
+
+    fn codex_usage_rows(db: &Database) -> Result<Vec<(String, i64, i64)>, AppError> {
+        let conn = lock_conn!(db.conn);
+        let mut stmt = conn
+            .prepare(
+                "SELECT request_id, input_tokens, output_tokens
+                 FROM proxy_request_logs WHERE data_source = 'codex_session'
+                 ORDER BY request_id",
+            )
+            .map_err(|error| AppError::Database(error.to_string()))?;
+        let rows = stmt
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+            .map_err(|error| AppError::Database(error.to_string()))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| AppError::Database(error.to_string()))?;
+        Ok(rows)
+    }
+
+    #[test]
+    fn remote_compaction_usage_record_is_imported_when_the_following_token_count_is_zero(
+    ) -> Result<(), AppError> {
+        let db = Database::memory()?;
+        let temp = tempdir().unwrap();
+        let path = rollout_path(temp.path(), PARENT_ID);
+        write_jsonl(
+            &path,
+            &[
+                session_meta(PARENT_ID),
+                turn_context(),
+                token_usage_record_at("resp_compact", 26_705, 0, 491, "2026-07-10T03:00:02Z"),
+                token_count_with_last_at(0, 0, 0, 0, 0, 0, "default", "2026-07-10T03:00:02Z"),
+            ],
+        );
+
+        let result = sync_test_file(&db, &path, &[&path])?;
+
+        assert_eq!(result.imported, 1, "compaction usage must be imported");
+        let rows = codex_usage_rows(&db)?;
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].1, 26_705);
+        assert_eq!(rows[0].2, 491);
+        assert!(rows[0].0.ends_with(":usage:resp_compact"));
+        Ok(())
+    }
+
+    #[test]
+    fn usage_record_covered_by_token_count_is_not_imported_twice() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        let temp = tempdir().unwrap();
+        let path = rollout_path(temp.path(), PARENT_ID);
+        write_jsonl(
+            &path,
+            &[
+                session_meta(PARENT_ID),
+                turn_context(),
+                token_usage_record_at("resp_turn", 26_705, 1_000, 491, "2026-07-10T03:00:02Z"),
+                token_count_with_last_at(
+                    26_705,
+                    1_000,
+                    491,
+                    26_705,
+                    1_000,
+                    491,
+                    "default",
+                    "2026-07-10T03:00:03Z",
+                ),
+            ],
+        );
+
+        let result = sync_test_file(&db, &path, &[&path])?;
+
+        assert_eq!(result.imported, 1);
+        let rows = codex_usage_rows(&db)?;
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].1, 26_705);
+        assert_eq!(rows[0].2, 491);
+        assert_eq!(
+            rows[0].0,
+            format!("{CODEX_THREAD_REQUEST_ID_PREFIX}:{PARENT_ID}:1")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn compaction_retains_fast_cache_write_and_rebuild_fingerprint() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        let temp = tempdir().unwrap();
+        let path = rollout_path(temp.path(), PARENT_ID);
+        let mut usage = token_usage_record_at(
+            "resp_compact",
+            1_000_000,
+            100_000,
+            10_000,
+            "2026-07-10T03:00:02Z",
+        );
+        usage["payload"]["usage"]["cache_write_input_tokens"] = serde_json::json!(100_000);
+        let lines = [
+            session_meta(PARENT_ID),
+            thread_settings_with_tier_at(Some("priority"), "gpt-5.6-sol", "2026-07-10T03:00:01Z"),
+            usage,
+            token_count_with_last_at(0, 0, 0, 0, 0, 0, "default", "2026-07-10T03:00:02Z"),
+        ];
+        write_jsonl(&path, &lines);
+        let parsed = parse_codex_file(&path, Some(PARENT_ID.into()))?;
+        let before = CodexRebuildFileFingerprint::from_parsed(&parsed);
+        assert_eq!(parsed.usage_record_events.len(), 1);
+        assert!(parsed.usage_record_events[0].delta.cache_write_reported);
+        assert_eq!(sync_test_file(&db, &path, &[&path])?.imported, 1);
+        assert_eq!(sync_test_file(&db, &path, &[&path])?.imported, 0);
+        {
+            let conn = lock_conn!(db.conn);
+            let (writes, semantics, multiplier, write_cost): (i64, i64, String, String) = conn.query_row(
+                "SELECT cache_creation_tokens, input_token_semantics, cost_multiplier, cache_creation_cost_usd
+                 FROM proxy_request_logs WHERE data_source='codex_session'",
+                [], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )?;
+            assert_eq!(writes, 100_000);
+            assert_eq!(semantics, INPUT_TOKEN_SEMANTICS_TOTAL);
+            assert_eq!(multiplier.parse::<Decimal>().unwrap(), Decimal::new(25, 1));
+            assert_eq!(write_cost.parse::<Decimal>().unwrap(), Decimal::new(4, 1));
+        }
+        let mut changed = lines.clone();
+        changed[2]["payload"]["response_id"] = serde_json::json!("different-response");
+        write_jsonl(&path, &changed);
+        let after = CodexRebuildFileFingerprint::from_parsed(&parse_codex_file(
+            &path,
+            Some(PARENT_ID.into()),
+        )?);
+        assert!(!before.is_prefix_compatible_with(&after));
+        changed[2]["payload"]["usage"]
+            .as_object_mut()
+            .unwrap()
+            .remove("cache_write_input_tokens");
+        write_jsonl(&path, &changed);
+        let missing = parse_codex_file(&path, Some(PARENT_ID.into()))?;
+        assert!(!missing.usage_record_events[0].delta.cache_write_reported);
+        Ok(())
+    }
+
+    #[test]
+    fn already_scanned_compaction_stays_behind_the_cursor() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        let temp = tempdir().unwrap();
+        let path = rollout_path(temp.path(), PARENT_ID);
+        write_jsonl(
+            &path,
+            &[
+                session_meta(PARENT_ID),
+                turn_context(),
+                token_usage_record_at("resp_compact", 26_705, 0, 491, "2026-07-10T03:00:02Z"),
+                token_count_with_last_at(0, 0, 0, 0, 0, 0, "default", "2026-07-10T03:00:02Z"),
+            ],
+        );
+        let metadata = fs::metadata(&path).unwrap();
+        {
+            let conn = lock_conn!(db.conn);
+            conn.execute(
+                "INSERT INTO session_log_sync
+                    (file_path, last_modified, last_line_offset, last_byte_offset, last_synced_at)
+                 VALUES (?1, ?2, 100, ?3, 0)",
+                rusqlite::params![
+                    path.to_string_lossy().to_string(),
+                    metadata_modified_nanos(&metadata),
+                    i64::try_from(metadata.len()).unwrap()
+                ],
+            )
+            .map_err(|error| AppError::Database(error.to_string()))?;
+        }
+
+        let result = sync_test_file(&db, &path, &[&path])?;
+
+        assert_eq!(result.imported, 0);
+        assert!(codex_usage_rows(&db)?.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn compaction_confirmed_on_next_scan_is_imported_once() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        let temp = tempdir().unwrap();
+        let path = rollout_path(temp.path(), PARENT_ID);
+        let mut lines = vec![
+            session_meta(PARENT_ID),
+            turn_context(),
+            token_usage_record_at("resp_later", 1000, 100, 10, "2026-07-10T03:00:02Z"),
+        ];
+        write_jsonl(&path, &lines);
+        assert_eq!(sync_test_file(&db, &path, &[&path])?.imported, 0);
+        lines.push(token_count_with_last_at(
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            "default",
+            "2026-07-10T03:00:02Z",
+        ));
+        write_jsonl(&path, &lines);
+        assert_eq!(sync_test_file(&db, &path, &[&path])?.imported, 1);
+        assert_eq!(sync_test_file(&db, &path, &[&path])?.imported, 0);
+        assert_eq!(codex_usage_rows(&db)?.len(), 1);
+        Ok(())
     }
 
     fn sync_test_file(

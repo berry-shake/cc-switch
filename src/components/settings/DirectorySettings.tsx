@@ -1,3 +1,4 @@
+import { HelpTip } from "@/components/ui/help-tip";
 import { useMemo } from "react";
 import { FolderSearch, Undo2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
@@ -8,7 +9,7 @@ import type { AppId } from "@/lib/api";
 import type { ResolvedDirectories } from "@/hooks/useSettings";
 import { ClaudeScanDirectories } from "./ClaudeScanDirectories";
 
-export type DirectoryAppId = Exclude<AppId, "claude-desktop" | "mcode">;
+export type DirectoryAppId = Exclude<AppId, "claude-desktop" | "mcode" | "agy">;
 
 interface DirectorySettingsProps {
   appConfigDir?: string;
@@ -100,13 +101,13 @@ export function DirectorySettings({
 
       {/* Claude/Codex 配置目录 - 独立区块 */}
       <section className="space-y-4">
-        <header className="space-y-1">
+        <header className="flex items-center gap-1">
           <h3 className="text-sm font-medium">
             {t("settings.configDirectoryOverride")}
           </h3>
-          <p className="text-xs text-fg-2">
+          <HelpTip title={t("settings.configDirectoryOverride")}>
             {t("settings.configDirectoryDescription")}
-          </p>
+          </HelpTip>
         </header>
 
         <DirectoryInput

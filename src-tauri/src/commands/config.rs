@@ -168,6 +168,13 @@ pub async fn get_config_status(
                 path,
             })
         }
+        AppType::Agy => {
+            let dir = crate::agy_config::agy_dir();
+            Ok(ConfigStatus {
+                exists: crate::agy_config::settings_path().exists(),
+                path: dir.to_string_lossy().into_owned(),
+            })
+        }
     }
 }
 
@@ -195,6 +202,7 @@ pub async fn get_config_dir(app: String) -> Result<String, String> {
             .parent()
             .unwrap()
             .to_path_buf(),
+        AppType::Agy => crate::agy_config::agy_dir(),
     };
 
     Ok(dir.to_string_lossy().to_string())
@@ -219,6 +227,7 @@ pub async fn open_config_folder(handle: AppHandle, app: String) -> Result<bool, 
             .parent()
             .unwrap()
             .to_path_buf(),
+        AppType::Agy => crate::agy_config::agy_dir(),
     };
 
     if !config_dir.exists() {
