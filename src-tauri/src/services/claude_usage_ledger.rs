@@ -101,27 +101,6 @@ fn is_legacy_claude_path(path: &str) -> bool {
     )
 }
 
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn legacy_cursor_detection_does_not_capture_other_apps_in_projects_workspace() {
-        for path in [
-            "/home/.claude/projects/-work/id.jsonl",
-            "C:\\config\\projects\\-work\\session\\subagents\\agent.jsonl",
-            "/work/projects/-p/id/subagents/workflows/wf_1/agent.jsonl",
-        ] {
-            assert!(super::is_legacy_claude_path(path), "{path}");
-        }
-        for path in [
-            "/opt/projects/codex/sessions/2026/09/20/rollout.jsonl",
-            "/opt/projects/pi/sessions/-work/session.jsonl",
-            "/config/projects/p/session.json",
-        ] {
-            assert!(!super::is_legacy_claude_path(path), "{path}");
-        }
-    }
-}
-
 /// The guard also covers missing/rewritten legacy sources until their identities
 /// can be recovered. Unknown historical requests are deferred, not charged twice.
 pub(crate) fn protected_before(conn: &Connection) -> Result<Option<i64>, AppError> {
@@ -241,4 +220,25 @@ fn read_prefix_ids(
         return Err("读取期间文件发生变化".into());
     }
     Ok(ids.into_iter().collect())
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn legacy_cursor_detection_does_not_capture_other_apps_in_projects_workspace() {
+        for path in [
+            "/home/.claude/projects/-work/id.jsonl",
+            "C:\\config\\projects\\-work\\session\\subagents\\agent.jsonl",
+            "/work/projects/-p/id/subagents/workflows/wf_1/agent.jsonl",
+        ] {
+            assert!(super::is_legacy_claude_path(path), "{path}");
+        }
+        for path in [
+            "/opt/projects/codex/sessions/2026/09/20/rollout.jsonl",
+            "/opt/projects/pi/sessions/-work/session.jsonl",
+            "/config/projects/p/session.json",
+        ] {
+            assert!(!super::is_legacy_claude_path(path), "{path}");
+        }
+    }
 }

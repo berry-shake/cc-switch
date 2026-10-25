@@ -1,241 +1,250 @@
-//! OMP user-level `mcp.json` synchronization and import.
-
-use crate::app_config::{McpApps, McpServer, MultiAppConfig};
-use crate::config::atomic_write_private;
+//! OMP-native MCP state: preserve per-server options and use the user denylist
+//! when disabling so project and foreign discovery cannot reactivate a server.
+use crate::app_config::{McpApps, McpServer};
 use crate::error::AppError;
-use serde_json::{Map, Value};
-use std::collections::{HashMap, HashSet};
-use std::fs;
-use std::path::Path;
-use std::sync::{LazyLock, Mutex, MutexGuard};
+use crate::store::AppState;
+use serde_json::{json, Value};
+use std::sync::Mutex;
 
-use super::validation::validate_server_spec;
+use super::pi::{transport_spec, unified_spec, TRANSPORT_FIELDS};
 
-const MAX_MCP_FILE_BYTES: u64 = 4 * 1024 * 1024;
-static MCP_FILE_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+static WRITE_LOCK: Mutex<()> = Mutex::new(());
 
-pub fn sync_single_server_to_omp(
-    _config: &MultiAppConfig,
-    id: &str,
-    server_spec: &Value,
-) -> Result<(), AppError> {
-    validate_server_spec(server_spec)?;
-    let _guard = lock_file()?;
-    let path = crate::omp_config::get_omp_mcp_path()?;
-    let mut document = read_document(&path)?;
-    let root = root_mut(&mut document, &path)?;
-    let servers = object_field_mut(root, "mcpServers", &path)?;
-    let mut spec = server_spec.clone();
-    if let Some(spec) = spec.as_object_mut() {
-        spec.insert("enabled".to_string(), Value::Bool(true));
+#[derive(Clone, Copy)]
+pub(crate) enum OmpChange<'a> {
+    Enable(&'a Value, &'a Value),
+    Disable(&'a Value, &'a Value),
+    Remove(Option<&'a Value>),
+}
+
+impl<'a> OmpChange<'a> {
+    pub(crate) fn from_enabled(spec: &'a Value, enabled: bool) -> Self {
+        Self::from_previous(spec, spec, enabled)
     }
-    servers.insert(id.to_string(), spec);
-    remove_name_from_list(root, "disabledServers", id);
-    remove_name_from_list(root, "enabledServers", id);
-    write_document(&path, &document)
+    pub(crate) fn from_previous(spec: &'a Value, previous: &'a Value, enabled: bool) -> Self {
+        if enabled {
+            Self::Enable(spec, previous)
+        } else {
+            Self::Disable(spec, previous)
+        }
+    }
+}
+
+pub fn sync_single_server_to_omp(id: &str, spec: &Value) -> Result<(), AppError> {
+    sync(id, OmpChange::Enable(spec, spec))
 }
 
 pub fn remove_server_from_omp(id: &str) -> Result<(), AppError> {
-    let _guard = lock_file()?;
-    let path = crate::omp_config::get_omp_mcp_path()?;
-    if !path.exists() {
+    sync(id, OmpChange::Remove(None))
+}
+
+fn sync(id: &str, change: OmpChange<'_>) -> Result<(), AppError> {
+    let _guard = WRITE_LOCK
+        .lock()
+        .map_err(|e| AppError::Message(e.to_string()))?;
+    sync_locked(id, change)
+}
+
+pub(crate) fn sync_and_commit<T>(
+    id: &str,
+    change: OmpChange<'_>,
+    commit: impl FnOnce() -> Result<T, AppError>,
+) -> Result<T, AppError> {
+    let _guard = WRITE_LOCK
+        .lock()
+        .map_err(|e| AppError::Message(e.to_string()))?;
+    crate::mcode_config::write_and_commit(
+        &crate::omp_config::get_omp_mcp_path()?,
+        || sync_locked(id, change),
+        commit,
+    )
+}
+
+fn update_list(document: &mut Value, field: &str, id: &str, include: bool) -> Result<(), AppError> {
+    if document.get(field).is_none() && !include {
         return Ok(());
     }
-    let mut document = read_document(&path)?;
-    let root = root_mut(&mut document, &path)?;
-    if let Some(servers) = root.get_mut("mcpServers").and_then(Value::as_object_mut) {
-        servers.remove(id);
+    let list = document
+        .as_object_mut()
+        .unwrap()
+        .entry(field)
+        .or_insert_with(|| json!([]))
+        .as_array_mut()
+        .ok_or_else(|| AppError::Config(format!("Oh My Pi MCP '{field}' must be an array")))?;
+    list.retain(|value| value.as_str() != Some(id));
+    if include {
+        list.push(json!(id));
     }
-    remove_name_from_list(root, "disabledServers", id);
-    remove_name_from_list(root, "enabledServers", id);
-    write_document(&path, &document)
+    Ok(())
 }
 
-pub fn import_from_omp(config: &mut MultiAppConfig) -> Result<usize, AppError> {
-    let _guard = lock_file()?;
-    let path = crate::omp_config::get_omp_mcp_path()?;
-    if !path.exists() {
-        return Ok(0);
-    }
-    let document = read_document(&path)?;
-    let root = document.as_object().ok_or_else(|| invalid_root(&path))?;
-    let Some(native) = root.get("mcpServers").and_then(Value::as_object) else {
-        return Ok(0);
-    };
-    let disabled = root
-        .get("disabledServers")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(Value::as_str)
-        .collect::<HashSet<_>>();
-    let servers = config.mcp.servers.get_or_insert_with(HashMap::new);
-    let mut changed = 0;
-
-    for (id, spec) in native {
-        let enabled = spec.get("enabled").and_then(Value::as_bool).unwrap_or(true)
-            && !disabled.contains(id.as_str());
-        if !enabled {
-            continue;
-        }
-        if let Err(error) = validate_server_spec(spec) {
-            log::warn!("Skipping invalid OMP MCP server '{id}': {error}");
-            continue;
-        }
-        if let Some(existing) = servers.get_mut(id) {
-            if !existing.apps.omp {
-                existing.apps.omp = true;
-                changed += 1;
+fn sync_locked(id: &str, change: OmpChange<'_>) -> Result<(), AppError> {
+    crate::omp_config::update_omp_mcp_document(|document| {
+        let before = document.clone();
+        let servers = document
+            .as_object_mut()
+            .unwrap()
+            .entry("mcpServers")
+            .or_insert_with(|| json!({}))
+            .as_object_mut()
+            .ok_or_else(|| {
+                AppError::Config("Oh My Pi MCP 'mcpServers' must be an object".into())
+            })?;
+        match change {
+            OmpChange::Enable(spec, previous) | OmpChange::Disable(spec, previous) => {
+                let unified = unified_spec(spec);
+                super::validation::validate_server_spec(&unified)?;
+                if servers
+                    .get(id)
+                    .is_some_and(|native| transport_spec(native) != transport_spec(previous))
+                {
+                    return Err(AppError::InvalidInput(format!("Oh My Pi MCP '{id}' conflicts with an independently configured server; native configuration preserved")));
+                }
+                // Native options edited by OMP win; stored options restore a removed entry.
+                let mut merged = servers.get(id).cloned().unwrap_or_else(|| unified.clone());
+                let entry = merged
+                    .as_object_mut()
+                    .ok_or_else(|| AppError::Config("Invalid Oh My Pi MCP entry".into()))?;
+                for field in TRANSPORT_FIELDS {
+                    entry.remove(field);
+                }
+                entry.extend(
+                    unified
+                        .as_object()
+                        .unwrap()
+                        .iter()
+                        .filter(|(key, _)| TRANSPORT_FIELDS.contains(&key.as_str()))
+                        .map(|(key, value)| (key.clone(), value.clone())),
+                );
+                entry.insert(
+                    "enabled".into(),
+                    json!(matches!(change, OmpChange::Enable(_, _))),
+                );
+                servers.insert(id.into(), merged);
+                update_list(
+                    document,
+                    "disabledServers",
+                    id,
+                    matches!(change, OmpChange::Disable(_, _)),
+                )?;
+                update_list(document, "enabledServers", id, false)?;
             }
-        } else {
-            let mut normalized = spec.clone();
-            if let Some(normalized) = normalized.as_object_mut() {
-                normalized.remove("enabled");
+            OmpChange::Remove(expected) => {
+                if expected.is_some_and(|spec| {
+                    servers
+                        .get(id)
+                        .is_some_and(|native| transport_spec(native) != transport_spec(spec))
+                }) {
+                    return Err(AppError::InvalidInput(format!("Oh My Pi MCP '{id}' changed outside CC Switch; native configuration preserved")));
+                }
+                servers.remove(id);
+                update_list(document, "disabledServers", id, false)?;
+                update_list(document, "enabledServers", id, false)?;
             }
-            servers.insert(
-                id.clone(),
-                McpServer {
-                    id: id.clone(),
-                    name: id.clone(),
-                    server: normalized,
-                    apps: McpApps {
-                        omp: true,
-                        ..McpApps::default()
-                    },
-                    description: None,
-                    homepage: None,
-                    docs: None,
-                    tags: Vec::new(),
-                },
-            );
-            changed += 1;
         }
-    }
-    Ok(changed)
-}
-
-fn lock_file() -> Result<MutexGuard<'static, ()>, AppError> {
-    MCP_FILE_LOCK
-        .lock()
-        .map_err(|error| AppError::Config(format!("OMP MCP file lock is poisoned: {error}")))
-}
-
-fn read_document(path: &Path) -> Result<Value, AppError> {
-    if !path.exists() {
-        return Ok(Value::Object(Map::new()));
-    }
-    let metadata = fs::metadata(path).map_err(|error| AppError::io(path, error))?;
-    if metadata.len() > MAX_MCP_FILE_BYTES {
-        return Err(AppError::InvalidInput(format!(
-            "OMP MCP file exceeds the 4 MiB limit: {}",
-            path.display()
-        )));
-    }
-    let bytes = fs::read(path).map_err(|error| AppError::io(path, error))?;
-    serde_json::from_slice(&bytes).map_err(|error| {
-        AppError::McpValidation(format!(
-            "OMP MCP file is not valid JSON ({}): {error}",
-            path.display()
-        ))
+        Ok(*document != before)
     })
 }
 
-fn root_mut<'a>(
-    document: &'a mut Value,
-    path: &Path,
-) -> Result<&'a mut Map<String, Value>, AppError> {
-    document.as_object_mut().ok_or_else(|| invalid_root(path))
+fn read_document() -> Result<Value, AppError> {
+    let mut result = json!({});
+    crate::omp_config::update_omp_mcp_document(|document| {
+        result = document.clone();
+        Ok(false)
+    })?;
+    if result
+        .get("mcpServers")
+        .is_some_and(|servers| !servers.is_object())
+    {
+        return Err(AppError::Config(
+            "Oh My Pi MCP 'mcpServers' must be an object".into(),
+        ));
+    }
+    Ok(result)
 }
 
-fn invalid_root(path: &Path) -> AppError {
-    AppError::McpValidation(format!(
-        "OMP MCP root must be a JSON object: {}",
-        path.display()
-    ))
+pub(crate) fn is_disabled_managed(id: &str, spec: &Value) -> Result<bool, AppError> {
+    let document = read_document()?;
+    Ok(document["mcpServers"].get(id).is_some_and(|entry| {
+        entry.get("enabled") == Some(&json!(false)) && transport_spec(entry) == transport_spec(spec)
+    }) && document["disabledServers"]
+        .as_array()
+        .is_some_and(|items| items.contains(&json!(id))))
 }
 
-fn object_field_mut<'a>(
-    root: &'a mut Map<String, Value>,
-    field: &str,
-    path: &Path,
-) -> Result<&'a mut Map<String, Value>, AppError> {
-    root.entry(field.to_string())
-        .or_insert_with(|| Value::Object(Map::new()))
-        .as_object_mut()
-        .ok_or_else(|| {
-            AppError::McpValidation(format!(
-                "OMP MCP '{field}' must be an object: {}",
-                path.display()
-            ))
-        })
+pub(crate) fn remove_disabled_if_managed(id: &str, spec: &Value) -> Result<(), AppError> {
+    let _guard = WRITE_LOCK
+        .lock()
+        .map_err(|e| AppError::Message(e.to_string()))?;
+    let document = read_document()?;
+    if document["mcpServers"].get(id).is_some_and(|entry| {
+        entry.get("enabled") == Some(&json!(false)) && transport_spec(entry) == transport_spec(spec)
+    }) {
+        sync_locked(id, OmpChange::Remove(Some(spec)))?;
+    }
+    Ok(())
 }
 
-fn remove_name_from_list(root: &mut Map<String, Value>, field: &str, id: &str) {
-    let Some(values) = root.get_mut(field).and_then(Value::as_array_mut) else {
-        return;
+fn native_enabled(document: &Value, id: &str, spec: &Value) -> bool {
+    let listed = |key: &str| {
+        document[key]
+            .as_array()
+            .is_some_and(|items| items.iter().any(|item| item.as_str() == Some(id)))
     };
-    values.retain(|value| value.as_str() != Some(id));
-    if values.is_empty() {
-        root.remove(field);
+    if listed("disabledServers") {
+        return false;
     }
+    let disabled = spec.get("enabled").is_some_and(|value| {
+        value == &json!(false)
+            || value
+                .as_str()
+                .is_some_and(|text| matches!(text.to_lowercase().as_str(), "false" | "0"))
+    });
+    !disabled || listed("enabledServers")
 }
 
-fn write_document(path: &Path, document: &Value) -> Result<(), AppError> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|error| AppError::io(parent, error))?;
+pub(crate) fn import(state: &AppState) -> Result<usize, AppError> {
+    let document = read_document()?;
+    let mut existing = state.db.get_all_mcp_servers()?;
+    let mut count = 0;
+    let mut skipped = Vec::new();
+    let servers = document.get("mcpServers").and_then(Value::as_object);
+    for (id, native) in servers.into_iter().flatten() {
+        let mut spec = unified_spec(native);
+        if super::validation::validate_server_spec(&spec).is_err() {
+            skipped.push(format!("'{id}': invalid transport configuration"));
+            continue;
+        }
+        let enabled = native_enabled(&document, id, native);
+        spec.as_object_mut().unwrap().remove("enabled");
+        let server = if let Some(mut server) = existing.shift_remove(id) {
+            if transport_spec(&server.server) != transport_spec(&spec) {
+                skipped.push(format!("'{id}': conflicts with an existing server"));
+                continue;
+            }
+            server.apps.omp = enabled;
+            server
+        } else {
+            count += 1;
+            McpServer {
+                id: id.clone(),
+                name: id.clone(),
+                server: spec,
+                apps: McpApps {
+                    omp: enabled,
+                    ..Default::default()
+                },
+                description: None,
+                homepage: None,
+                docs: None,
+                tags: vec![],
+            }
+        };
+        state.db.save_mcp_server(&server)?;
     }
-    let mut bytes = serde_json::to_vec_pretty(document)
-        .map_err(|error| AppError::Config(format!("Failed to serialize OMP MCP JSON: {error}")))?;
-    bytes.push(b'\n');
-    atomic_write_private(path, &bytes)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::omp_config::test_support::TestAgentDir;
-    use serde_json::json;
-    use serial_test::serial;
-
-    #[test]
-    #[serial]
-    fn projection_preserves_unknown_root_and_clears_denylist() {
-        let _agent = TestAgentDir::new();
-        let path = crate::omp_config::get_omp_mcp_path().expect("MCP path");
-        fs::create_dir_all(path.parent().expect("parent")).expect("create parent");
-        fs::write(
-            &path,
-            r#"{"future":{"keep":true},"mcpServers":{},"disabledServers":["test","other"]}"#,
-        )
-        .expect("seed MCP");
-        sync_single_server_to_omp(
-            &MultiAppConfig::default(),
-            "test",
-            &json!({"command":"npx","args":["server"]}),
-        )
-        .expect("project server");
-        let value: Value =
-            serde_json::from_slice(&fs::read(path).expect("read MCP")).expect("parse MCP");
-        assert_eq!(value["future"]["keep"], true);
-        assert_eq!(value["mcpServers"]["test"]["enabled"], true);
-        assert_eq!(value["disabledServers"], json!(["other"]));
-    }
-
-    #[test]
-    #[serial]
-    fn import_skips_native_disabled_server() {
-        let _agent = TestAgentDir::new();
-        let path = crate::omp_config::get_omp_mcp_path().expect("MCP path");
-        fs::create_dir_all(path.parent().expect("parent")).expect("create parent");
-        fs::write(
-            path,
-            r#"{"mcpServers":{"active":{"command":"a"},"off":{"command":"b","enabled":false}}}"#,
-        )
-        .expect("seed MCP");
-        let mut config = MultiAppConfig::default();
-        assert_eq!(import_from_omp(&mut config).expect("import"), 1);
-        let servers = config.mcp.servers.expect("servers");
-        assert!(servers.contains_key("active"));
-        assert!(!servers.contains_key("off"));
+    if skipped.is_empty() {
+        Ok(count)
+    } else {
+        Err(AppError::InvalidInput(format!("Imported {count} Oh My Pi MCP servers; skipped {}. Native configurations were preserved.", skipped.join("; "))))
     }
 }

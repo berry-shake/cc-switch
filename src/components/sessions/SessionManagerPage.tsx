@@ -18,12 +18,11 @@ import {
 import { useSessionSearch } from "@/hooks/useSessionSearch";
 import {
   piKeys,
-  ompKeys,
   useDeleteSessionMutation,
   useSessionsQuery,
   useSettingsQuery,
 } from "@/lib/query";
-import { ompApi, piApi, sessionsApi, type AppId } from "@/lib/api";
+import { piApi, sessionsApi, type AppId } from "@/lib/api";
 import type { SessionMeta } from "@/types";
 import { DEFAULT_VISIBLE_APPS } from "@/config/appConfig";
 import { Button } from "@/components/ui/button";
@@ -195,8 +194,8 @@ export function SessionManagerPage({
   });
 
   const ompSessionDiscovery = useQuery({
-    queryKey: ompKeys.sessionDiscovery,
-    queryFn: () => ompApi.getSessionDiscovery(),
+    queryKey: piKeys.sessionDiscoveryFor("omp"),
+    queryFn: () => piApi.getSessionDiscovery("omp"),
     enabled: appFilter === "omp",
     staleTime: 30 * 1000,
   });
@@ -823,7 +822,7 @@ export function SessionManagerPage({
             aria-expanded={open}
             onClick={() => toggleGroup(group.key)}
             title={group.projectDir ?? undefined}
-            className="flex h-7 min-w-0 max-w-full items-center gap-2.5 rounded-control pe-2 ps-1.5 text-left font-semibold transition-colors hover:bg-selected"
+            className="flex h-7 w-full min-w-0 max-w-full items-center gap-2.5 rounded-control pe-2 ps-1.5 text-left font-semibold transition-colors hover:bg-selected"
           >
             <ChevronDown
               aria-hidden="true"

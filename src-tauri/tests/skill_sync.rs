@@ -28,6 +28,70 @@ fn symlink_dir(src: &std::path::Path, dest: &std::path::Path) {
 }
 
 #[test]
+fn omp_skill_desired_state_survives_missing_projection_and_resync() {
+    let _guard = test_mutex().lock().unwrap_or_else(|e| e.into_inner());
+    reset_test_fs();
+    let home = ensure_test_home();
+    let agent = home.join(".omp/agent");
+    cc_switch_lib::update_settings(cc_switch_lib::AppSettings {
+        omp_config_dir: Some(agent.to_string_lossy().into_owned()),
+        ..Default::default()
+    })
+    .expect("set isolated OMP directory");
+    let state = create_test_state().expect("create state");
+    write_skill(&home.join(".cc-switch/skills/omp-skill"), "OMP Skill");
+    state
+        .db
+        .save_skill(&InstalledSkill {
+            id: "local:omp-skill".into(),
+            name: "OMP Skill".into(),
+            description: None,
+            directory: "omp-skill".into(),
+            repo_owner: None,
+            repo_name: None,
+            repo_branch: None,
+            readme_url: None,
+            apps: SkillApps {
+                omp: true,
+                ..Default::default()
+            },
+            installed_at: 1,
+            content_hash: None,
+            updated_at: 0,
+        })
+        .expect("save OMP desired state");
+    let skills = SkillService::get_all_installed(&state.db).expect("list skills");
+    assert!(skills[0].apps.omp);
+    assert!(!agent.join("skills/omp-skill").exists());
+    SkillService::sync_to_app(&state.db, &AppType::Omp).expect("restore OMP projection");
+    assert!(agent.join("skills/omp-skill/SKILL.md").exists());
+    assert!(!home.join(".pi/agent/skills/omp-skill").exists());
+    SkillService::toggle_app(&state.db, "local:omp-skill", &AppType::Omp, false)
+        .expect("disable OMP skill");
+    assert!(
+        !state
+            .db
+            .get_installed_skill("local:omp-skill")
+            .unwrap()
+            .unwrap()
+            .apps
+            .omp
+    );
+    assert!(!agent.join("skills/omp-skill").exists());
+    SkillService::toggle_app(&state.db, "local:omp-skill", &AppType::Omp, true)
+        .expect("enable OMP skill");
+    assert!(
+        state
+            .db
+            .get_installed_skill("local:omp-skill")
+            .unwrap()
+            .unwrap()
+            .apps
+            .omp
+    );
+}
+
+#[test]
 fn import_from_apps_respects_explicit_app_selection() {
     let _guard = test_mutex().lock().unwrap_or_else(|e| e.into_inner());
     reset_test_fs();

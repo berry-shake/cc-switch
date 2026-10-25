@@ -6,7 +6,6 @@ import { providersApi, settingsApi } from "@/lib/api";
 import { syncCurrentProvidersLiveSafe } from "@/utils/postChangeSync";
 import {
   invalidatePiDirectoryCaches,
-  invalidateOmpDirectoryCaches,
   useSettingsQuery,
   useSaveSettingsMutation,
 } from "@/lib/query";
@@ -62,6 +61,7 @@ const DIRECTORY_KEYS = [
   "openclawConfigDir",
   "hermesConfigDir",
   "piConfigDir",
+  "ompConfigDir",
 ] as const;
 
 const sanitizeDir = (value?: string | null): string | undefined => {
@@ -208,6 +208,10 @@ export function useSettings(): UseSettingsResult {
       // 目录草稿只由显式「保存」写入，自动保存沿用已确认的值
       for (const key of DIRECTORY_KEYS) {
         if (!(key in updates)) mergedSettings[key] = data?.[key];
+      }
+      if (!("claudeAdditionalConfigDirs" in updates)) {
+        mergedSettings.claudeAdditionalConfigDirs =
+          data?.claudeAdditionalConfigDirs;
       }
 
       try {
@@ -497,7 +501,7 @@ export function useSettings(): UseSettingsResult {
           await invalidatePiDirectoryCaches(queryClient);
         }
         if (ompDirChanged) {
-          await invalidateOmpDirectoryCaches(queryClient);
+          await invalidatePiDirectoryCaches(queryClient, "omp");
         }
 
         const appDirChanged = sanitizedAppDir !== (previousAppDir ?? undefined);

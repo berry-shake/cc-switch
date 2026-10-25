@@ -13,6 +13,7 @@ use super::utils::for_each_jsonl_value;
 use super::utils::{
     extract_text, parse_timestamp_to_ms, path_basename, truncate_summary, TITLE_MAX_CHARS,
 };
+use crate::session_manager::terminal::shell_escape;
 
 const PROVIDER_ID: &str = "pi";
 pub(crate) const MAX_TREE_ENTRIES: usize = 500_000;
@@ -20,13 +21,13 @@ const MAX_TREE_ID_BYTES: usize = 256;
 pub(crate) const MAX_SESSION_BYTES: u64 = 128 * 1024 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SessionLayout {
+pub(crate) enum SessionLayout {
     Flat,
     ProjectDirectories,
 }
 
 #[derive(Debug, PartialEq, Eq)]
-enum SessionRootResolution {
+pub(crate) enum SessionRootResolution {
     Available {
         root: PathBuf,
         layout: SessionLayout,
@@ -52,12 +53,35 @@ pub enum PiSessionDiscovery {
     },
 }
 
+/// Pi 和它的分支 Oh My Pi 的会话格式只差这几处，会话树、活动分支和转录块共用这里的实现。
+pub(crate) struct Dialect {
+    pub provider_id: &'static str,
+    /// 报错和日志里的应用名
+    pub label: &'static str,
+    pub resolve_root: fn() -> SessionRootResolution,
+    pub resume_command: fn(&str) -> Result<String, String>,
+    /// Oh My Pi：首行可能是定宽的 `{"type":"title"}` 标题槽，会话头里也可能带 `title`
+    pub title_slot: bool,
+    /// Oh My Pi 的 `model_change` 只写 `provider/id` 一个串，Pi 拆成 `provider` + `modelId`
+    pub model_selector: bool,
+}
+
+const PI: Dialect = Dialect {
+    provider_id: PROVIDER_ID,
+    label: "Pi",
+    resolve_root: resolve_session_root,
+    resume_command: |source| Ok(format!("pi --session {}", shell_escape(source))),
+    title_slot: false,
+    model_selector: false,
+};
+
 #[derive(Debug)]
 struct SessionHeader {
     id: String,
     cwd: String,
     timestamp: Option<i64>,
     version: u64,
+    title: Option<String>,
 }
 
 #[derive(Debug)]
@@ -80,7 +104,11 @@ struct SessionSummary {
 /// session browser has no authoritative launch cwd, so relative values are
 /// deliberately non-enumerable and never fall back to another root.
 pub fn session_roots() -> Vec<PathBuf> {
-    match resolve_session_root() {
+    session_roots_for(&PI)
+}
+
+pub(crate) fn session_roots_for(d: &Dialect) -> Vec<PathBuf> {
+    match (d.resolve_root)() {
         SessionRootResolution::Available { root, .. } => vec![root],
         SessionRootResolution::RequiresProjectContext { .. }
         | SessionRootResolution::Unavailable { .. } => Vec::new(),
@@ -92,21 +120,32 @@ pub fn session_roots() -> Vec<PathBuf> {
 /// instead of silently treating an incomplete import as success. Nested
 /// subagent and fork sessions are included.
 pub(crate) fn session_files() -> Result<Vec<PathBuf>, String> {
-    session_files_from_resolution(resolve_session_root())
+    session_files_for(&PI, true)
+}
+
+pub(crate) fn session_files_for(
+    d: &Dialect,
+    include_children: bool,
+) -> Result<Vec<PathBuf>, String> {
+    session_files_from_resolution((d.resolve_root)(), include_children)
+        .map_err(|error| error.replace("Pi sessionDir", &format!("{} session directory", d.label)))
 }
 
 fn session_files_from_resolution(
     resolution: SessionRootResolution,
+    include_children: bool,
 ) -> Result<Vec<PathBuf>, String> {
     match resolution {
         SessionRootResolution::Available { root, layout } => {
             let mut files = Vec::new();
             collect_jsonl_files(&root, layout, &mut files, false);
-            let mut children = Vec::new();
-            for session in &files {
-                collect_child_session_files(&session.with_extension(""), &mut children);
+            if include_children {
+                let mut children = Vec::new();
+                for session in &files {
+                    collect_child_session_files(&session.with_extension(""), &mut children);
+                }
+                files.extend(children);
             }
-            files.extend(children);
             files.sort();
             Ok(files)
         }
@@ -118,7 +157,11 @@ fn session_files_from_resolution(
 }
 
 pub fn session_discovery() -> PiSessionDiscovery {
-    match resolve_session_root() {
+    session_discovery_for(&PI)
+}
+
+pub(crate) fn session_discovery_for(d: &Dialect) -> PiSessionDiscovery {
+    match (d.resolve_root)() {
         SessionRootResolution::Available { .. } => PiSessionDiscovery::Available,
         SessionRootResolution::RequiresProjectContext { configured_path } => {
             PiSessionDiscovery::RequiresProjectContext { configured_path }
@@ -216,56 +259,41 @@ fn resolve_global_session_dir(value: &str, home: &Path) -> Option<PathBuf> {
 }
 
 pub fn scan_sessions() -> Vec<SessionMeta> {
-    match resolve_session_root() {
+    scan_sessions_for(&PI)
+}
+
+pub(crate) fn scan_sessions_for(d: &Dialect) -> Vec<SessionMeta> {
+    match (d.resolve_root)() {
         SessionRootResolution::Available { root, layout, .. } => {
-            scan_sessions_in_root(&root, layout)
+            scan_sessions_in_root(d, &root, layout)
         }
         SessionRootResolution::RequiresProjectContext {
             configured_path, ..
         } => {
             log::warn!(
-                "Pi sessionDir '{configured_path}' requires a project cwd and cannot be globally enumerated"
+                "{} session directory '{configured_path}' requires a project cwd and cannot be globally enumerated",
+                d.label
             );
             Vec::new()
         }
         SessionRootResolution::Unavailable { reason } => {
-            log::warn!("Pi session discovery unavailable: {reason}");
+            log::warn!("{} session discovery unavailable: {reason}", d.label);
             Vec::new()
         }
     }
 }
 
-pub(super) fn project_session_files(root: &Path) -> Vec<PathBuf> {
+fn scan_sessions_in_root(d: &Dialect, root: &Path, layout: SessionLayout) -> Vec<SessionMeta> {
     let mut files = Vec::new();
-    collect_jsonl_files(root, SessionLayout::ProjectDirectories, &mut files, false);
-    files.sort();
-    files
-}
-
-pub(super) fn scan_project_sessions(
-    root: &Path,
-    provider_id: &str,
-    resume_binary: &str,
-    app_name: &str,
-) -> Vec<SessionMeta> {
-    let mut files = Vec::new();
-    collect_jsonl_files(root, SessionLayout::ProjectDirectories, &mut files, true);
+    collect_jsonl_files(root, layout, &mut files, true);
     files
         .into_iter()
-        .filter_map(|path| match parse_session_with_title_slot(&path, true) {
-            Ok(mut session) => {
-                session.provider_id = provider_id.to_string();
-                if let Some(source_path) = session.source_path.as_deref() {
-                    session.resume_command = Some(format!(
-                        "{resume_binary} --session {}",
-                        crate::session_manager::terminal::shell_escape(source_path)
-                    ));
-                }
-                Some(session)
-            }
+        .filter_map(|path| match parse_session(d, &path) {
+            Ok(session) => Some(session),
             Err(error) => {
                 log::debug!(
-                    "Skipping invalid {app_name} session {}: {error}",
+                    "Skipping invalid {} session {}: {error}",
+                    d.label,
                     path.display()
                 );
                 None
@@ -274,158 +302,111 @@ pub(super) fn scan_project_sessions(
         .collect()
 }
 
-pub(super) fn load_project_messages(
-    root: &Path,
-    path: &Path,
-    app_name: &str,
-) -> Result<Vec<SessionMessage>, String> {
-    load_messages_with_layout_and_title_slot(root, path, SessionLayout::ProjectDirectories, true)
-        .map_err(|error| error.replace("Pi", app_name))
+pub fn load_messages(path: &Path) -> Result<Vec<SessionMessage>, String> {
+    load_messages_for(&PI, path)
 }
 
-pub(super) fn delete_project_session(
+pub(crate) fn load_messages_for(d: &Dialect, path: &Path) -> Result<Vec<SessionMessage>, String> {
+    let (root, layout) = available_root(d)?;
+    load_messages_with_layout(d, &root, path, layout)
+}
+
+fn load_messages_with_layout(
+    d: &Dialect,
+    root: &Path,
+    path: &Path,
+    layout: SessionLayout,
+) -> Result<Vec<SessionMessage>, String> {
+    let (_, source) = validate_source_under_root(d, root, path, layout)?;
+    let tree = read_tree(d, &source)?;
+    read_active_messages(d, &source, &tree)
+}
+
+pub fn delete_session(root: &Path, path: &Path, session_id: &str) -> Result<bool, String> {
+    delete_session_for(&PI, root, path, session_id)
+}
+
+pub(crate) fn delete_session_for(
+    d: &Dialect,
     root: &Path,
     path: &Path,
     session_id: &str,
-    app_name: &str,
 ) -> Result<bool, String> {
-    delete_session_with_layout_and_title_slot(
-        root,
-        path,
-        session_id,
-        SessionLayout::ProjectDirectories,
-        true,
-    )
-    .map_err(|error| error.replace("Pi", app_name))
+    let layout = layout_for_current_root(d, root)?;
+    delete_session_with_layout(d, root, path, session_id, layout)
 }
 
-fn scan_sessions_in_root(root: &Path, layout: SessionLayout) -> Vec<SessionMeta> {
-    let mut files = Vec::new();
-    collect_jsonl_files(root, layout, &mut files, true);
-    files
-        .into_iter()
-        .filter_map(|path| match parse_session(&path) {
-            Ok(session) => Some(session),
-            Err(error) => {
-                log::debug!("Skipping invalid Pi session {}: {error}", path.display());
-                None
-            }
-        })
-        .collect()
+fn delete_session_with_layout(
+    d: &Dialect,
+    root: &Path,
+    path: &Path,
+    session_id: &str,
+    layout: SessionLayout,
+) -> Result<bool, String> {
+    let label = d.label;
+    if !is_valid_tree_id(session_id) {
+        return Err(format!("Invalid {label} session ID"));
+    }
+    let (_, source) = validate_source_under_root(d, root, path, layout)?;
+    let tree = read_tree(d, &source)?;
+    if tree.header.id != session_id {
+        return Err(format!(
+            "{label} session ID mismatch: expected {session_id}, found {}",
+            tree.header.id
+        ));
+    }
+    fs::remove_file(&source).map_err(|error| {
+        format!(
+            "Failed to delete {label} session {}: {error}",
+            source.display()
+        )
+    })?;
+    Ok(true)
 }
 
-pub fn load_messages(path: &Path) -> Result<Vec<SessionMessage>, String> {
-    match resolve_session_root() {
-        SessionRootResolution::Available { root, layout, .. } => {
-            load_messages_with_layout(&root, path, layout)
-        }
-        SessionRootResolution::RequiresProjectContext { .. } => {
-            Err("Relative Pi sessionDir cannot be globally resolved".to_string())
-        }
+fn available_root(d: &Dialect) -> Result<(PathBuf, SessionLayout), String> {
+    match (d.resolve_root)() {
+        SessionRootResolution::Available { root, layout } => Ok((root, layout)),
+        SessionRootResolution::RequiresProjectContext { .. } => Err(format!(
+            "Relative {} session directory cannot be globally resolved",
+            d.label
+        )),
         SessionRootResolution::Unavailable { reason } => Err(reason),
     }
 }
 
-fn load_messages_with_layout(
-    root: &Path,
-    path: &Path,
-    layout: SessionLayout,
-) -> Result<Vec<SessionMessage>, String> {
-    load_messages_with_layout_and_title_slot(root, path, layout, false)
-}
-
-fn load_messages_with_layout_and_title_slot(
-    root: &Path,
-    path: &Path,
-    layout: SessionLayout,
-    allow_title_slot: bool,
-) -> Result<Vec<SessionMessage>, String> {
-    let (_, source) = validate_source_under_root(root, path, layout)?;
-    let tree = read_tree_with_title_slot(&source, allow_title_slot)?;
-    read_active_messages(&source, &tree)
-}
-
-pub fn delete_session(root: &Path, path: &Path, session_id: &str) -> Result<bool, String> {
-    let layout = layout_for_current_root(root)?;
-    delete_session_with_layout(root, path, session_id, layout)
-}
-
-fn delete_session_with_layout(
-    root: &Path,
-    path: &Path,
-    session_id: &str,
-    layout: SessionLayout,
-) -> Result<bool, String> {
-    delete_session_with_layout_and_title_slot(root, path, session_id, layout, false)
-}
-
-fn delete_session_with_layout_and_title_slot(
-    root: &Path,
-    path: &Path,
-    session_id: &str,
-    layout: SessionLayout,
-    allow_title_slot: bool,
-) -> Result<bool, String> {
-    if !is_valid_tree_id(session_id) {
-        return Err("Invalid Pi session ID".to_string());
-    }
-    let (_, source) = validate_source_under_root(root, path, layout)?;
-    let tree = read_tree_with_title_slot(&source, allow_title_slot)?;
-    if tree.header.id != session_id {
-        return Err(format!(
-            "Pi session ID mismatch: expected {session_id}, found {}",
-            tree.header.id
-        ));
-    }
-    fs::remove_file(&source)
-        .map_err(|error| format!("Failed to delete Pi session {}: {error}", source.display()))?;
-    Ok(true)
-}
-
-fn layout_for_current_root(root: &Path) -> Result<SessionLayout, String> {
-    let (configured_root, layout) = match resolve_session_root() {
-        SessionRootResolution::Available { root, layout, .. } => (root, layout),
-        SessionRootResolution::RequiresProjectContext { .. } => {
-            return Err("Relative Pi sessionDir cannot be globally resolved".to_string());
-        }
-        SessionRootResolution::Unavailable { reason } => return Err(reason),
+fn layout_for_current_root(d: &Dialect, root: &Path) -> Result<SessionLayout, String> {
+    let (configured_root, layout) = available_root(d)?;
+    let canonical = |path: &Path| {
+        path.canonicalize().map_err(|error| {
+            format!(
+                "Failed to resolve {} session root {}: {error}",
+                d.label,
+                path.display()
+            )
+        })
     };
-    let configured_root = configured_root.canonicalize().map_err(|error| {
-        format!(
-            "Failed to resolve Pi session root {}: {error}",
-            configured_root.display()
-        )
-    })?;
-    let requested_root = root.canonicalize().map_err(|error| {
-        format!(
-            "Failed to resolve Pi session root {}: {error}",
-            root.display()
-        )
-    })?;
-    if configured_root != requested_root {
-        return Err("Pi session root changed before deletion".to_string());
+    if canonical(&configured_root)? != canonical(root)? {
+        return Err(format!("{} session root changed before deletion", d.label));
     }
     Ok(layout)
 }
 
-fn parse_session(path: &Path) -> Result<SessionMeta, String> {
-    parse_session_with_title_slot(path, false)
-}
-
-fn parse_session_with_title_slot(
-    path: &Path,
-    allow_title_slot: bool,
-) -> Result<SessionMeta, String> {
-    let source = path
-        .canonicalize()
-        .map_err(|error| format!("Failed to resolve Pi session {}: {error}", path.display()))?;
+fn parse_session(d: &Dialect, path: &Path) -> Result<SessionMeta, String> {
+    let source = path.canonicalize().map_err(|error| {
+        format!(
+            "Failed to resolve {} session {}: {error}",
+            d.label,
+            path.display()
+        )
+    })?;
     let source_path = source
         .to_str()
-        .ok_or_else(|| "Pi session path is not valid UTF-8".to_string())?
+        .ok_or_else(|| format!("{} session path is not valid UTF-8", d.label))?
         .to_string();
     let SessionTree {
         header, summary, ..
-    } = read_tree_with_title_slot(&source, allow_title_slot)?;
+    } = read_tree(d, &source)?;
     let title = summary.explicit_name.flatten().or_else(|| {
         summary
             .first_user_message
@@ -440,26 +421,24 @@ fn parse_session_with_title_slot(
         .map(|message| truncate_summary(message, 160))
         .filter(|message| !message.is_empty());
     Ok(SessionMeta {
-        provider_id: PROVIDER_ID.to_string(),
+        provider_id: d.provider_id.to_string(),
         session_id: header.id,
         title,
         summary: summary_text,
         project_dir: (!header.cwd.trim().is_empty()).then(|| header.cwd.clone()),
         created_at: header.timestamp,
         last_active_at: summary.last_active_at.or(header.timestamp),
-        source_path: Some(source_path.clone()),
+        resume_command: Some((d.resume_command)(&source_path)?),
+        source_path: Some(source_path),
         source_config_dir: None,
-        resume_command: Some(format!(
-            "pi --session {}",
-            crate::session_manager::terminal::shell_escape(&source_path)
-        )),
     })
 }
 
-fn read_tree_with_title_slot(path: &Path, allow_title_slot: bool) -> Result<SessionTree, String> {
-    validate_file_size(path)?;
+fn read_tree(d: &Dialect, path: &Path) -> Result<SessionTree, String> {
+    let label = d.label;
+    validate_file_size(d, path)?;
     let reader = BufReader::new(
-        File::open(path).map_err(|error| format!("Failed to open Pi session: {error}"))?,
+        File::open(path).map_err(|error| format!("Failed to open {label} session: {error}"))?,
     );
     let mut header = None;
     let mut parents = HashMap::<String, (Option<String>, usize)>::new();
@@ -469,7 +448,7 @@ fn read_tree_with_title_slot(path: &Path, allow_title_slot: bool) -> Result<Sess
     let mut summary = SessionSummary::default();
     let mut saw_title_slot = false;
     for line in reader.lines() {
-        let line = line.map_err(|error| format!("Failed to read Pi session: {error}"))?;
+        let line = line.map_err(|error| format!("Failed to read {label} session: {error}"))?;
         if line.trim().is_empty() {
             continue;
         }
@@ -477,25 +456,22 @@ fn read_tree_with_title_slot(path: &Path, allow_title_slot: bool) -> Result<Sess
             continue;
         };
         if header.is_none() {
-            if allow_title_slot && !saw_title_slot && is_session_title_slot(&value) {
+            if d.title_slot && !saw_title_slot && is_session_title_slot(&value) {
                 saw_title_slot = true;
-                summary.explicit_name = Some(
-                    value
-                        .get("title")
-                        .and_then(Value::as_str)
-                        .map(str::trim)
-                        .filter(|title| !title.is_empty())
-                        .map(str::to_string),
-                );
+                summary.explicit_name = Some(non_empty_text(value.get("title")));
                 continue;
             }
-            header = Some(parse_header(&value)?);
+            let parsed = parse_header(d, &value)?;
+            if summary.explicit_name.is_none() && parsed.title.is_some() {
+                summary.explicit_name = Some(parsed.title.clone());
+            }
+            header = Some(parsed);
             continue;
         }
         entry_index += 1;
         if entry_index > MAX_TREE_ENTRIES {
             return Err(format!(
-                "Pi session exceeds the {MAX_TREE_ENTRIES}-entry safety limit"
+                "{label} session exceeds the {MAX_TREE_ENTRIES}-entry safety limit"
             ));
         }
         update_session_summary(&mut summary, &value);
@@ -511,22 +487,22 @@ fn read_tree_with_title_slot(path: &Path, allow_title_slot: bool) -> Result<Sess
             .insert(id.clone(), (parent_id, entry_index))
             .is_some()
         {
-            log::debug!("Pi session contains duplicate entry ID {id}; using the latest entry");
+            log::debug!("{label} session contains duplicate entry ID {id}; using the latest entry");
         }
         latest_id = Some(id.clone());
         legacy_previous_id = Some(id);
     }
-    let header = header.ok_or_else(|| "Pi session has no valid header".to_string())?;
+    let header = header.ok_or_else(|| format!("{label} session has no valid header"))?;
     let mut active_entry_indexes = HashSet::new();
     let mut visited_ids = HashSet::new();
     let mut current = latest_id;
     while let Some(id) = current {
         if !visited_ids.insert(id.clone()) {
-            log::debug!("Pi session tree contains a cycle at entry {id}; stopping traversal");
+            log::debug!("{label} session tree contains a cycle at entry {id}; stopping traversal");
             break;
         }
         let Some((parent_id, entry_index)) = parents.get(&id) else {
-            log::debug!("Pi session tree references missing entry {id}; stopping traversal");
+            log::debug!("{label} session tree references missing entry {id}; stopping traversal");
             break;
         };
         active_entry_indexes.insert(*entry_index);
@@ -541,14 +517,7 @@ fn read_tree_with_title_slot(path: &Path, allow_title_slot: bool) -> Result<Sess
 
 fn update_session_summary(summary: &mut SessionSummary, value: &Value) {
     if value.get("type").and_then(Value::as_str) == Some("session_info") {
-        summary.explicit_name = Some(
-            value
-                .get("name")
-                .and_then(Value::as_str)
-                .map(str::trim)
-                .filter(|name| !name.is_empty())
-                .map(str::to_string),
-        );
+        summary.explicit_name = Some(non_empty_text(value.get("name")));
         return;
     }
     let Some((role, content)) = value
@@ -579,13 +548,26 @@ fn update_session_summary(summary: &mut SessionSummary, value: &Value) {
     summary.last_message = Some(content);
 }
 
-fn read_active_messages(path: &Path, tree: &SessionTree) -> Result<Vec<SessionMessage>, String> {
-    validate_file_size(path)?;
+fn non_empty_text(value: Option<&Value>) -> Option<String> {
+    value
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .map(str::to_string)
+}
+
+fn read_active_messages(
+    d: &Dialect,
+    path: &Path,
+    tree: &SessionTree,
+) -> Result<Vec<SessionMessage>, String> {
+    let label = d.label;
+    validate_file_size(d, path)?;
     let mut transcript = PiTranscript::new();
     let mut saw_header = false;
     let mut entry_index = 0usize;
     let mut legacy_previous_id = None;
-    for_each_jsonl_value(path, |span, value| {
+    for_each_jsonl_value(path, |span, mut value| {
         if !saw_header {
             if value.get("type").and_then(Value::as_str) == Some("session") {
                 saw_header = true;
@@ -595,7 +577,7 @@ fn read_active_messages(path: &Path, tree: &SessionTree) -> Result<Vec<SessionMe
         entry_index += 1;
         if entry_index > MAX_TREE_ENTRIES {
             return Err(format!(
-                "Pi session exceeds the {MAX_TREE_ENTRIES}-entry safety limit"
+                "{label} session exceeds the {MAX_TREE_ENTRIES}-entry safety limit"
             ));
         }
         let Some((id, _)) = entry_identity(
@@ -608,11 +590,14 @@ fn read_active_messages(path: &Path, tree: &SessionTree) -> Result<Vec<SessionMe
         };
         legacy_previous_id = Some(id.clone());
         if tree.active_entry_indexes.contains(&entry_index) {
+            if d.model_selector {
+                split_model_selector(&mut value);
+            }
             transcript.push_entry(&value, span, Some(id));
         }
         Ok(())
     })
-    .map_err(|error| error.replace("session file", "Pi session"))?;
+    .map_err(|error| error.replace("session file", &format!("{label} session")))?;
     Ok(transcript.finish())
 }
 
@@ -630,19 +615,43 @@ fn is_session_title_slot(value: &Value) -> bool {
             .is_none_or(|source| matches!(source.as_str(), Some("auto" | "user")))
 }
 
-fn parse_header(value: &Value) -> Result<SessionHeader, String> {
+/// Oh My Pi 的模型串是 `provider/id`，转录块按 Pi 的 `provider` + `modelId` 读。
+fn split_model_selector(value: &mut Value) {
+    if value.get("type").and_then(Value::as_str) != Some("model_change") {
+        return;
+    }
+    let Some(model) = value
+        .get("model")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+    else {
+        return;
+    };
+    match model.split_once('/') {
+        Some((provider, model_id)) => {
+            value["provider"] = Value::String(provider.to_string());
+            value["modelId"] = Value::String(model_id.to_string());
+        }
+        None => value["modelId"] = Value::String(model),
+    }
+}
+
+fn parse_header(d: &Dialect, value: &Value) -> Result<SessionHeader, String> {
+    let label = d.label;
     if value.get("type").and_then(Value::as_str) != Some("session") {
-        return Err("Pi session header must be the first valid JSON entry".to_string());
+        return Err(format!(
+            "{label} session header must be the first valid JSON entry"
+        ));
     }
     let id = value
         .get("id")
         .and_then(Value::as_str)
         .filter(|id| is_valid_tree_id(id))
-        .ok_or_else(|| "Pi session header has an invalid ID".to_string())?
+        .ok_or_else(|| format!("{label} session header has an invalid ID"))?
         .to_string();
     let version = value.get("version").and_then(Value::as_u64).unwrap_or(1);
     if version == 0 {
-        return Err(format!("Unsupported Pi session version: {version}"));
+        return Err(format!("Unsupported {label} session version: {version}"));
     }
     Ok(SessionHeader {
         id,
@@ -653,6 +662,10 @@ fn parse_header(value: &Value) -> Result<SessionHeader, String> {
             .to_string(),
         timestamp: value.get("timestamp").and_then(parse_timestamp_to_ms),
         version,
+        title: d
+            .title_slot
+            .then(|| non_empty_text(value.get("title")))
+            .flatten(),
     })
 }
 
@@ -720,38 +733,50 @@ fn parse_message(message: &Value) -> Option<(String, String)> {
 }
 
 fn validate_source_under_root(
+    d: &Dialect,
     root: &Path,
     path: &Path,
     layout: SessionLayout,
 ) -> Result<(PathBuf, PathBuf), String> {
+    let label = d.label;
     let root = root.canonicalize().map_err(|error| {
         format!(
-            "Failed to resolve Pi session root {}: {error}",
+            "Failed to resolve {label} session root {}: {error}",
             root.display()
         )
     })?;
-    let source = path
-        .canonicalize()
-        .map_err(|error| format!("Failed to resolve Pi session {}: {error}", path.display()))?;
+    let source = path.canonicalize().map_err(|error| {
+        format!(
+            "Failed to resolve {label} session {}: {error}",
+            path.display()
+        )
+    })?;
     if !source.starts_with(&root) {
         return Err(format!(
-            "Pi session source is outside the session root: {}",
+            "{label} session source is outside the session root: {}",
             path.display()
         ));
     }
     if !matches_session_layout(&root, &source, layout) {
         return Err(format!(
-            "Pi session source does not match the active directory layout: {}",
+            "{label} session source does not match the active directory layout: {}",
             path.display()
         ));
     }
-    let metadata = fs::symlink_metadata(&source)
-        .map_err(|error| format!("Failed to inspect Pi session {}: {error}", source.display()))?;
+    let metadata = fs::symlink_metadata(&source).map_err(|error| {
+        format!(
+            "Failed to inspect {label} session {}: {error}",
+            source.display()
+        )
+    })?;
     if !metadata.file_type().is_file()
         || source.extension().and_then(|value| value.to_str()) != Some("jsonl")
         || metadata.len() > MAX_SESSION_BYTES
     {
-        return Err(format!("Invalid Pi session file: {}", source.display()));
+        return Err(format!(
+            "Invalid {label} session file: {}",
+            source.display()
+        ));
     }
     Ok((root, source))
 }
@@ -767,12 +792,13 @@ fn matches_session_layout(root: &Path, source: &Path, layout: SessionLayout) -> 
     }
 }
 
-fn validate_file_size(path: &Path) -> Result<(), String> {
-    let metadata =
-        fs::metadata(path).map_err(|error| format!("Failed to inspect Pi session: {error}"))?;
+fn validate_file_size(d: &Dialect, path: &Path) -> Result<(), String> {
+    let label = d.label;
+    let metadata = fs::metadata(path)
+        .map_err(|error| format!("Failed to inspect {label} session: {error}"))?;
     if metadata.len() > MAX_SESSION_BYTES {
         Err(format!(
-            "Pi session exceeds the {MAX_SESSION_BYTES}-byte safety limit"
+            "{label} session exceeds the {MAX_SESSION_BYTES}-byte safety limit"
         ))
     } else {
         Ok(())
@@ -888,7 +914,7 @@ mod tests {
         )
         .expect("session");
         let messages =
-            load_messages_with_layout(&root, &path, SessionLayout::Flat).expect("messages");
+            load_messages_with_layout(&PI, &root, &path, SessionLayout::Flat).expect("messages");
         assert_eq!(
             messages
                 .into_iter()
@@ -911,7 +937,7 @@ mod tests {
         )
         .expect("session");
 
-        let session = parse_session(&path).expect("parse future session");
+        let session = parse_session(&PI, &path).expect("parse future session");
         assert_eq!(session.summary.as_deref(), Some("future"));
     }
 
@@ -928,7 +954,7 @@ mod tests {
         )
         .expect("session");
 
-        let error = parse_session(&path).expect_err("Pi must keep header-first semantics");
+        let error = parse_session(&PI, &path).expect_err("Pi must keep header-first semantics");
         assert!(error.contains("first valid JSON entry"));
     }
 
@@ -948,7 +974,7 @@ mod tests {
         .expect("session");
 
         let messages =
-            load_messages_with_layout(&root, &path, SessionLayout::Flat).expect("messages");
+            load_messages_with_layout(&PI, &root, &path, SessionLayout::Flat).expect("messages");
         assert_eq!(
             messages
                 .into_iter()
@@ -971,7 +997,7 @@ mod tests {
              {\"type\":\"message\",\"id\":\"orphan\",\"parentId\":\"missing\",\"message\":{\"role\":\"assistant\",\"content\":\"visible orphan\"}}\n",
         )
         .expect("missing-parent session");
-        let messages = load_messages_with_layout(&root, &missing, SessionLayout::Flat)
+        let messages = load_messages_with_layout(&PI, &root, &missing, SessionLayout::Flat)
             .expect("missing parent is tolerated");
         assert_eq!(messages[0].content, "visible orphan");
 
@@ -983,7 +1009,7 @@ mod tests {
              {\"type\":\"message\",\"id\":\"b\",\"parentId\":\"a\",\"message\":{\"role\":\"assistant\",\"content\":\"b\"}}\n",
         )
         .expect("cyclic session");
-        let messages = load_messages_with_layout(&root, &cycle, SessionLayout::Flat)
+        let messages = load_messages_with_layout(&PI, &root, &cycle, SessionLayout::Flat)
             .expect("cycle is tolerated");
         assert_eq!(
             messages
@@ -1011,7 +1037,7 @@ mod tests {
         )
         .expect("captured session");
 
-        let session = parse_session(&path).expect("parse capture semantics");
+        let session = parse_session(&PI, &path).expect("parse capture semantics");
         assert_eq!(session.title.as_deref(), Some("Abandoned branch name"));
         assert_eq!(session.summary.as_deref(), Some("active branch"));
     }
@@ -1069,15 +1095,13 @@ mod tests {
             reason: "fixture unavailable".to_string(),
         };
         assert_eq!(
-            session_files_from_resolution(unavailable).expect_err("discovery error"),
+            session_files_from_resolution(unavailable, true).expect_err("discovery error"),
             "fixture unavailable"
         );
         let relative = SessionRootResolution::RequiresProjectContext {
             configured_path: ".pi/sessions".to_string(),
         };
-        assert!(session_files_from_resolution(relative)
-            .expect_err("relative discovery error")
-            .contains("requires a project cwd"));
+        assert!(session_files_from_resolution(relative, true).is_err());
     }
 
     #[test]
@@ -1095,7 +1119,7 @@ mod tests {
         )
         .expect("captured session");
 
-        let session = parse_session(&path).expect("parse capture-generated session");
+        let session = parse_session(&PI, &path).expect("parse capture-generated session");
         assert_eq!(session.session_id, "cc-switch-capture-session");
         assert_eq!(session.title.as_deref(), Some("Captured session"));
         assert_eq!(session.summary.as_deref(), Some("captured answer"));
@@ -1110,8 +1134,8 @@ mod tests {
             .as_deref()
             .is_some_and(|command| command.starts_with("pi --session ")));
 
-        let messages =
-            load_messages_with_layout(&root, &path, SessionLayout::Flat).expect("load messages");
+        let messages = load_messages_with_layout(&PI, &root, &path, SessionLayout::Flat)
+            .expect("load messages");
         assert_eq!(
             messages
                 .iter()
@@ -1131,10 +1155,12 @@ mod tests {
         fs::create_dir_all(&root).expect("root");
         let path = root.join("session.jsonl");
         write_session_header(&path, "session-1");
-        assert!(delete_session_with_layout(&root, &path, "other", SessionLayout::Flat).is_err());
+        assert!(
+            delete_session_with_layout(&PI, &root, &path, "other", SessionLayout::Flat).is_err()
+        );
         assert!(path.exists());
         assert!(
-            delete_session_with_layout(&root, &path, "session-1", SessionLayout::Flat)
+            delete_session_with_layout(&PI, &root, &path, "session-1", SessionLayout::Flat)
                 .expect("delete")
         );
     }
@@ -1148,11 +1174,11 @@ mod tests {
         write_session_header(&flat, "flat-session");
         write_session_header(&project, "project-session");
 
-        let flat_sessions = scan_sessions_in_root(&root, SessionLayout::Flat);
+        let flat_sessions = scan_sessions_in_root(&PI, &root, SessionLayout::Flat);
         assert_eq!(flat_sessions.len(), 1);
         assert_eq!(flat_sessions[0].session_id, "flat-session");
 
-        let project_sessions = scan_sessions_in_root(&root, SessionLayout::ProjectDirectories);
+        let project_sessions = scan_sessions_in_root(&PI, &root, SessionLayout::ProjectDirectories);
         assert_eq!(project_sessions.len(), 1);
         assert_eq!(project_sessions[0].session_id, "project-session");
     }
@@ -1227,12 +1253,12 @@ mod tests {
                 layout,
             };
             assert_eq!(
-                session_files_from_resolution(resolution).expect("usage files"),
+                session_files_from_resolution(resolution, true).expect("usage files"),
                 expected,
                 "{layout:?}"
             );
 
-            let sessions = scan_sessions_in_root(&root, layout);
+            let sessions = scan_sessions_in_root(&PI, &root, layout);
             assert_eq!(sessions.len(), 1, "{layout:?}");
             assert_eq!(sessions[0].session_id, "parent");
         }
@@ -1248,6 +1274,7 @@ mod tests {
         write_session_header(&project, "project-session");
 
         assert!(delete_session_with_layout(
+            &PI,
             &root,
             &project,
             "project-session",
@@ -1257,6 +1284,7 @@ mod tests {
         assert!(project.exists());
 
         assert!(delete_session_with_layout(
+            &PI,
             &root,
             &flat,
             "flat-session",
@@ -1266,6 +1294,7 @@ mod tests {
         assert!(flat.exists());
 
         assert!(delete_session_with_layout(
+            &PI,
             &root,
             &project,
             "project-session",
@@ -1291,7 +1320,7 @@ mod tests {
         fs::write(&path, lines.join("\n") + "\n").expect("session");
 
         let messages =
-            load_messages_with_layout(&root, &path, SessionLayout::Flat).expect("messages");
+            load_messages_with_layout(&PI, &root, &path, SessionLayout::Flat).expect("messages");
         let summary: Vec<_> = messages
             .iter()
             .map(|m| {

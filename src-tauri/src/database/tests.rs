@@ -53,29 +53,53 @@ const LEGACY_SCHEMA_SQL: &str = r#"
 "#;
 
 #[test]
-fn omp_and_agy_flags_round_trip_independently() -> Result<(), AppError> {
+fn omp_agy_mcode_and_kimi_flags_round_trip_independently() -> Result<(), AppError> {
     let db = Database::memory()?;
-    for (omp, agy, mcode) in [
-        (true, false, true),
-        (false, true, false),
-        (true, true, false),
-    ] {
+    for flags in 0..16 {
+        let omp = flags & 1 != 0;
+        let agy = flags & 2 != 0;
+        let mcode = flags & 4 != 0;
+        let kimi = flags & 8 != 0;
         let server: crate::app_config::McpServer = serde_json::from_value(json!({
             "id": "independent", "name": "keep", "server": {"command": "test-only"},
-            "apps": {"omp": omp, "agy": agy, "mcode": mcode, "pi": true}
+            "apps": {"omp": omp, "agy": agy, "mcode": mcode, "kimi": kimi, "pi": true}
         }))
         .unwrap();
         db.save_mcp_server(&server)?;
         let servers = db.get_all_mcp_servers()?;
         let apps = &servers["independent"].apps;
         assert_eq!(
-            (apps.omp, apps.agy, apps.mcode, apps.pi),
-            (omp, agy, mcode, true)
+            (apps.omp, apps.agy, apps.mcode, apps.kimi, apps.pi),
+            (omp, agy, mcode, kimi, true)
+        );
+        let toggled_mcp = db
+            .update_mcp_server_app_enabled("independent", &crate::app_config::AppType::Kimi, !kimi)?
+            .unwrap();
+        assert_eq!(
+            (
+                toggled_mcp.apps.omp,
+                toggled_mcp.apps.agy,
+                toggled_mcp.apps.mcode,
+                toggled_mcp.apps.kimi
+            ),
+            (omp, agy, mcode, !kimi)
+        );
+        let toggled_mcp = db
+            .update_mcp_server_app_enabled("independent", &crate::app_config::AppType::Omp, !omp)?
+            .unwrap();
+        assert_eq!(
+            (
+                toggled_mcp.apps.omp,
+                toggled_mcp.apps.agy,
+                toggled_mcp.apps.mcode,
+                toggled_mcp.apps.kimi
+            ),
+            (!omp, agy, mcode, !kimi)
         );
 
         let skill: crate::app_config::InstalledSkill = serde_json::from_value(json!({
             "id": "independent", "name": "keep", "directory": "keep",
-            "apps": {"omp": omp, "agy": agy, "mcode": mcode},
+            "apps": {"omp": omp, "agy": agy, "mcode": mcode, "kimi": kimi},
             "installedAt": 123, "contentHash": "keep-hash", "updatedAt": 456
         }))
         .unwrap();
@@ -83,18 +107,29 @@ fn omp_and_agy_flags_round_trip_independently() -> Result<(), AppError> {
         let skills = db.get_all_installed_skills()?;
         let stored = &skills["independent"];
         assert_eq!(
-            (stored.apps.omp, stored.apps.agy, stored.apps.mcode),
-            (omp, agy, mcode)
+            (
+                stored.apps.omp,
+                stored.apps.agy,
+                stored.apps.mcode,
+                stored.apps.kimi
+            ),
+            (omp, agy, mcode, kimi)
         );
         assert_eq!((stored.installed_at, stored.updated_at), (123, 456));
         assert_eq!(stored.content_hash.as_deref(), Some("keep-hash"));
         let mut toggled = skill.apps.clone();
         toggled.agy = !agy;
+        toggled.kimi = !kimi;
         assert!(db.update_skill_apps("independent", &toggled)?);
         let stored = db.get_installed_skill("independent")?.unwrap();
         assert_eq!(
-            (stored.apps.omp, stored.apps.agy, stored.apps.mcode),
-            (omp, !agy, mcode)
+            (
+                stored.apps.omp,
+                stored.apps.agy,
+                stored.apps.mcode,
+                stored.apps.kimi
+            ),
+            (omp, !agy, mcode, !kimi)
         );
         assert_eq!((stored.installed_at, stored.updated_at), (123, 456));
     }
@@ -1631,4 +1666,37 @@ fn incremental_vacuum_reclaims_entire_freelist() {
 
     Database::incremental_vacuum_on_conn(&conn).expect("incremental vacuum");
     assert_eq!(freelist(&conn), 0, "all free pages should be reclaimed");
+}
+
+/// Upstream v22 has neither OMP column. The fork persists independent MCP and
+/// Skill flags; upgrading must add both disabled without changing Pi.
+#[test]
+fn migration_upstream_v22_adds_independent_omp_flags() {
+    let conn = Connection::open_in_memory().expect("open memory db");
+    Database::create_tables_on_conn(&conn).expect("create tables");
+    conn.execute_batch(
+        "ALTER TABLE mcp_servers DROP COLUMN enabled_omp;
+         ALTER TABLE skills DROP COLUMN enabled_omp;",
+    )
+    .expect("rewind to upstream v22 shape");
+    conn.execute(
+        "INSERT INTO mcp_servers (id, name, server_config, enabled_pi) VALUES ('mcp-1', 'm', '{}', 1)",
+        [],
+    )
+    .expect("seed mcp row");
+    Database::set_user_version(&conn, 22).expect("set user_version=22");
+
+    Database::apply_schema_migrations_on_conn(&conn).expect("apply migrations");
+
+    assert_eq!(Database::get_user_version(&conn).unwrap(), SCHEMA_VERSION);
+    assert!(Database::has_column(&conn, "mcp_servers", "enabled_omp").unwrap());
+    assert!(Database::has_column(&conn, "skills", "enabled_omp").unwrap());
+    let (pi, omp): (i64, i64) = conn
+        .query_row(
+            "SELECT enabled_pi, enabled_omp FROM mcp_servers WHERE id = 'mcp-1'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .expect("read mcp row");
+    assert_eq!((pi, omp), (1, 0));
 }

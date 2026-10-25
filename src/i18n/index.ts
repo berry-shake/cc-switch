@@ -69,62 +69,19 @@ const getInitialLanguage = (): Language => {
   return navigatorLang ? "en" : DEFAULT_LANGUAGE;
 };
 
-export function withOmpAliases<T>(value: T): T {
-  const visit = (current: unknown, ompAlias: boolean): unknown => {
-    if (typeof current === "string") {
-      return ompAlias
-        ? current
-            .split("Pi")
-            .join("OMP")
-            .replace(/([/\\])\.pi(?=[/\\]|$)/g, "$1.omp")
-        : current;
-    }
-    if (Array.isArray(current)) {
-      return current.map((child) => visit(child, ompAlias));
-    }
-    if (!current || typeof current !== "object") {
-      return current;
-    }
-
-    const source = current as Record<string, unknown>;
-    const result = Object.fromEntries(
-      Object.entries(source).map(([key, child]) => [
-        key,
-        visit(child, ompAlias),
-      ]),
-    ) as Record<string, unknown>;
-    for (const [key, child] of Object.entries(source)) {
-      const alias =
-        key === "pi"
-          ? "omp"
-          : /^pi[A-Z]/.test(key)
-            ? `omp${key.slice(2)}`
-            : key.includes("Pi")
-              ? key.split("Pi").join("Omp")
-              : undefined;
-      if (alias && !(alias in source)) {
-        result[alias] = visit(child, true);
-      }
-    }
-    return result;
-  };
-
-  return visit(value, false) as T;
-}
-
 const resources = {
-  tr: { translation: withOmpAliases(tr) },
+  tr: { translation: tr },
   en: {
-    translation: withOmpAliases(en),
+    translation: en,
   },
   ja: {
-    translation: withOmpAliases(ja),
+    translation: ja,
   },
   zh: {
-    translation: withOmpAliases(zh),
+    translation: zh,
   },
   "zh-TW": {
-    translation: withOmpAliases(zhTW),
+    translation: zhTW,
   },
 };
 

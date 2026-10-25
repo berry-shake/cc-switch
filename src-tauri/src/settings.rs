@@ -56,6 +56,8 @@ pub struct VisibleApps {
     #[serde(default = "default_true")]
     pub mcode: bool,
     #[serde(default = "default_true")]
+    pub kimi: bool,
+    #[serde(default = "default_true")]
     pub agy: bool,
 }
 
@@ -73,6 +75,7 @@ impl Default for VisibleApps {
             pi: true,
             omp: true,
             mcode: true,
+            kimi: true,
             agy: true,
         }
     }
@@ -93,6 +96,7 @@ impl VisibleApps {
             AppType::Pi => self.pi,
             AppType::Omp => self.omp,
             AppType::Mcode => self.mcode,
+            AppType::Kimi => self.kimi,
             AppType::Agy => self.agy,
         }
     }
@@ -520,6 +524,9 @@ pub struct AppSettings {
     // ===== 主页面显示的应用 =====
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub visible_apps: Option<VisibleApps>,
+    /// 应用页和侧栏的应用顺序（应用 ID）。缺的应用由前端按默认顺序插回，不认识的忽略
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub app_order: Option<Vec<String>>,
 
     // ===== 设备级目录覆盖 =====
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -670,6 +677,7 @@ impl Default for AppSettings {
             language: None,
             quota_display: None,
             visible_apps: None,
+            app_order: None,
             claude_config_dir: None,
             claude_additional_config_dirs: Vec::new(),
             codex_config_dir: None,
@@ -1364,7 +1372,7 @@ pub fn get_current_provider(app_type: &AppType) -> Option<String> {
         AppType::OpenClaw => settings.current_provider_openclaw.clone(),
         AppType::Hermes => settings.current_provider_hermes.clone(),
         AppType::Agy => settings.current_provider_agy.clone(),
-        AppType::Pi | AppType::Omp | AppType::Mcode => None,
+        AppType::Pi | AppType::Omp | AppType::Mcode | AppType::Kimi => None,
     }
 }
 
@@ -1384,7 +1392,7 @@ pub fn set_current_provider(app_type: &AppType, id: Option<&str>) -> Result<(), 
         AppType::OpenClaw => settings.current_provider_openclaw = id_owned.clone(),
         AppType::Hermes => settings.current_provider_hermes = id_owned.clone(),
         AppType::Agy => settings.current_provider_agy = id_owned.clone(),
-        AppType::Pi | AppType::Omp | AppType::Mcode => {}
+        AppType::Pi | AppType::Omp | AppType::Mcode | AppType::Kimi => {}
     })
 }
 
@@ -1632,6 +1640,31 @@ mod tests {
     }
 
     #[test]
+    fn app_order_round_trips_as_camel_case() {
+        let settings: AppSettings = serde_json::from_value(serde_json::json!({
+            "appOrder": ["codex", "claude", "future-app"]
+        }))
+        .expect("parse settings");
+        assert_eq!(
+            settings.app_order.as_deref(),
+            Some(
+                &[
+                    "codex".to_string(),
+                    "claude".to_string(),
+                    "future-app".to_string()
+                ][..]
+            )
+        );
+        let value = serde_json::to_value(&settings).expect("serialize settings");
+        assert_eq!(
+            value["appOrder"],
+            serde_json::json!(["codex", "claude", "future-app"])
+        );
+        let default = serde_json::to_value(AppSettings::default()).expect("serialize default");
+        assert!(default.get("appOrder").is_none());
+    }
+
+    #[test]
     fn visible_apps_old_settings_default_claude_desktop_visible() {
         let visible: VisibleApps = serde_json::from_value(serde_json::json!({
             "claude": true,
@@ -1644,6 +1677,61 @@ mod tests {
         .expect("visible apps");
 
         assert!(visible.is_visible(&AppType::ClaudeDesktop));
+    }
+
+    #[test]
+    fn visible_apps_preserves_omp_choices_and_defaults_new_apps_visible() {
+        let missing: VisibleApps = serde_json::from_value(serde_json::json!({})).unwrap();
+        assert!(missing.omp);
+        assert!(missing.kimi);
+        for enabled in [false, true] {
+            let visible: VisibleApps = serde_json::from_value(serde_json::json!({
+                "omp": enabled,
+                "pi": !enabled,
+                "kimi": !enabled
+            }))
+            .unwrap();
+            assert_eq!(visible.is_visible(&AppType::Omp), enabled);
+            assert_eq!(visible.is_visible(&AppType::Pi), !enabled);
+            assert_eq!(visible.is_visible(&AppType::Kimi), !enabled);
+            let serialized = serde_json::to_value(visible).unwrap();
+            assert_eq!(serialized["omp"], enabled);
+            assert_eq!(serialized["kimi"], !enabled);
+        }
+    }
+
+    #[test]
+    fn upgraded_settings_preserve_scan_roots_sync_choice_and_provider_ids() {
+        let mut settings: AppSettings = serde_json::from_value(serde_json::json!({
+            "claudeConfigDir": "/primary/claude",
+            "claudeAdditionalConfigDirs": [" /extra/claude ", "/extra/claude", ""],
+            "ompConfigDir": " /independent/omp ",
+            "piConfigDir": "/independent/pi",
+            "sessionAutoSyncEnabled": false,
+            "currentProviderClaude": "existing-claude",
+            "currentProviderCodex": "existing-codex",
+            "visibleApps": { "omp": false },
+            "appOrder": ["omp", "codex", "claude"]
+        }))
+        .unwrap();
+        settings.normalize_paths();
+        let saved = serde_json::to_value(settings).unwrap();
+        assert_eq!(saved["claudeConfigDir"], "/primary/claude");
+        assert_eq!(
+            saved["claudeAdditionalConfigDirs"],
+            serde_json::json!(["/extra/claude"])
+        );
+        assert_eq!(saved["ompConfigDir"], "/independent/omp");
+        assert_eq!(saved["piConfigDir"], "/independent/pi");
+        assert_eq!(saved["sessionAutoSyncEnabled"], false);
+        assert_eq!(saved["currentProviderClaude"], "existing-claude");
+        assert_eq!(saved["currentProviderCodex"], "existing-codex");
+        assert_eq!(saved["visibleApps"]["omp"], false);
+        assert_eq!(saved["visibleApps"]["kimi"], true);
+        assert_eq!(
+            saved["appOrder"],
+            serde_json::json!(["omp", "codex", "claude"])
+        );
     }
 
     #[test]

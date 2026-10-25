@@ -1,4 +1,4 @@
-import { fireEvent, within, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { renderWithQueryClient as render } from "../utils/testQueryClient";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -58,20 +58,9 @@ describe("RequestLogTable", () => {
     );
 
     const headers = screen.getAllByRole("columnheader");
-    expect(headers).toHaveLength(11);
-    expect(
-      headers
-        .slice(4, 8)
-        .map((header) => within(header).getByText(/usage\./).textContent),
-    ).toEqual([
-      "usage.freshInput",
-      "usage.cacheWrite",
-      "usage.cacheReadTokens",
-      "usage.outputTokens",
-    ]);
     expect(screen.getByText("usage.noData").closest("td")).toHaveAttribute(
       "colspan",
-      "11",
+      String(headers.length),
     );
   });
 
@@ -159,6 +148,65 @@ describe("RequestLogTable", () => {
           page: 0,
           range,
         }),
+      );
+    });
+  });
+
+  it("pulls the page back into range when the total shrinks", async () => {
+    let total = 120;
+    useRequestLogsMock.mockImplementation(
+      ({ page = 0, pageSize = 20 }: { page?: number; pageSize?: number }) => ({
+        data: { data: [], total, page, pageSize },
+        isLoading: false,
+        isPlaceholderData: false,
+      }),
+    );
+    const range: UsageRangeSelection = { preset: "today" };
+    const table = (
+      <RequestLogTable range={range} appType="all" refreshIntervalMs={0} />
+    );
+    const { rerender } = render(table);
+
+    fireEvent.click(screen.getByRole("button", { name: "usage.nextPage" }));
+    fireEvent.click(screen.getByRole("button", { name: "usage.nextPage" }));
+    await waitFor(() => {
+      expect(useRequestLogsMock).toHaveBeenLastCalledWith(
+        expect.objectContaining({ page: 2 }),
+      );
+    });
+
+    // 「今天」跨日后只剩 5 条：只有一页、翻页条不画，必须自己回到第一页
+    total = 5;
+    rerender(
+      <RequestLogTable range={range} appType="all" refreshIntervalMs={0} />,
+    );
+    await waitFor(() => {
+      expect(useRequestLogsMock).toHaveBeenLastCalledWith(
+        expect.objectContaining({ page: 0 }),
+      );
+    });
+    expect(
+      screen.queryByRole("button", { name: "usage.nextPage" }),
+    ).not.toBeInTheDocument();
+
+    // 还剩几页时收回到最后一页，而不是第一页
+    total = 120;
+    rerender(table);
+    fireEvent.click(screen.getByRole("button", { name: "usage.nextPage" }));
+    fireEvent.click(screen.getByRole("button", { name: "usage.nextPage" }));
+    fireEvent.click(screen.getByRole("button", { name: "usage.nextPage" }));
+    await waitFor(() => {
+      expect(useRequestLogsMock).toHaveBeenLastCalledWith(
+        expect.objectContaining({ page: 3 }),
+      );
+    });
+    total = 50;
+    rerender(
+      <RequestLogTable range={range} appType="all" refreshIntervalMs={0} />,
+    );
+    await waitFor(() => {
+      expect(useRequestLogsMock).toHaveBeenLastCalledWith(
+        expect.objectContaining({ page: 2 }),
       );
     });
   });
@@ -544,6 +592,101 @@ describe("RequestLogTable optional columns", () => {
       <RequestLogTable range={{ preset: "today" }} refreshIntervalMs={0} />,
     );
     expect(screen.getByText("500")).toBeInTheDocument();
+  });
+
+  it("slides kept rows down and highlights rows that arrive on refresh", () => {
+    const animate = vi.fn();
+    const original = Element.prototype.animate;
+    Element.prototype.animate = animate;
+    const logsOf = (...ids: string[]) => ({
+      data: {
+        data: ids.map((requestId) => ({
+          ...base,
+          requestId,
+          appType: "claude",
+          inputTokens: 1,
+          cacheReadTokens: 0,
+          cacheCreationTokens: 0,
+          latencyMs: 100,
+          statusCode: 200,
+        })),
+        total: ids.length,
+        page: 0,
+        pageSize: 20,
+      },
+      isLoading: false,
+    });
+    try {
+      useRequestLogsMock.mockReturnValue(logsOf("a", "b"));
+      const { rerender } = render(
+        <RequestLogTable range={{ preset: "today" }} refreshIntervalMs={0} />,
+      );
+      // 第一次显示不算新来的
+      expect(animate).not.toHaveBeenCalled();
+
+      useRequestLogsMock.mockReturnValue(logsOf("c", "a", "b"));
+      rerender(
+        <RequestLogTable range={{ preset: "today" }} refreshIntervalMs={0} />,
+      );
+      const rows = screen.getAllByRole("row").slice(1);
+      const targets = animate.mock.contexts as Element[];
+      // 新行：每格一段渐隐底色 + 整行淡入
+      expect(targets).toContain(rows[0]);
+      expect(targets).toContain(rows[0].querySelector("td"));
+      // 旧行各往下挪一行
+      const shiftOf = (row: Element) =>
+        animate.mock.calls[targets.indexOf(row)]?.[0]?.[0]?.transform;
+      expect(shiftOf(rows[1])).toBe("translateY(-100%)");
+      expect(shiftOf(rows[2])).toBe("translateY(-100%)");
+    } finally {
+      Element.prototype.animate = original;
+    }
+  });
+
+  it("does not animate rows that only appear because the page size grew", () => {
+    const animate = vi.fn();
+    const original = Element.prototype.animate;
+    Element.prototype.animate = animate;
+    const logsOf = (...ids: string[]) => ({
+      data: {
+        data: ids.map((requestId) => ({
+          ...base,
+          requestId,
+          appType: "claude",
+          inputTokens: 1,
+          cacheReadTokens: 0,
+          cacheCreationTokens: 0,
+          latencyMs: 100,
+          statusCode: 200,
+        })),
+        total: 40,
+        page: 0,
+        pageSize: ids.length,
+      },
+      isLoading: false,
+    });
+    try {
+      useRequestLogsMock.mockReturnValue(logsOf("a", "b"));
+      const { rerender } = render(
+        <RequestLogTable
+          range={{ preset: "today" }}
+          refreshIntervalMs={0}
+          pageSize={10}
+        />,
+      );
+      // 每页从 10 条调到 20 条：c、d 是这一屏多出来的，不是刚进来的请求
+      useRequestLogsMock.mockReturnValue(logsOf("a", "b", "c", "d"));
+      rerender(
+        <RequestLogTable
+          range={{ preset: "today" }}
+          refreshIntervalMs={0}
+          pageSize={20}
+        />,
+      );
+      expect(animate).not.toHaveBeenCalled();
+    } finally {
+      Element.prototype.animate = original;
+    }
   });
 
   it("formats hit percentages without rounding up to 100", () => {

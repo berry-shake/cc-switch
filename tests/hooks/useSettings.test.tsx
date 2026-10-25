@@ -402,6 +402,42 @@ describe("useSettings hook", () => {
     expect(saved).toEqual({ requiresRestart: false });
   });
 
+  it("auto-saves the persisted directory, not an unsaved draft", async () => {
+    // Directory rows only commit on the explicit Save button. An unrelated
+    // auto-save (a General tab toggle) must not smuggle the half-typed path in.
+    serverSettings = {
+      ...serverSettings,
+      ompConfigDir: "/server/omp",
+      hermesConfigDir: "/server/hermes",
+      claudeAdditionalConfigDirs: ["/server/claude-extra"],
+    };
+    useSettingsQueryMock.mockReturnValue({
+      data: serverSettings,
+      isLoading: false,
+    });
+    settingsFormMock = createSettingsFormMock({
+      settings: {
+        ...serverSettings,
+        ompConfigDir: "/draft/omp",
+        hermesConfigDir: "/draft/hermes",
+        claudeAdditionalConfigDirs: ["/draft/claude-extra"],
+      },
+    });
+
+    const { result } = renderHook(() => useSettings());
+
+    await act(async () => {
+      await result.current.autoSaveSettings({ minimizeToTrayOnClose: true });
+    });
+
+    const payload = mutateAsyncMock.mock.calls[0][0] as Settings;
+    expect(payload.ompConfigDir).toBe("/server/omp");
+    expect(payload.hermesConfigDir).toBe("/server/hermes");
+    expect(payload.claudeAdditionalConfigDirs).toEqual([
+      "/server/claude-extra",
+    ]);
+  });
+
   it("shows toast when Claude plugin sync fails but continues flow", async () => {
     // 设置服务器状态为 false,本地状态为 true,触发状态变化
     serverSettings = {

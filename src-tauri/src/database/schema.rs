@@ -68,6 +68,7 @@ impl Database {
             enabled_gemini BOOLEAN NOT NULL DEFAULT 0, enabled_grokbuild BOOLEAN NOT NULL DEFAULT 0,
             enabled_opencode BOOLEAN NOT NULL DEFAULT 0,
             enabled_agy BOOLEAN NOT NULL DEFAULT 0,
+            enabled_kimi BOOLEAN NOT NULL DEFAULT 0,
             enabled_hermes BOOLEAN NOT NULL DEFAULT 0,
             enabled_omp BOOLEAN NOT NULL DEFAULT 0,
             enabled_mcode BOOLEAN NOT NULL DEFAULT 0,
@@ -102,6 +103,7 @@ impl Database {
             enabled_opencode BOOLEAN NOT NULL DEFAULT 0,
             enabled_mcode BOOLEAN NOT NULL DEFAULT 0,
             enabled_agy BOOLEAN NOT NULL DEFAULT 0,
+            enabled_kimi BOOLEAN NOT NULL DEFAULT 0,
             enabled_hermes BOOLEAN NOT NULL DEFAULT 0,
             enabled_omp BOOLEAN NOT NULL DEFAULT 0,
             installed_at INTEGER NOT NULL DEFAULT 0,
@@ -646,6 +648,32 @@ impl Database {
                             }
                         }
                         Self::set_user_version(conn, 23)?;
+                    }
+                    23 => {
+                        // Fork v23 already has persistent OMP Skills/MCP flags and
+                        // the Claude ledger; upstream v22/v23 instead adds Kimi
+                        // and MCP-only OMP. Detect the missing fork layout before
+                        // adding columns: the empty ledger table is created on
+                        // startup even for upstream databases.
+                        if !Self::has_column(conn, "skills", "enabled_omp")?
+                            || !Self::has_column(conn, "mcp_servers", "enabled_omp")?
+                        {
+                            Self::migrate_v16_to_v17(conn)?;
+                            Self::migrate_v17_to_v18(conn)?;
+                            crate::services::claude_usage_ledger::migrate_legacy(conn)?;
+                        }
+                        Self::migrate_v18_to_v19(conn)?;
+                        for table in ["mcp_servers", "skills"] {
+                            if Self::table_exists(conn, table)? {
+                                Self::add_column_if_missing(
+                                    conn,
+                                    table,
+                                    "enabled_kimi",
+                                    "BOOLEAN NOT NULL DEFAULT 0",
+                                )?;
+                            }
+                        }
+                        Self::set_user_version(conn, 24)?;
                     }
                     _ => {
                         return Err(AppError::Database(format!(
@@ -2571,6 +2599,34 @@ impl Database {
             ("kimi-k3", "Kimi K3", "3.00", "15.00", "0.30", "3.00"),
             // Kimi For Coding 套餐里 K3 的裸名（无 kimi- 前缀），同标准 list 价
             ("k3", "Kimi K3", "3.00", "15.00", "0.30", "3.00"),
+            // 2026-10-24 官方价页：K3.1 Pro 缓存写入取默认 5 分钟档（1 小时档为 2 倍）。
+            // HighSpeed 只有输入/输出/缓存写翻倍，缓存读仍是 $0.20，别按 K2.7 的 2 倍规律改
+            (
+                "kimi-k3.1-pro",
+                "Kimi K3.1 Pro",
+                "2.00",
+                "10.00",
+                "0.20",
+                "2.00",
+            ),
+            (
+                "kimi-k3.1-pro-highspeed",
+                "Kimi K3.1 Pro HighSpeed",
+                "4.00",
+                "20.00",
+                "0.20",
+                "4.00",
+            ),
+            // Kimi Code 套餐里的裸名（无 kimi- 前缀），同标准 list 价
+            ("k3.1-pro", "Kimi K3.1 Pro", "2.00", "10.00", "0.20", "2.00"),
+            (
+                "k3.1-pro-highspeed",
+                "Kimi K3.1 Pro HighSpeed",
+                "4.00",
+                "20.00",
+                "0.20",
+                "4.00",
+            ),
             // 腾讯混元 (Tencent Hunyuan)（官方 CNY 1/4/0.25 按 1 USD ≈ 7.14 折算；Hy3 阶梯计价取最低档）
             ("hunyuan-hy3", "Hunyuan Hy3", "0.14", "0.56", "0.035", "0"),
             ("hy3", "Hunyuan Hy3", "0.14", "0.56", "0.035", "0"),
@@ -4079,6 +4135,45 @@ mod tests {
     }
 
     #[test]
+    fn kimi_migration_preserves_existing_flags_and_defaults_to_disabled() -> Result<(), AppError> {
+        let conn = Connection::open_in_memory()?;
+        conn.execute_batch("CREATE TABLE mcp_servers(id TEXT PRIMARY KEY, enabled_codex BOOLEAN); CREATE TABLE skills(id TEXT PRIMARY KEY, enabled_claude BOOLEAN); INSERT INTO mcp_servers VALUES ('m',1); INSERT INTO skills VALUES ('s',1);")?;
+        Database::set_user_version(&conn, 21)?;
+        Database::apply_schema_migrations_on_conn(&conn)?;
+        assert_eq!(Database::get_user_version(&conn)?, SCHEMA_VERSION);
+        for (table, flag) in [
+            ("mcp_servers", "enabled_codex"),
+            ("skills", "enabled_claude"),
+        ] {
+            let flags = conn.query_row(
+                &format!("SELECT {flag}, enabled_kimi FROM {table}"),
+                [],
+                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
+            )?;
+            assert_eq!(flags, (1, 0));
+        }
+        Database::apply_schema_migrations_on_conn(&conn)?;
+        Ok(())
+    }
+
+    #[test]
+    fn kimi_clean_database_persists_mcp_and_skill_flags_independently() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        let server = serde_json::from_value(serde_json::json!({"id":"m", "name":"m", "server":{"command":"echo"}, "apps":{"kimi":true,"codex":true}})).unwrap();
+        db.save_mcp_server(&server)?;
+        db.update_mcp_server_app_enabled("m", &crate::app_config::AppType::Kimi, false)?;
+        let saved = db.get_all_mcp_servers()?;
+        assert!(!saved["m"].apps.kimi);
+        assert!(saved["m"].apps.codex);
+        let skill = serde_json::from_value(serde_json::json!({"id":"s", "name":"s", "description":"", "directory":"s", "apps":{"kimi":true,"claude":true}, "installedAt":0})).unwrap();
+        db.save_skill(&skill)?;
+        let saved = db.get_installed_skill("s")?.unwrap();
+        assert!(saved.apps.kimi && saved.apps.claude);
+        assert!(db.get_all_installed_skills()?["s"].apps.kimi);
+        Ok(())
+    }
+
+    #[test]
     fn agy_migration_preserves_existing_flags_and_defaults_to_disabled() -> Result<(), AppError> {
         let conn = Connection::open_in_memory()?;
         conn.execute_batch("CREATE TABLE mcp_servers(id TEXT PRIMARY KEY, enabled_gemini BOOLEAN); CREATE TABLE skills(id TEXT PRIMARY KEY, enabled_codex BOOLEAN); INSERT INTO mcp_servers VALUES ('m',1); INSERT INTO skills VALUES ('s',1);")?;
@@ -4432,7 +4527,7 @@ mod tests {
             Database::set_user_version(&conn, if upstream { 21 } else { 22 })?;
             for _ in 0..2 {
                 Database::apply_schema_migrations_on_conn(&conn)?;
-                assert_eq!(Database::get_user_version(&conn)?, 23);
+                assert_eq!(Database::get_user_version(&conn)?, SCHEMA_VERSION);
                 for table in ["mcp_servers", "skills"] {
                     let flags: (bool, bool) = conn.query_row(
                         &format!(
@@ -4463,6 +4558,212 @@ mod tests {
                     |r| r.get(0),
                 )?;
                 assert_eq!(completed, !upstream);
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn migrate_fork_v23_and_upstream_v22_v23_preserves_flags_and_usage() -> Result<(), AppError> {
+        for (version, upstream) in [(23, false), (22, true), (23, true)] {
+            let conn = Connection::open_in_memory()?;
+            Database::create_tables_on_conn(&conn)?;
+            conn.execute_batch(
+                "INSERT INTO mcp_servers
+                   (id, name, server_config, enabled_omp, enabled_kimi, enabled_mcode, enabled_pi, enabled_agy)
+                 VALUES ('enabled', 'keep', '{\"command\":\"keep\"}', 1, 1, 0, 1, 0),
+                        ('disabled', 'keep-off', '{}', 0, 0, 1, 0, 1);
+                 INSERT INTO skills
+                   (id, name, directory, enabled_omp, enabled_kimi, enabled_mcode, enabled_agy, installed_at, content_hash, updated_at)
+                 VALUES ('enabled', 'keep', 'keep', 1, 1, 0, 0, 123, 'kept-hash', 456),
+                        ('disabled', 'keep-off', 'keep-off', 0, 0, 1, 1, 789, 'other-hash', 987);
+                 INSERT INTO providers (id, app_type, name, settings_config, is_current)
+                 VALUES ('existing-omp-id', 'omp', 'keep provider', '{\"apiKey\":\"kept\"}', 1);
+                 INSERT INTO proxy_request_logs
+                   (request_id, provider_id, app_type, model, latency_ms, status_code, created_at,
+                    input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
+                    input_token_semantics, total_cost_usd, data_source)
+                 VALUES ('session:claude', 'p', 'claude', 'kept-claude', 100, 200, 123456,
+                         100, 20, 70, 15, 1, '12.345678', 'session_log'),
+                        ('codex:kept', '_codex_session', 'codex', 'kept-codex', 200, 200, 654321,
+                         1000, 200, 700, 150, 0, '23.456789', 'codex_session');
+                 INSERT INTO usage_daily_rollups
+                   (date, app_type, provider_id, model, request_model, request_count, input_tokens,
+                    output_tokens, cache_read_tokens, cache_creation_tokens, total_cost_usd)
+                 VALUES ('2026-09-01', 'codex', '_codex_session', 'kept-codex', 'requested-codex',
+                         42, 1000, 200, 700, 150, '34.567890'),
+                        ('2026-09-01', 'claude', 'p', 'kept-claude', 'requested-claude',
+                         43, 100, 20, 70, 15, '45.678901');
+                 INSERT INTO session_log_sync
+                   (file_path, last_modified, last_line_offset, last_byte_offset, last_tail_fingerprint, last_synced_at)
+                 VALUES ('/fixture/.claude/projects/project/existing.jsonl', 123456, 42, 12345, 876, 123456),
+                        ('/fixture/codex/sessions/rollout.jsonl', 654321, 84, 54321, NULL, 654321);
+                 INSERT INTO session_usage_dedup (data_source, request_id, semantic_id, has_entry_id)
+                 VALUES ('session_log', 'session:pruned', 'session:pruned', 1),
+                        ('codex_session', 'codex:pruned', 'codex:semantic', 1);",
+            )?;
+            if upstream {
+                conn.execute_batch("ALTER TABLE skills DROP COLUMN enabled_omp;")?;
+                if version == 22 {
+                    conn.execute_batch("ALTER TABLE mcp_servers DROP COLUMN enabled_omp;")?;
+                }
+            } else {
+                conn.execute_batch(
+                    "ALTER TABLE mcp_servers DROP COLUMN enabled_kimi;
+                     ALTER TABLE skills DROP COLUMN enabled_kimi;",
+                )?;
+                crate::services::claude_usage_ledger::migrate_legacy(&conn)?;
+                conn.execute("UPDATE claude_usage_legacy_cursors SET completed=1", [])?;
+            }
+            // A completed fork ledger must not snapshot newly synced files again.
+            conn.execute_batch(
+                "INSERT INTO session_log_sync
+                   (file_path, last_modified, last_line_offset, last_byte_offset, last_tail_fingerprint, last_synced_at)
+                 VALUES ('/fixture/.claude/projects/project/new.jsonl', 234567, 7, 700, 123, 234567);",
+            )?;
+            Database::set_user_version(&conn, version)?;
+            let expected_cutoff: String = conn.query_row(
+                "SELECT CAST(strftime('%s', '2026-09-02', 'utc') AS TEXT)",
+                [],
+                |row| row.get(0),
+            )?;
+            for _ in 0..2 {
+                Database::create_tables_on_conn(&conn)?;
+                Database::apply_schema_migrations_on_conn(&conn)?;
+                assert_eq!(Database::get_user_version(&conn)?, SCHEMA_VERSION);
+                for table in ["mcp_servers", "skills"] {
+                    let omp_column_count: i64 = conn.query_row(
+                        &format!("SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name='enabled_omp'"),
+                        [], |row| row.get(0),
+                    )?;
+                    assert_eq!(omp_column_count, 1);
+                    for enabled in [false, true] {
+                        let flags: (bool, bool, bool, bool) = conn.query_row(
+                            &format!("SELECT enabled_omp, enabled_kimi, enabled_mcode, enabled_agy FROM {table} WHERE id=?1"),
+                            [if enabled { "enabled" } else { "disabled" }],
+                            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                        )?;
+                        let omp_preserved = !upstream || (table == "mcp_servers" && version == 23);
+                        assert_eq!(
+                            flags,
+                            (
+                                enabled && omp_preserved,
+                                enabled && upstream,
+                                !enabled,
+                                !enabled
+                            )
+                        );
+                    }
+                }
+                let skill_metadata: (i64, String, i64) = conn.query_row(
+                    "SELECT installed_at, content_hash, updated_at FROM skills WHERE id='enabled'",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )?;
+                assert_eq!(skill_metadata, (123, "kept-hash".into(), 456));
+                let provider: (String, String, bool) = conn.query_row(
+                    "SELECT id, settings_config, is_current FROM providers WHERE app_type='omp'",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )?;
+                assert_eq!(
+                    provider,
+                    (
+                        "existing-omp-id".into(),
+                        "{\"apiKey\":\"kept\"}".into(),
+                        true
+                    )
+                );
+                for (id, expected_cost, expected_tokens) in [
+                    ("session:claude", "12.345678", (100, 20, 70, 15, 1)),
+                    ("codex:kept", "23.456789", (1000, 200, 700, 150, 0)),
+                ] {
+                    let history: (String, i64, i64, i64, i64, i64) = conn.query_row(
+                        "SELECT total_cost_usd, input_tokens, output_tokens, cache_read_tokens,
+                                cache_creation_tokens, input_token_semantics
+                         FROM proxy_request_logs WHERE request_id=?1",
+                        [id],
+                        |row| {
+                            Ok((
+                                row.get(0)?,
+                                row.get(1)?,
+                                row.get(2)?,
+                                row.get(3)?,
+                                row.get(4)?,
+                                row.get(5)?,
+                            ))
+                        },
+                    )?;
+                    assert_eq!(history.0, expected_cost);
+                    assert_eq!(
+                        (history.1, history.2, history.3, history.4, history.5),
+                        expected_tokens
+                    );
+                }
+                let rollup: (i64, i64, i64, i64, i64, String, String) = conn.query_row(
+                    "SELECT request_count, input_tokens, output_tokens, cache_read_tokens,
+                            cache_creation_tokens, total_cost_usd, request_model
+                     FROM usage_daily_rollups WHERE app_type='codex'",
+                    [],
+                    |row| {
+                        Ok((
+                            row.get(0)?,
+                            row.get(1)?,
+                            row.get(2)?,
+                            row.get(3)?,
+                            row.get(4)?,
+                            row.get(5)?,
+                            row.get(6)?,
+                        ))
+                    },
+                )?;
+                assert_eq!(
+                    rollup,
+                    (
+                        42,
+                        1000,
+                        200,
+                        700,
+                        150,
+                        "34.567890".into(),
+                        "requested-codex".into()
+                    )
+                );
+                let codex_cursor: (i64, i64, i64, i64) = conn.query_row(
+                    "SELECT last_modified, last_line_offset, last_byte_offset, last_synced_at
+                     FROM session_log_sync WHERE file_path='/fixture/codex/sessions/rollout.jsonl'",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                )?;
+                assert_eq!(codex_cursor, (654321, 84, 54321, 654321));
+                for id in ["session:claude", "session:pruned"] {
+                    assert!(crate::services::claude_usage_ledger::contains(&conn, id)?);
+                }
+                let codex_dedup: (String, bool) = conn.query_row(
+                    "SELECT semantic_id, has_entry_id FROM session_usage_dedup
+                     WHERE data_source='codex_session' AND request_id='codex:pruned'",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )?;
+                assert_eq!(codex_dedup, ("codex:semantic".into(), true));
+                let snapshot: (i64, i64, i64, bool) = conn.query_row(
+                    "SELECT last_line_offset, last_byte_offset, last_tail_fingerprint, completed
+                     FROM claude_usage_legacy_cursors WHERE file_path='/fixture/.claude/projects/project/existing.jsonl'",
+                    [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                )?;
+                assert_eq!(snapshot, (42, 12345, 876, !upstream));
+                let snapshots: i64 = conn.query_row(
+                    "SELECT COUNT(*) FROM claude_usage_legacy_cursors",
+                    [],
+                    |row| row.get(0),
+                )?;
+                assert_eq!(snapshots, if upstream { 2 } else { 1 });
+                let cutoff: String = conn.query_row(
+                    "SELECT value FROM settings WHERE key='claude_usage_legacy_before'",
+                    [],
+                    |row| row.get(0),
+                )?;
+                assert_eq!(cutoff, expected_cutoff);
             }
         }
         Ok(())

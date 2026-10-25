@@ -9,7 +9,10 @@ import type { AppId } from "@/lib/api";
 import type { ResolvedDirectories } from "@/hooks/useSettings";
 import { ClaudeScanDirectories } from "./ClaudeScanDirectories";
 
-export type DirectoryAppId = Exclude<AppId, "claude-desktop" | "mcode" | "agy">;
+export type DirectoryAppId = Exclude<
+  AppId,
+  "claude-desktop" | "mcode" | "agy" | "kimi"
+>;
 
 interface DirectorySettingsProps {
   appConfigDir?: string;
@@ -207,13 +210,11 @@ export function DirectorySettings({
         />
 
         <DirectoryInput
-          label={t("settings.ompConfigDir", { defaultValue: "OMP 配置目录" })}
+          label={t("settings.ompConfigDir")}
           description={undefined}
           value={ompDir}
           resolvedValue={resolvedDirs.omp}
-          placeholder={t("settings.browsePlaceholderOmp", {
-            defaultValue: "例如：/home/<你的用户名>/.omp/agent",
-          })}
+          placeholder={t("settings.browsePlaceholderOmp")}
           onChange={(val) => onDirectoryChange("omp", val)}
           onBrowse={() => onBrowseDirectory("omp")}
           onReset={() => onResetDirectory("omp")}

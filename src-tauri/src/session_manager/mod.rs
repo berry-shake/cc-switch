@@ -13,7 +13,7 @@ use std::time::Instant;
 
 pub use model::SessionMessage;
 use providers::{
-    agy, claude, codex, gemini, grokbuild, hermes, mcode, omp, openclaw, opencode, pi,
+    agy, claude, codex, gemini, grokbuild, hermes, kimi, mcode, omp, openclaw, opencode, pi,
 };
 
 #[derive(Debug, Clone, Serialize)]
@@ -93,6 +93,7 @@ pub fn scan_sessions() -> Vec<SessionMeta> {
     sessions.extend(r8);
     sessions.extend(r9);
     sessions.extend(mcode::scan_sessions());
+    sessions.extend(kimi::scan_sessions());
     sessions.extend(agy::scan_sessions());
 
     sessions.sort_by(|a, b| {
@@ -137,6 +138,7 @@ pub fn load_messages(provider_id: &str, source_path: &str) -> Result<Vec<Session
         "grokbuild" => grokbuild::load_messages(path),
         "hermes" => hermes::load_messages(path),
         "pi" => pi::load_messages(path),
+        "kimi" => kimi::load_messages(path),
         "omp" => omp::load_messages(path),
         _ => Err(format!("Unsupported provider: {provider_id}")),
     }
@@ -185,6 +187,12 @@ fn delete_session_source(
     session_id: &str,
     source_path: &str,
 ) -> Result<bool, String> {
+    if provider_id == "kimi" {
+        return Err(
+            "Delete this session in Kimi Code to keep its session index and history consistent"
+                .into(),
+        );
+    }
     if provider_id == "agy" {
         return Err(
             "Delete this session in Antigravity to keep its binary store and summaries consistent"
@@ -255,8 +263,9 @@ fn provider_roots(provider_id: &str) -> Result<Vec<PathBuf>, String> {
         "grokbuild" => grokbuild::session_roots(),
         "hermes" => vec![crate::hermes_config::get_hermes_dir().join("sessions")],
         "pi" => pi::session_roots(),
-        "omp" => omp::session_roots(),
+        "kimi" => kimi::session_roots(),
         "agy" => agy::session_roots(),
+        "omp" => omp::session_roots(),
         _ => return Err(format!("Unsupported provider: {provider_id}")),
     };
 

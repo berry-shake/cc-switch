@@ -47,9 +47,10 @@ export const TOOL_NAMES = [
   "openclaw",
   "hermes",
   "pi",
-  "omp",
   "mcode",
+  "kimi",
   "agy",
+  "omp",
 ] as const;
 export type ToolName = (typeof TOOL_NAMES)[number];
 export type ToolLifecycleAction = "install" | "update" | "uninstall";
@@ -123,6 +124,10 @@ const MCODE_WINDOWS_INSTALL_COMMAND = `powershell -NoProfile -ExecutionPolicy By
   "irm https://filecdn.minimax.chat/public/install.ps1 | iex",
 )}`;
 
+const KIMI_WINDOWS_INSTALL_COMMAND = `powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand ${powershellEncodedCommand(
+  "irm https://code.kimi.com/kimi-code/install.ps1 | iex",
+)}`;
+
 const AGY_WINDOWS_INSTALL_COMMAND = `powershell -NoProfile -ExecutionPolicy Bypass -EncodedCommand ${powershellEncodedCommand(
   "irm https://antigravity.google/cli/install.ps1 | iex",
 )}`;
@@ -157,8 +162,12 @@ npm i -g @earendil-works/pi-coding-agent@latest
 npm i -g @oh-my-pi/pi-coding-agent@latest
 # MiniMax Code
 ${posixScriptInstallCommand("https://filecdn.minimax.chat/public/install.sh")} || ${MCODE_NPM_INSTALL_COMMAND}
+# Kimi Code
+${posixScriptInstallCommand("https://code.kimi.com/kimi-code/install.sh")}
 # Antigravity CLI
-${posixScriptInstallCommand("https://antigravity.google/cli/install.sh")}`;
+${posixScriptInstallCommand("https://antigravity.google/cli/install.sh")}
+# Oh My Pi
+bun install -g @oh-my-pi/pi-coding-agent@latest`;
 
 const WINDOWS_ONE_CLICK_INSTALL_COMMANDS = `# Claude Code
 ${CLAUDE_NPM_INSTALL_COMMAND}
@@ -180,8 +189,12 @@ npm i -g @earendil-works/pi-coding-agent@latest
 npm i -g @oh-my-pi/pi-coding-agent@latest
 # MiniMax Code
 ${MCODE_WINDOWS_INSTALL_COMMAND}
+# Kimi Code
+${KIMI_WINDOWS_INSTALL_COMMAND}
 # Antigravity CLI
-${AGY_WINDOWS_INSTALL_COMMAND}`;
+${AGY_WINDOWS_INSTALL_COMMAND}
+# Oh My Pi
+bun install -g @oh-my-pi/pi-coding-agent@latest`;
 
 export const ONE_CLICK_INSTALL_COMMANDS = isWindows()
   ? WINDOWS_ONE_CLICK_INSTALL_COMMANDS
@@ -196,9 +209,10 @@ export const TOOL_DISPLAY_NAMES: Record<ToolName, string> = {
   openclaw: "OpenClaw",
   hermes: "Hermes",
   pi: "Pi",
-  omp: "OMP",
   mcode: "MiniMax Code",
+  kimi: "Kimi Code",
   agy: "Antigravity CLI",
+  omp: "Oh My Pi",
 };
 
 // 后端返回的 tool 是 string；这里收敛唯一的 ToolName 断言与兜底，供升级确认
@@ -216,9 +230,10 @@ export const TOOL_APP_IDS: Record<ToolName, AppId> = {
   openclaw: "openclaw",
   hermes: "hermes",
   pi: "pi",
-  omp: "omp",
   mcode: "mcode",
+  kimi: "kimi",
   agy: "agy",
+  omp: "omp",
 };
 
 // 工具版本探测代价高：每个工具一次 `--version` 子进程 + 一次 npm/github/pypi 网络请求。

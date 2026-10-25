@@ -23,6 +23,8 @@ mod grok_config;
 pub mod hermes_config;
 mod init_status;
 mod jsonc_document;
+mod kimi_config;
+mod kimi_session;
 mod lightweight;
 #[cfg(target_os = "linux")]
 mod linux_fix;
@@ -973,10 +975,10 @@ pub fn run() {
             }
             match crate::services::provider::import_omp_providers_from_live(&app_state) {
                 Ok(count) if count > 0 => {
-                    log::info!("✓ Synced {count} OMP provider(s) from native config");
+                    log::info!("✓ Synced {count} Oh My Pi provider(s) from native config");
                 }
-                Ok(_) => log::debug!("○ No OMP provider changes from native config"),
-                Err(e) => log::warn!("✗ Failed to import OMP providers: {e}"),
+                Ok(_) => log::debug!("○ No Oh My Pi provider changes from native config"),
+                Err(e) => log::warn!("✗ Failed to import Oh My Pi providers: {e}"),
             }
 
             // 2. OMO 配置导入（当数据库中无 OMO provider 时，从本地文件导入）
@@ -1277,6 +1279,7 @@ pub fn run() {
             );
             // 将同一个实例注入到全局状态，避免重复创建导致的不一致
             app.manage(app_state);
+            app.manage(services::kimi_oauth::KimiOAuthManager::default());
 
             // 初始化 SkillService
             let skill_service = SkillService::new();
@@ -1528,6 +1531,7 @@ pub fn run() {
             commands::update_provider,
             commands::get_provider_editor_view,
             commands::delete_provider,
+            commands::add_provider_to_live_config,
             commands::remove_provider_from_live_config,
             commands::switch_provider,
             commands::import_default_config,
@@ -1642,9 +1646,8 @@ pub fn run() {
             commands::get_pi_current_state,
             commands::update_pi_provider_usage_script,
             commands::get_pi_session_discovery,
-            // OMP native provider view
+            // Oh My Pi native provider and session views
             commands::get_omp_current_state,
-            commands::update_omp_provider_usage_script,
             commands::get_omp_session_discovery,
             // Profile management (项目配置方案)
             commands::list_profiles,
@@ -1894,6 +1897,14 @@ pub fn run() {
             commands::auth_logout,
             commands::agy_account_is_running,
             commands::agy_account_quota,
+            commands::kimi_oauth_status,
+            commands::kimi_oauth_start,
+            commands::kimi_oauth_poll,
+            commands::kimi_oauth_cancel,
+            commands::kimi_oauth_remove,
+            commands::kimi_oauth_quota,
+            commands::kimi_oauth_use_account,
+            commands::kimi_oauth_models,
             // Copilot OAuth commands (multi-account support)
             commands::copilot_start_device_flow,
             commands::copilot_poll_for_auth,

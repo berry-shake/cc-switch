@@ -83,8 +83,8 @@ describe("Pi prompts page", () => {
       displayPath: "~/.pi/agent/AGENTS.md",
     });
     vi.spyOn(promptsApi, "getPrompts").mockResolvedValue({});
-    vi.spyOn(promptsApi, "listPiPromptTemplates").mockResolvedValue([]);
-    vi.spyOn(promptsApi, "getPiPromptFile").mockResolvedValue({
+    vi.spyOn(promptsApi, "listNativePromptTemplates").mockResolvedValue([]);
+    vi.spyOn(promptsApi, "getNativePromptFile").mockResolvedValue({
       exists: false,
       revision: "missing",
       content: "",

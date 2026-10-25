@@ -17,7 +17,7 @@ import {
   providersApi,
   vscodeApi,
   type AppId,
-  type ManagedAuthProvider,
+  type AuthCenterTarget,
 } from "@/lib/api";
 import type {
   EditorConflictPolicy,
@@ -26,7 +26,7 @@ import type {
 } from "@/lib/api/providers";
 import { useLiveEditConflict } from "@/components/providers/LiveEditConflictDialog";
 import { toastEditorViewFailed } from "@/components/providers/forms/hooks/useDraftEditorProjection";
-import { usesEditorView } from "@/config/appConfig";
+import { isPiFamilyApp, usesEditorView } from "@/config/appConfig";
 
 interface EditProviderDialogProps {
   open: boolean;
@@ -79,8 +79,7 @@ export function EditProviderDialog({
   // 表单用了聚合的简化布局：页头应用名后标「聚合模式」
   const [stackLayout, setStackLayout] = useState(false);
   const [authSettingsTarget, setAuthSettingsTarget] =
-    useState<ManagedAuthProvider | null>(null);
-  const isNativeModelApp = appId === "pi" || appId === "omp";
+    useState<AuthCenterTarget | null>(null);
 
   useEffect(() => {
     setAuthSettingsTarget(null);
@@ -94,12 +93,12 @@ export function EditProviderDialog({
   currentFormReadyToken.current = formReadyToken;
   const [formReadyState, setFormReadyState] = useState({
     token: formReadyToken,
-    ready: !isNativeModelApp,
+    ready: !isPiFamilyApp(appId),
   });
   const isFormReady =
     formReadyState.token === formReadyToken
       ? formReadyState.ready
-      : !isNativeModelApp;
+      : !isPiFamilyApp(appId);
   const handleSubmitReadyChange = useCallback(
     (ready: boolean) => {
       if (currentFormReadyToken.current === formReadyToken) {
@@ -190,10 +189,16 @@ export function EditProviderDialog({
         return;
       }
 
-      // OpenCode uses additive mode, while Pi's shared models.json is owned by
-      // the catalog coordinator. Neither has a per-provider generic live
-      // snapshot that may replace the DB aggregate in this form.
-      if (appId === "opencode" || isNativeModelApp || appId === "mcode") {
+      // OpenCode uses additive mode, while Pi's (and Oh My Pi's) native models
+      // file is owned by its provider service. Neither has a per-provider generic
+      // live snapshot that may replace the DB aggregate in this form.
+      if (
+        appId === "opencode" ||
+        appId === "pi" ||
+        appId === "mcode" ||
+        appId === "kimi" ||
+        appId === "omp"
+      ) {
         if (!cancelled) {
           setLiveSettings(null);
           setHasLoadedLive(true);
@@ -291,7 +296,9 @@ export function EditProviderDialog({
         unknown
       >;
       const nextProviderId =
-        (appId === "opencode" || appId === "openclaw" || isNativeModelApp) &&
+        (appId === "opencode" ||
+          appId === "openclaw" ||
+          isPiFamilyApp(appId)) &&
         values.providerKey?.trim()
           ? values.providerKey.trim()
           : provider.id;
@@ -374,7 +381,7 @@ export function EditProviderDialog({
       }
       backLabel={t("provider.backToList")}
       onClose={handlePanelClose}
-      contentClassName={isNativeModelApp ? "pb-0 pt-4" : "pt-4"}
+      contentClassName={isPiFamilyApp(appId) ? "pb-0 pt-4" : "pt-4"}
       footer={
         <>
           <Button

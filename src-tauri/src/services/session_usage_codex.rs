@@ -5390,6 +5390,19 @@ mod tests {
         supported
     }
 
+    /// 缓存是进程级的，`serial` 只互斥带标记的测试：不带标记的测试（如续写页
+    /// 解析会经 `load_parent_timeline` 缓存前序页）可能同时写入别的条目。
+    /// 数条目时只数本测试临时目录下的键，不数全局总数。
+    fn cached_parent_timelines_under(dir: &Path) -> usize {
+        replay_caches()
+            .lock()
+            .unwrap()
+            .parent_timelines
+            .keys()
+            .filter(|path| path.starts_with(dir))
+            .count()
+    }
+
     #[test]
     #[serial_test::serial]
     fn test_parent_malformed_lines_defer_child_until_repaired() -> Result<(), AppError> {
@@ -5490,16 +5503,16 @@ mod tests {
         });
         assert_eq!(parent_signatures_before(&parent, late).unwrap().len(), 2);
 
-        let caches = replay_caches().lock().unwrap();
         match first_timeline {
             Some(first_timeline) => {
-                assert_eq!(caches.parent_timelines.len(), 1);
+                assert_eq!(cached_parent_timelines_under(temp.path()), 1);
+                let caches = replay_caches().lock().unwrap();
                 assert!(Arc::ptr_eq(
                     &first_timeline,
                     &caches.parent_timelines[&parent].timeline
                 ));
             }
-            None => assert!(caches.parent_timelines.is_empty()),
+            None => assert_eq!(cached_parent_timelines_under(temp.path()), 0),
         }
         Ok(())
     }
@@ -5533,10 +5546,7 @@ mod tests {
         assert_eq!(parent_signatures_before(&parent, cutoff).unwrap().len(), 2);
 
         let expected_entries = usize::from(parent_cache_supported(&parent));
-        assert_eq!(
-            replay_caches().lock().unwrap().parent_timelines.len(),
-            expected_entries
-        );
+        assert_eq!(cached_parent_timelines_under(temp.path()), expected_entries);
         Ok(())
     }
 
@@ -5603,10 +5613,7 @@ mod tests {
             .is_empty());
         assert_eq!(parent_signatures_before(&parent, after).unwrap().len(), 1);
         let expected_entries = usize::from(parent_cache_supported(&parent));
-        assert_eq!(
-            replay_caches().lock().unwrap().parent_timelines.len(),
-            expected_entries
-        );
+        assert_eq!(cached_parent_timelines_under(temp.path()), expected_entries);
     }
 
     #[cfg(any(unix, windows))]

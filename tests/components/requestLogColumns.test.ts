@@ -1,28 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
-  REQUEST_LOG_COLUMNS,
+  requestLogGroupBreaks,
+  requestLogPinnedStart,
   resolveRequestLogColumns,
   setRequestLogColumn,
-  TOGGLEABLE_REQUEST_LOG_COLUMNS,
 } from "@/components/usage/requestLogColumns";
 
 describe("request log columns", () => {
-  it("keeps cache write visible and ordered before cache read and output", () => {
-    expect(resolveRequestLogColumns(undefined)).toEqual([
-      "time",
-      "app",
-      "provider",
-      "model",
-      "freshInput",
-      "cacheWrite",
-      "cacheRead",
-      "output",
-      "cost",
-      "speed",
-      "firstToken",
-    ]);
-  });
-
   it("applies overrides in table order, keeps time, ignores unknown ids", () => {
     expect(
       resolveRequestLogColumns({
@@ -35,21 +19,38 @@ describe("request log columns", () => {
       "time",
       "provider",
       "model",
+      "cost",
       "freshInput",
       "cacheWrite",
       "cacheRead",
       "output",
-      "cost",
       "speed",
       "firstToken",
       "statusCode",
     ]);
-    expect(TOGGLEABLE_REQUEST_LOG_COLUMNS.map((c) => c.id)).not.toContain(
+  });
+
+  it("breaks groups at the first shown column of each group", () => {
+    expect([
+      ...requestLogGroupBreaks([
+        "time",
+        "model",
+        "cost",
+        "output",
+        "cacheRead",
+        "firstToken",
+      ]),
+    ]).toEqual(["cost", "output", "firstToken"]);
+    expect(requestLogGroupBreaks(["time", "app"]).size).toBe(0);
+  });
+
+  it("pins time and app when they lead the table, and only time when app is hidden", () => {
+    expect(requestLogPinnedStart(["time", "app", "provider", "model"])).toEqual(
+      ["time", "app"],
+    );
+    expect(requestLogPinnedStart(["time", "provider", "app"])).toEqual([
       "time",
-    );
-    expect(TOGGLEABLE_REQUEST_LOG_COLUMNS).toHaveLength(
-      REQUEST_LOG_COLUMNS.length - 1,
-    );
+    ]);
   });
 
   it("stores only columns that differ from their default", () => {
