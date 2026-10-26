@@ -166,8 +166,8 @@ function AnalyticsDataQualityNotice({
     >
       <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
       <div className="min-w-0">
-        <div className="text-xs font-semibold">{title}</div>
-        <div className="mt-0.5 text-[11px] leading-relaxed text-amber-900/75 dark:text-amber-100/75">
+        <div className="text-caption font-semibold">{title}</div>
+        <div className="mt-0.5 text-badge leading-relaxed text-amber-900/75 dark:text-amber-100/75">
           {description}
         </div>
       </div>
@@ -239,10 +239,10 @@ function CapacityRing({
         />
       </svg>
       <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-        <span className="text-4xl font-black tabular-nums tracking-tight">
+        <span className="text-metric font-semibold tabular-nums tracking-tight">
           {utilizationPercent == null ? "—" : formatPercent(utilizationPercent)}
         </span>
-        <span className="mt-1 text-[11px] font-medium text-muted-foreground">
+        <span className="mt-1 text-badge font-medium text-muted-foreground">
           {usedLabel} · {detailLabel}
         </span>
       </div>
@@ -513,11 +513,11 @@ export function CodexCycleCapacityCard({
                   className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-0.5"
                   data-testid="codex-capacity-identity-line"
                 >
-                  <h3 className="shrink-0 text-base font-semibold tracking-tight">
+                  <h3 className="shrink-0 text-section tracking-tight">
                     {titleLabel}
                   </h3>
                   {normalizedEmail ? (
-                    <div className="flex min-w-0 items-center gap-1.5 border-l border-border/60 pl-2.5 text-[11px] text-muted-foreground">
+                    <div className="flex min-w-0 items-center gap-1.5 border-l border-border/60 pl-2.5 text-badge text-muted-foreground">
                       <Mail className="h-3.5 w-3.5 shrink-0" />
                       <span className="sr-only">
                         {t("usage.cycleCapacity.accountEmail", "邮箱")}:
@@ -532,7 +532,7 @@ export function CodexCycleCapacityCard({
                   ) : null}
                 </div>
                 <div
-                  className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-0.5 text-[11px] text-muted-foreground"
+                  className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-0.5 text-badge text-muted-foreground"
                   data-testid="codex-capacity-timing-line"
                 >
                   <div className="flex min-w-0 items-center gap-1.5">
@@ -561,7 +561,7 @@ export function CodexCycleCapacityCard({
 
             <div className="flex shrink-0 flex-wrap items-center gap-1.5 sm:justify-end">
               <div
-                className="flex min-w-0 flex-1 items-center gap-1.5 rounded-lg border border-border/40 bg-background/40 px-2.5 py-1.5 text-[10px] leading-tight text-muted-foreground sm:flex-none"
+                className="flex min-w-0 flex-1 items-center gap-1.5 rounded-lg border border-border/40 bg-background/40 px-2.5 py-1.5 text-badge leading-tight text-muted-foreground sm:flex-none"
                 aria-label={basisLabel}
                 title={basisLabel}
               >
@@ -600,7 +600,7 @@ export function CodexCycleCapacityCard({
                       role="radio"
                       aria-checked={effectiveMode === mode}
                       className={cn(
-                        "h-7 rounded-md px-3 text-[11px] shadow-none transition-none",
+                        "h-7 rounded-md px-3 text-badge shadow-none transition-none",
                         effectiveMode === mode
                           ? "bg-background font-semibold text-foreground shadow-sm hover:bg-background"
                           : "text-muted-foreground hover:text-foreground",
@@ -617,7 +617,7 @@ export function CodexCycleCapacityCard({
                   type="button"
                   variant="outline"
                   size="sm"
-                  className="h-8 shrink-0 gap-1.5 px-2.5 text-[11px]"
+                  className="h-8 shrink-0 gap-1.5 px-2.5 text-badge"
                   disabled={isRefreshingAnalytics}
                   aria-label={t("common.refresh", "刷新")}
                   title={t("common.refresh", "刷新")}
@@ -664,7 +664,7 @@ export function CodexCycleCapacityCard({
             {effectiveMode === "analytics" && analyticsUnavailable ? (
               <div
                 role="status"
-                className="mt-4 rounded-lg border border-amber-500/25 bg-amber-500/[0.07] p-3 text-xs"
+                className="mt-4 rounded-lg border border-amber-500/25 bg-amber-500/[0.07] p-3 text-caption"
                 data-testid="codex-analytics-unavailable"
               >
                 {t(
@@ -776,10 +776,10 @@ export function CodexCycleCapacityCard({
                       >
                         <Clock3 className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
                         <div className="min-w-0">
-                          <div className="text-sm font-semibold text-foreground">
+                          <div className="text-strong font-semibold text-foreground">
                             {waitingTitle}
                           </div>
-                          <div className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground">
+                          <div className="mt-0.5 text-badge leading-relaxed text-muted-foreground">
                             {waitingDescription}
                           </div>
                         </div>
@@ -902,7 +902,7 @@ export function CodexCycleCapacityCard({
               />
             ) : null}
 
-            <div className="mt-4 flex items-start gap-2 rounded-lg bg-muted/30 px-3 py-2 text-[10px] leading-relaxed text-muted-foreground">
+            <div className="mt-4 flex items-start gap-2 rounded-lg bg-muted/30 px-3 py-2 text-badge leading-relaxed text-muted-foreground">
               <CircleDollarSign className="mt-0.5 h-3.5 w-3.5 shrink-0" />
               <span>
                 {disclaimer}

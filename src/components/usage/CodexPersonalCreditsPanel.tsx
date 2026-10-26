@@ -82,7 +82,7 @@ export function CodexPersonalCreditsPanel({
       {data.totalsStatus !== "available" ? (
         <p
           role="status"
-          className="text-xs text-amber-600"
+          className="text-caption text-amber-600"
           data-testid="credits-totals-warning"
         >
           {data.totalsStatus === "invalid"
@@ -99,7 +99,7 @@ export function CodexPersonalCreditsPanel({
       {stats &&
       (stats.missingCreditDates.length > 0 ||
         stats.missingTokenDates.length > 0) ? (
-        <p role="status" className="text-xs text-amber-600">
+        <p role="status" className="text-caption text-amber-600">
           {partial}{" "}
           {[
             ...new Set([
@@ -110,7 +110,7 @@ export function CodexPersonalCreditsPanel({
         </p>
       ) : null}
       {stats && stats.boundaryDates.length > 0 ? (
-        <p role="status" className="text-xs text-amber-600">
+        <p role="status" className="text-caption text-amber-600">
           {t(
             "usage.personalCredits.boundary",
             "周期边界日计入整日数据，可能包含周期外消耗：",
@@ -126,7 +126,7 @@ export function CodexPersonalCreditsPanel({
           <CapacityMetric key={metric.label} {...metric} />
         ))}
       </div>
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-[11px] text-muted-foreground">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-badge text-muted-foreground">
         <span
           data-testid="codex-personal-credits-total"
           className="tabular-nums"
@@ -151,7 +151,7 @@ export function CodexPersonalCreditsPanel({
             max="1000000000"
             step="any"
             value={rateText}
-            className="h-6 w-20 px-2 text-xs tabular-nums"
+            className="h-6 w-20 px-2 text-caption tabular-nums"
             aria-label={t(
               "usage.personalCredits.rate",
               "换算系数：每 1 USD 对应 Credits",
@@ -167,7 +167,7 @@ export function CodexPersonalCreditsPanel({
         </span>
       </div>
       {rate == null ? (
-        <p role="alert" className="text-xs text-amber-600">
+        <p role="alert" className="text-caption text-amber-600">
           {t(
             "usage.personalCredits.invalidRate",
             "请输入大于 0 且不超过 1,000,000,000 的换算系数。",

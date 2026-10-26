@@ -118,13 +118,13 @@ function ForecastMetric({
       data-prominence={primary ? "primary" : "secondary"}
       data-tone={tone}
     >
-      <dt className="text-[11px] font-medium leading-snug text-muted-foreground">
+      <dt className="text-badge font-medium leading-snug text-muted-foreground">
         {label}
       </dt>
       <dd
         className={cn(
           "mt-2 flex flex-1 flex-col break-words font-bold leading-snug tabular-nums tracking-tight",
-          primary ? "text-xl md:text-2xl" : "text-base",
+          primary ? "text-metric" : "text-strong",
           FORECAST_METRIC_VALUE_CLASS[tone],
           valueClassName,
         )}
@@ -184,12 +184,12 @@ function ForecastDetail({
       data-prominence="secondary"
       data-tone={tone}
     >
-      <dt className="text-[11px] font-medium leading-snug text-muted-foreground">
+      <dt className="text-badge font-medium leading-snug text-muted-foreground">
         {label}
       </dt>
       <dd
         className={cn(
-          "mt-1.5 break-words text-sm font-semibold leading-snug tabular-nums",
+          "mt-1.5 break-words text-strong font-semibold leading-snug tabular-nums",
           FORECAST_METRIC_VALUE_CLASS[tone],
           valueClassName,
         )}
@@ -356,7 +356,7 @@ function CodexCycleForecastWaitingPanel({
           <div className="rounded-xl bg-muted/70 p-2.5 text-muted-foreground">
             <Activity className="h-5 w-5" />
           </div>
-          <h4 className="text-base font-semibold tracking-tight">
+          <h4 className="text-strong font-semibold tracking-tight">
             {t("usage.cycleCapacity.currentStatus", "当前状态")}
           </h4>
         </div>
@@ -484,7 +484,7 @@ function CodexCycleForecastWaitingPanel({
                 "周期计划重置时间",
               )}
               value={formatDateTime(resetAtMs, locale)}
-              valueClassName="text-base"
+              valueClassName="text-strong"
             />
             <ForecastDetail
               metricId="remaining-to-reset"
@@ -493,7 +493,7 @@ function CodexCycleForecastWaitingPanel({
                 "预测时点至重置的剩余时间",
               )}
               value={remaining}
-              valueClassName="text-base"
+              valueClassName="text-strong"
             />
           </dl>
         </div>
@@ -616,7 +616,7 @@ export function CodexCycleForecastPanel({
           <div className={cn("rounded-xl p-2.5", status.iconClassName)}>
             <Activity className="h-5 w-5" />
           </div>
-          <h4 className="text-base font-semibold tracking-tight">
+          <h4 className="text-strong font-semibold tracking-tight">
             {t("usage.cycleCapacity.currentStatus", "当前状态")}
           </h4>
         </div>
@@ -767,7 +767,7 @@ export function CodexCycleForecastPanel({
                 "周期计划重置时间",
               )}
               value={formatDateTime(resetAtMs, locale)}
-              valueClassName="text-base"
+              valueClassName="text-strong"
             />
             <ForecastDetail
               metricId="remaining-to-reset"
@@ -776,7 +776,7 @@ export function CodexCycleForecastPanel({
                 "预测时点至重置的剩余时间",
               )}
               value={remaining}
-              valueClassName="text-base"
+              valueClassName="text-strong"
             />
           </dl>
         </div>

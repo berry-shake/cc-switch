@@ -21,12 +21,12 @@ export function CapacityMetric({
           "border-emerald-500/20 bg-emerald-500/[0.045] dark:bg-emerald-500/[0.07]",
       )}
     >
-      <div className="mb-1.5 text-[11px] font-medium leading-snug text-muted-foreground">
+      <div className="mb-1.5 text-badge font-medium leading-snug text-muted-foreground">
         {label}
       </div>
       <div
         className={cn(
-          "truncate text-lg font-bold tabular-nums tracking-tight",
+          "truncate text-title font-semibold tabular-nums tracking-tight",
           emphasized && "text-emerald-600 dark:text-emerald-400",
         )}
         title={title ?? value}
