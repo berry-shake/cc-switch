@@ -141,3 +141,14 @@ export interface CodexOfficialUsageSnapshot extends CodexQuotaSnapshot {
   analyticsUnavailable?: boolean;
   queriedAt: number;
 }
+
+/** Claude 账号的套餐：Claude Code 记在凭据里（`subscriptionType` / `rateLimitTier`） */
+export interface ClaudeAccountPlan {
+  subscriptionType: string | null;
+  rateLimitTier: string | null;
+}
+
+/** 绑号卡的额度，带上这个号的套餐（读不到时缺省） */
+export interface ClaudeAccountQuota extends SubscriptionQuota {
+  plan?: ClaudeAccountPlan | null;
+}
