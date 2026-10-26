@@ -1,10 +1,13 @@
 import { useCallback, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 
+import { Button } from "@/components/ui/button";
 import { subscriptionApi } from "@/lib/api/subscription";
 import { usageApi } from "@/lib/api/usage";
 import { resolveCodexQuotaCycle } from "@/lib/codexCycleCapacity";
 import {
+  persistCodexCycleCapacityMode,
   readCodexCycleCapacityMode,
   type CodexCycleCapacityCalculationMode,
 } from "@/lib/codexCycleCapacityMode";
@@ -31,13 +34,16 @@ export interface CodexCycleCapacitySectionProps {
  * 本机 JSONL 用量属于当前 Codex CLI 账号，因此额度也只从同一份
  * `~/.codex/auth.json` 凭据查询，不与 cc-switch 托管的其他 OAuth 账号混算。
  * 这里故意直接读取原始 react-query 状态，不使用订阅卡片的 keep-last-good：
- * 最新请求 reject 或 HTTP 错误映射为 success=false 时，入口保持隐藏；接口
- * 成功但周期刚重置、比例尚未同步或用量暂为空时，则保留卡片并显示等待状态。
+ * 最新请求 reject 或 HTTP 错误映射为 success=false 时不展示陈旧容量数字，
+ * 但入口本身保留为错误状态（可重试、可切换估算方式），避免整块消失后
+ * 用户既看不到问题也找不回模式开关；接口成功但周期刚重置、比例尚未同步
+ * 或用量暂为空时，则保留卡片并显示等待状态。
  */
 export function CodexCycleCapacitySection({
   enabled,
   refreshIntervalMs = DEFAULT_USAGE_REFRESH_INTERVAL_MS,
 }: CodexCycleCapacitySectionProps) {
+  const { t } = useTranslation();
   const autoRefresh = refreshIntervalMs > 0;
   const [calculationMode, setCalculationMode] = useState(
     readCodexCycleCapacityMode,
@@ -140,12 +146,72 @@ export function CodexCycleCapacitySection({
     [officialQuery.isFetching, officialQuery.isStale, refreshAnalytics],
   );
 
+  const retryQuota = useCallback(() => {
+    void Promise.all([localQuotaQuery.refetch(), officialQuery.refetch()]);
+  }, [localQuotaQuery, officialQuery]);
+
+  const switchCalculationMode = useCallback(
+    (mode: CodexCycleCapacityCalculationMode) => {
+      persistCodexCycleCapacityMode(mode);
+      handleCalculationModeChange(mode);
+    },
+    [handleCalculationModeChange],
+  );
+
   const analyticsUsage =
     officialQuery.isSuccess &&
     officialQuery.data.credentialScope === activeSnapshot?.credentialScope
       ? officialQuery.data.analytics
       : null;
-  if (!enabled || !activeSnapshot || !quota?.success) return null;
+  if (!enabled) return null;
+  if (!activeSnapshot || !quota?.success) {
+    // 失败时保留入口本身：只隐藏具体数字，避免整块消失后连模式开关都找不回。
+    const alternate: CodexCycleCapacityCalculationMode =
+      calculationMode === "analytics" ? "local" : "analytics";
+    return (
+      <section
+        className="rounded-xl border border-border/60 bg-card px-4 py-3"
+        data-testid="capacity-unavailable"
+      >
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm font-medium">
+              {t("usage.cycleCapacity.title", "Codex 周期等效容量（估算）")}
+            </span>
+            <span className="text-xs text-muted-foreground">
+              {t("usage.cycleCapacity.quotaUnavailable", "额度查询失败")}
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              data-testid="capacity-switch-mode"
+              onClick={() => switchCalculationMode(alternate)}
+            >
+              {alternate === "local"
+                ? t("usage.cycleCapacity.localCalculation", "本地日志")
+                : t("usage.cycleCapacity.analyticsCalculation", "官方接口")}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              data-testid="capacity-retry"
+              onClick={retryQuota}
+            >
+              {t("usage.cycleCapacity.retry", "重试")}
+            </Button>
+          </div>
+        </div>
+        <p className="mt-2 text-xs leading-5 text-muted-foreground">
+          {t(
+            "usage.cycleCapacity.quotaUnavailableHint",
+            "Codex 登录可能已过期或网络不可用。请在终端运行 codex login 后重试。",
+          )}
+        </p>
+      </section>
+    );
+  }
 
   return (
     <CodexCycleCapacityCard

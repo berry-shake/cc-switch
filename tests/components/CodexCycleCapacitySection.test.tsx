@@ -460,7 +460,7 @@ describe("CodexCycleCapacitySection", () => {
     ).toBe(false);
   });
 
-  it("hides stale official data when the atomic refresh rejects", () => {
+  it("keeps a retryable entry when the atomic refresh rejects", () => {
     window.localStorage.setItem(
       CODEX_CYCLE_CAPACITY_MODE_STORAGE_KEY,
       "analytics",
@@ -468,7 +468,37 @@ describe("CodexCycleCapacitySection", () => {
     installQueries({ officialSuccess: false });
     render(<CodexCycleCapacitySection enabled />);
 
+    // 失败时不展示陈旧数字，但入口、模式开关和重试都必须留在页面上。
     expect(screen.queryByTestId("capacity-entry")).not.toBeInTheDocument();
+    expect(screen.getByTestId("capacity-unavailable")).toBeInTheDocument();
+    expect(screen.getByText(/codex login/)).toBeInTheDocument();
     expect(loadQuotaSamplesMock).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByTestId("capacity-retry"));
+    expect(officialRefetchMock).toHaveBeenCalled();
+    expect(localRefetchMock).toHaveBeenCalled();
+  });
+
+  it("keeps the entry when both quota sources fail", () => {
+    installQueries({ localSuccess: false, officialSuccess: false });
+    render(<CodexCycleCapacitySection enabled />);
+
+    expect(screen.getByTestId("capacity-unavailable")).toBeInTheDocument();
+  });
+
+  it("switches estimation mode from the failure entry", () => {
+    window.localStorage.setItem(
+      CODEX_CYCLE_CAPACITY_MODE_STORAGE_KEY,
+      "analytics",
+    );
+    installQueries({ officialSuccess: false });
+    render(<CodexCycleCapacitySection enabled />);
+
+    fireEvent.click(screen.getByTestId("capacity-switch-mode"));
+
+    expect(
+      window.localStorage.getItem(CODEX_CYCLE_CAPACITY_MODE_STORAGE_KEY),
+    ).toBe("local");
+    expect(screen.getByTestId("capacity-entry")).toBeInTheDocument();
   });
 });
