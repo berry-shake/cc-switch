@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Merged the official upstream `v4.0.21` release into `mod`. Retained the fork's independent Oh My Pi integration, Claude additional configuration directories, Codex capacity/forecast usage, and durable usage deduplication.
 - Kept OMP usage discovery limited to project-level parent sessions; upstream's `models.yml` anchor fix and the Codex compaction-usage compensation are both in effect.
+- **Codex capacity lives under the Codex tab.** The capacity card (and its forecast) no longer appears in the all-apps usage view; switch to the Codex app tab to see it.
 - **Codex capacity stays visible when quota lookup fails.** An expired Codex login or a failed official/API call no longer removes the whole entry: the card keeps its title, a retry action and the local/official mode switch, and explains that `codex login` may be needed. Stale capacity numbers are still never shown.
 - **Fork database schema stays 24.** Upstream v4.0.21 does not change the schema (upstream 23); no migration is added. Existing data, flags, cursors and costs are unchanged. Rollback still requires restoring the matching pre-upgrade database with the old application.
 - Local macOS arm64 builds use ad-hoc signing, without Apple notarization.

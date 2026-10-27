@@ -957,7 +957,7 @@ export function UsageDashboard({
     >
       {overviewPanel}
       <CodexCycleCapacitySection
-        enabled={appType === "all" || appType === "codex"}
+        enabled={appType === "codex"}
         refreshIntervalMs={refreshIntervalMs}
       />
       {detailPanel}

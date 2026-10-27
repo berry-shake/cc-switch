@@ -228,6 +228,19 @@ describe("UsageDashboard", () => {
     });
   });
 
+  it("shows the Codex capacity entry only in the Codex tab", () => {
+    const all = renderDashboard();
+    expect(cycleCapacitySectionMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({ enabled: false }),
+    );
+    all.unmount();
+
+    renderDashboard({ initialAppType: "codex" });
+    expect(cycleCapacitySectionMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({ enabled: true }),
+    );
+  });
+
   it("swaps the trend chart for the heatmap on the all-time range", async () => {
     const user = userEvent.setup();
     renderDashboard();

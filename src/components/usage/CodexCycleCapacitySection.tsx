@@ -23,7 +23,7 @@ const QUOTA_REFRESH_INTERVAL_MS = 60 * 60 * 1000;
 const DEFAULT_USAGE_REFRESH_INTERVAL_MS = 30 * 1000;
 
 export interface CodexCycleCapacitySectionProps {
-  /** 入口只在「全部」或 Codex 统计上下文中启用。 */
+  /** 入口只在 Codex 统计上下文中启用；「全部」视图不显示。 */
   enabled: boolean;
   refreshIntervalMs?: number;
 }
