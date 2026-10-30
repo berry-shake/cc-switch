@@ -201,6 +201,10 @@ export const settingsApi = {
     });
   },
 
+  async webdavSyncClearSettings(): Promise<{ success: boolean }> {
+    return await invoke("webdav_sync_clear_settings");
+  },
+
   async webdavSyncFetchRemoteInfo(): Promise<
     RemoteSnapshotInfo | { empty: true }
   > {

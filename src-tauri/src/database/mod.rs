@@ -51,7 +51,10 @@ use std::sync::Mutex;
 
 /// 当前 Schema 版本号
 /// 每次修改表结构时递增，并在 schema.rs 中添加相应的迁移逻辑
-pub(crate) const SCHEMA_VERSION: i32 = 24;
+// Fork 24 already carried OMP/Kimi flags and the Claude ledger when upstream
+// settled on its own v24 (DeepSeek Harness + parser_state). Fork 25 is the
+// merge of both layouts.
+pub(crate) const SCHEMA_VERSION: i32 = 25;
 
 /// 安全地序列化 JSON，避免 unwrap panic
 pub(crate) fn to_json_string<T: Serialize>(value: &T) -> Result<String, AppError> {

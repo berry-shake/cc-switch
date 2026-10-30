@@ -49,6 +49,7 @@ export const TOOL_NAMES = [
   "pi",
   "mcode",
   "kimi",
+  "dsh",
   "agy",
   "omp",
 ] as const;
@@ -172,6 +173,8 @@ npm i -g @earendil-works/pi-coding-agent@latest
 npm i -g @oh-my-pi/pi-coding-agent@latest
 # MiniMax Code
 ${posixScriptInstallCommand("https://filecdn.minimax.chat/public/install.sh")} || ${MCODE_NPM_INSTALL_COMMAND}
+# DeepSeek Harness
+npm i -g @deepseek-ai/dsh@latest --engine-strict
 # Kimi Code
 ${posixScriptInstallCommand("https://code.kimi.com/kimi-code/install.sh")}
 # Antigravity CLI
@@ -199,6 +202,8 @@ npm i -g @earendil-works/pi-coding-agent@latest
 npm i -g @oh-my-pi/pi-coding-agent@latest
 # MiniMax Code
 ${MCODE_WINDOWS_INSTALL_COMMAND}
+# DeepSeek Harness
+npm i -g @deepseek-ai/dsh@latest --engine-strict
 # Kimi Code
 ${KIMI_WINDOWS_INSTALL_COMMAND}
 # Antigravity CLI
@@ -221,6 +226,7 @@ export const TOOL_DISPLAY_NAMES: Record<ToolName, string> = {
   pi: "Pi",
   mcode: "MiniMax Code",
   kimi: "Kimi Code",
+  dsh: "DeepSeek Harness",
   agy: "Antigravity CLI",
   omp: "Oh My Pi",
 };
@@ -242,6 +248,7 @@ export const TOOL_APP_IDS: Record<ToolName, AppId> = {
   pi: "pi",
   mcode: "mcode",
   kimi: "kimi",
+  dsh: "dsh",
   agy: "agy",
   omp: "omp",
 };

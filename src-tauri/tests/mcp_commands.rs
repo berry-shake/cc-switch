@@ -762,6 +762,7 @@ command = "echo"
                 omp: false,
                 mcode: false,
                 kimi: false,
+                dsh: false,
                 pi: false,
             },
             description: None,
@@ -912,6 +913,7 @@ fn set_mcp_enabled_for_codex_writes_live_config() {
                 omp: false,
                 mcode: false,
                 kimi: false,
+                dsh: false,
                 pi: false,
             },
             description: None,
@@ -983,6 +985,7 @@ fn enabling_codex_mcp_skips_when_codex_dir_missing() {
                 omp: false,
                 mcode: false,
                 kimi: false,
+                dsh: false,
                 pi: false,
             },
             description: None,
@@ -1034,6 +1037,7 @@ fn upsert_mcp_server_disabling_app_removes_from_claude_live_config() {
                 omp: false,
                 mcode: false,
                 kimi: false,
+                dsh: false,
                 pi: false,
             },
             description: None,
@@ -1074,6 +1078,7 @@ fn upsert_mcp_server_disabling_app_removes_from_claude_live_config() {
                 omp: false,
                 mcode: false,
                 kimi: false,
+                dsh: false,
                 pi: false,
             },
             description: None,
@@ -1260,6 +1265,7 @@ fn enabling_gemini_mcp_skips_when_gemini_dir_missing() {
                 omp: false,
                 mcode: false,
                 kimi: false,
+                dsh: false,
                 pi: false,
             },
             description: None,
@@ -1321,6 +1327,7 @@ fn enabling_claude_mcp_skips_when_claude_config_absent() {
                 omp: false,
                 mcode: false,
                 kimi: false,
+                dsh: false,
                 pi: false,
             },
             description: None,
@@ -1382,6 +1389,7 @@ fn explicit_default_claude_dir_keeps_default_split_mcp_path() {
                 omp: false,
                 mcode: false,
                 kimi: false,
+                dsh: false,
                 pi: false,
             },
             description: None,
@@ -1444,6 +1452,7 @@ fn custom_claude_dir_writes_mcp_inside_config_dir() {
                 omp: false,
                 mcode: false,
                 kimi: false,
+                dsh: false,
                 pi: false,
             },
             description: None,
@@ -1529,6 +1538,7 @@ fn custom_claude_dir_sync_does_not_copy_default_profile() {
                 omp: false,
                 mcode: false,
                 kimi: false,
+                dsh: false,
                 pi: false,
             },
             description: None,
@@ -1674,6 +1684,7 @@ fn sync_all_enabled_removes_known_disabled_but_preserves_unknown_live_entries() 
                 omp: false,
                 mcode: false,
                 kimi: false,
+                dsh: false,
                 pi: false,
             },
             description: None,
@@ -1702,6 +1713,7 @@ fn sync_all_enabled_removes_known_disabled_but_preserves_unknown_live_entries() 
                 omp: false,
                 mcode: false,
                 kimi: false,
+                dsh: false,
                 pi: false,
             },
             description: None,
@@ -1735,7 +1747,27 @@ fn sync_all_enabled_removes_known_disabled_but_preserves_unknown_live_entries() 
 }
 
 #[test]
-fn resync_targets_deduplicate_and_reject_unsupported() {
+fn resync_targets_default_to_managed_apps_and_reject_unsupported() {
+    let all = McpService::resync_targets(None).expect("default targets");
+    assert_eq!(
+        all.iter().map(|app| app.as_str()).collect::<Vec<_>>(),
+        vec![
+            "claude",
+            "codex",
+            "gemini",
+            "grokbuild",
+            "opencode",
+            "hermes",
+            "pi",
+            "mcode",
+            "kimi",
+            "dsh",
+            "agy",
+            "omp"
+        ]
+    );
+    assert_eq!(McpService::resync_targets(Some(&[])).unwrap(), all);
+
     let only_codex =
         McpService::resync_targets(Some(&["codex".to_string(), "codex".to_string()])).unwrap();
     assert_eq!(only_codex, vec![AppType::Codex]);

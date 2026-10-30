@@ -5,6 +5,73 @@ All notable changes to CC Switch will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.0.22-mod] - 2026-10-30
+
+- Merged the official upstream `v4.0.22` release into `mod`, including DeepSeek Harness and upstream's own Oh My Pi session-usage importer.
+- **Fork schema is now 25.** Upstream v4.0.22 also calls its layout 24, so the fork adds a 24 → 25 step for `enabled_dsh` and `session_log_sync.parser_state` while keeping the fork's `enabled_omp` columns. A database written by earlier fork builds upgrades in place; existing flags, cursors and costs are untouched.
+- **OMP usage keeps its fork history.** The fork imported OMP usage before upstream did, under the Pi hash domain; the merged flavor keeps that hash tag so the durable deduplication ledger still recognises historical rows, and gives OMP a child-session cutoff so child files first seen by upstream's importer cannot be counted on top of parent projections already recorded.
+- Retained the fork's Claude additional configuration directories, Codex capacity/forecast card (Codex tab only, visible on lookup failure), typography tokens and durable usage deduplication.
+- Local macOS arm64 builds use ad-hoc signing, without Apple notarization. This update does not change or upgrade the external Oh My Pi installation.
+
+## [4.0.22] - 2026-10-30
+
+This release adds DeepSeek Harness as the 14th managed app: providers are written to its Web and Desktop profiles together, MCP, Skills and the global prompt are synced, sessions can be browsed, the Apps page installs, upgrades and uninstalls it, a DeepSeek account can be signed in from the Auth Center with its balance shown, and session usage is imported. Oh My Pi session usage is imported too. Open Terminal gains a skip-permissions option, extra arguments and a Codex launch path; WebDAV settings can be cleared; Skills can open their folder and Discover rows open their docs; Copilot Claude models go through native `/v1/messages` so prompt caching works. Fixes cover Claude account switching on macOS with OAuth MCP servers, adding Claude accounts behind the global proxy, Claude Desktop defaulting new sessions to the Fable tier, MiniMax's exhausted weekly window disappearing, balances of inactive providers not refreshing, proxy requests that loop back into the proxy, Gemini thought signatures and Vertex tool turns, xAI rejecting Codex 0.163's `include` marker, and oversized error bodies stored in the usage log.
+
+**Stats**: 56 commits | 221 files changed | +15498 insertions | -1173 deletions
+
+### Added
+
+- **DeepSeek Harness** (#8795, #8986, 2baa68621, dfa291237, efb955bd1, f283a55f6): New additive app `dsh` (database 23 → 24 adds `enabled_dsh` to MCP and Skills). Providers (OpenAI Chat Completions, OpenAI Responses, Anthropic Messages, reusing the Pi vendor presets) are written to the `cordis.patch.yml` of the `web` and `desktop` profiles together (both are created when missing, plus any initialized `headless` / `acp` profile), with the API key kept in `$DSH_HOME/.credentials.yaml`; other plugin config and unknown fields are preserved, writes roll back on failure, a profile whose copy has diverged refuses edits, and the factory profile commented out with `[]` can be written the first time. stdio / Streamable HTTP MCP, Skills and the global prompt are synced; JSONL and multi-frame zstd sessions are readable (thinking, tool calls, compaction replacements, `DSH_HOME`). The Apps page installs, upgrades (`--engine-strict`) and uninstalls `@deepseek-ai/dsh` via npm. A DeepSeek account can be signed in from the Auth Center (browser OAuth, shared by Web and Desktop) with its balance and granted credit; the add dialog offers "DeepSeek official sign-in", and a signed-in account appears as a read-only official card in "Added" (derived from the sign-in, never stored or synced). Session usage is imported incrementally, with account-routed requests shown as "DeepSeek account (OAuth)". The shared model editor of OpenCode, MiniMax Code and DeepSeek Harness now lays out capability switches and context / max output fields like Pi and Kimi, and DSH gets structured thinking levels and per-model compatibility options. No local routing.
+- **Oh My Pi Session Usage** (#9046, fixes #8939): The Pi importer becomes a shared engine with a flavor; Oh My Pi gets its own app type and data source. It skips the fixed-width title slot, bills `model_usage` entries recorded outside the conversation, uses the measured duration for latency, counts subagent sessions older than the first sync, and imports only files opening with its title slot when both apps resolve the same store. Pi's identities and cursors are unchanged.
+- **Open Terminal: Skip Permissions and Extra Arguments** (03b475fb8, ebb00da11): A checkbox starts Claude Code / Antigravity with `--dangerously-skip-permissions` (Codex: `--dangerously-bypass-approvals-and-sandbox`), and an optional "Extra arguments" field appends flags. Both apply to that launch only, are remembered per app after the terminal opens and are never written to config. Arguments split on whitespace with single / double quotes (no backslash escapes), at most 16; on macOS / Linux each is quoted for the user's shell (fish quoted separately, a leading `=` quoted for zsh), on Windows each goes through a quoted batch variable and values with `"` `%` `^` are refused; the launcher uses `setlocal DisableDelayedExpansion`.
+- **Open a Codex Terminal from a Card** (6776bc06b): Third-party cards with their own route launch `codex -c ...` (the key through `env_key`, never the command line), neutralizing keys the current provider left where possible and refusing when a leftover cannot be neutralized; the current direct card, or an official / default card that is the current proxy route, launches plain `codex`. Every launch sets `CODEX_HOME` to the managed config dir.
+- **Clear the WebDAV Config** (7201d81bf, refs #8977): A "Clear config" button behind a confirmation removes the device-local URL, username, password and remote folder; uploaded data is left alone. The auto-sync worker re-reads settings after taking the sync lock, so an upload queued behind a clear exits.
+- **Skills: Open Folder, Copy Name, Discover Docs** (#8993, 0b8a53e37, refs #9039): Installed rows get "Open folder" in the ⋯ menu (replacing "Copy directory name") and copy the skill name on click; Discover rows (configured repos and skills.sh) get an "Open docs" button for `readmeUrl`, falling back to the repo page.
+- **Astron Coding Plan for Claude Code** (12e9fe53f, refs #9036): The `/anthropic` endpoint with `astron-code-latest` on every tier and `CLAUDE_CODE_MAX_CONTEXT_TOKENS=92160`; search aliases 讯飞 / 星火 / spark.
+
+### Changed
+
+- **Copilot Claude Models on Native `/v1/messages`** (#8908): Anthropic models whose live `/models` entry lists `/v1/messages` are passed through natively instead of bridged to `/chat/completions`, which dropped `cache_control` and broke prefix caching at Claude Code's mid-conversation system messages (measured ~35% → ~95% cache hits on long sessions). Thinking blocks are stripped only on OpenAI-format bridges; Copilot is covered by the thinking rectifiers.
+- **Skill Repo Discovery Per Repo** (#8907, fixes #1426): Adding, enabling, disabling or removing a repo discovers only that repo; successful results are cached for 10 minutes and the refresh button bypasses the cache.
+- **Bound Claude Official Quota in Tray and Usage Settings** (67cce7ad3): The tray gets an account-scoped Claude account source (on by default, refreshed on hover, no fallback to the default login's cache); the usage settings dialog shows bound cards as enabled and tests against the bound account.
+- **Claude Desktop Gateway Auth** (#5123, #7488, fixes #7482): The token is accepted from `Authorization: Bearer` or `x-api-key` (Bearer preferred), compared in constant time, with one 401 for every failure.
+- **Claude Accounts with the Config Dir in WSL** (0133facca): The Auth Center explains that Claude accounts are not supported yet and disables Add account / Re-login; the card form and subtitle say so. The help text now says switching changes running sessions too.
+- **Help Tips and Tooltips** (#8593): MCP / Skills matrix cells no longer show the app name tooltip on top of the status tooltip (the name shows on the header icon); help cards open to the right, are capped at 300px, wrap long paths and scroll inside; the OMO form uses the shared `HelpTip`.
+- **Auth Center Section Jump** (#8964): Jumping to a section scrolls only the panel body, re-aligns while sections above load, and stops when the user scrolls.
+- **Additive App Config Read Errors** (c1933fd04, refs #9044): OpenCode, OpenClaw and Hermes show the read error above the list or empty state (like Pi), and a failed add restores or deletes the row instead of leaving an orphan.
+- **Expired Managed Account Hint** (16b6575d0, refs #7573): ChatGPT and xAI managed accounts say "Sign in to this account again in Accounts" instead of naming a command that does not exist.
+- **Sidebar Today Usage** (7f82b85b5): Inset to line up with the mode badge text.
+- **Codex Official Model List Diagnostics** (11485ee78, refs #8966): Failures log the reqwest source chain.
+- **Presets**: OspreyAI sponsor presets for Claude Code, Claude Desktop, Codex, OpenCode, OpenClaw, Hermes and Pi (9433caabe); TokenFlux moves to tokenflux.com with tokenflux.dev as a fallback endpoint (839efbe24); StreamLake API key links carry `?channel=ccswitch` (ebdedbee4); DIT.ai, PatewayAI and AIGoCode promotion copy refreshed (03e19fe73, c2aa4e0b2, 3e75b96e1).
+
+### Fixed
+
+- **Claude Account Switch Refused on macOS with OAuth MCP Servers** (6c998b4dc, refs #9002): The default slot keeps `mcpOAuth`, pushing the hex payload past the 4032-byte `security -i` line; large payloads now go through argv like Claude Code does.
+- **Adding a Claude Account Failed with 403 Behind the Global Proxy** (33aaf8e74, refs #9038): `claude auth login`, `claude -p /usage` and `claude auth status` get `HTTPS_PROXY` / `HTTP_PROXY` (both cases) and a loopback `NO_PROXY`; SOCKS is skipped.
+- **Claude Desktop Defaulted New Sessions to Fable** (#7491, fixes #7457, #8973): `inferenceModels` is written in the UI tier order Sonnet → Opus → Fable → Haiku in direct mode, mapped routes and the native card's default routes.
+- **MiniMax Weekly Window Vanished When Exhausted** (#8124, fixes #8123): `current_weekly_status=2` is shown as an exhausted weekly tier; status 3 stays hidden.
+- **Balances of Inactive Providers Not Refreshed** (#8342, fixes #8335): The auto query interval applies to every provider, not only the current one.
+- **Requests Looping Back into the Proxy** (#8598): An upstream URL resolving to the proxy's own listener fails with a configuration error instead of forwarding into itself.
+- **Gemini `thoughtSignature` Inside `functionCall`** (#6690, df753b5ef, refs #6833): Rebuilt function calls carry the replayed signature at Part level; for Gemini 3+ the first unsigned `functionCall` of each step in the current turn gets the skip signature.
+- **Vertex Gemini Rejected Tool Turns with Trailing Text** (064ae4220, refs #8988): `functionResponse` parts and the rest of a user message become separate user contents, in every message so history stays byte-stable.
+- **WebSearch `blocked_domains` Rejected on Responses** (326b394be, refs #8979): Passed through as `filters.blocked_domains` on API-key Responses routes; the ChatGPT Codex OAuth route still refuses it explicitly.
+- **xAI Rejected Codex 0.163+ Requests** (#8997, fixes #8996): `output.encrypted_content` is dropped from `include` for xAI only.
+- **Codex Section Detection Missed `[[array]]` Headers** (#9029, fixes #9023).
+- **OpenCode V2 Connectivity Check** (ed494fbc7, refs #8969): Reads `settings.baseURL` and the native package names.
+- **Huge Error Bodies Stored in the Usage Log** (#9010, part of #6706): `error_message` is capped at 4096 characters on write; existing rows are unchanged.
+- **Windows Tray Clicks Under Third-Party Hosts** (#8729, closes #8565): When the icon rect is unavailable (e.g. MyDockFinder), the click is synthesized at the cursor.
+- **Kimi Upgrade Stuck on Versions Before 0.43.0** (da2635118, refs #9032): Older builds go through their package manager or rerun the official installer instead of `kimi upgrade --yes`.
+- **A CLI That Runs but Prints No Version** (e78f641ca): Reported as found but not runnable instead of installed-but-"not installed"; only regular files count as installs.
+- **Antigravity Sessions Shadowed by Another Root's Index Entry** (115677a1c, refs #8941): A transcript-backed entry replaces an index-only one, so usage is imported and the session opens.
+
+### Docs
+
+- Guide to switching Claude subscription accounts (d288057f3), linked from the v4.0.21 notes (dd81bc95b); DIT.ai moved ahead of OpenModel in the README sponsor table (ee8ee25eb).
+
+### Repository
+
+- Contributing guide requires a self-written Human Note (df511e82e); WSL2 checks are manual-only and Antigravity SQLite tests skip when the temp dir lacks SQLite support (03ec9dbb6); a Windows path comparison in an Antigravity test (4ed071500).
+
 ## [4.0.21-mod] - 2026-10-26
 
 - Merged the official upstream `v4.0.21` release into `mod`. Retained the fork's independent Oh My Pi integration, Claude additional configuration directories, Codex capacity/forecast usage, and durable usage deduplication.
@@ -59,6 +126,7 @@ This release lets Claude Code switch between several official Claude subscriptio
 ### Repository
 
 - Issue and PR templates ask for a required Human Note (#8905); PRs from outside collaborators that change `SCHEMA_VERSION` are closed automatically (#8903); end-to-end proxy tests for inline `<think>` conversion (#8835).
+
 ## [4.0.20-mod] - 2026-10-25
 
 - Merged the official upstream `v4.0.20` release into `mod`, including Kimi Code and the reorganized usage page. Retained the upstream **Oh My Pi** name and purple π icon in the sidebar and provider page.
@@ -571,7 +639,7 @@ The fifth patch release on the 4.0 stable line. Codex threads that carry tool re
 ### Fixed
 
 - **Unmatched Tool Results Broke Codex Threads on Chat Upstreams** (#8136, fixes #7196, #4741): Codex history can carry tool results with no matching tool call, most notably the create_thread receipt the Codex desktop app injects into a new thread (a `function_call_output` whose `call_id` is null). The Responses-to-Chat conversion emitted them as `role=tool`, so strict Chat upstreams such as DeepSeek and OpenCode Zen rejected every request in that thread with HTTP 400. Unmatched `function_call_output` / `custom_tool_call_output` / `tool_search_output` items now become a marked user message, held until the current run of tool results ends so `role=tool` messages stay contiguous; media is sent as image parts rather than base64 text, and reasoning attachment is unchanged. Paired tool outputs convert exactly as before.
-- **Call-id-less Tool Outputs Broke Codex Threads on xAI** (refs #7074): Codex Desktop injects `function_call_output` receipts (create_thread, automation_update, heartbeat, cross-thread messages) with only an `fco_` id. xAI's native Responses API rejects the whole request with 422 (missing field `call_id`), and since the receipt stays in history the thread never recovers. The xAI-only compat layer now rewrites these items into user messages with the same marker the Chat bridge uses, keeping text and image parts. Items with a `call_id` and other upstreams are untouched.
+- **Call-id-less Tool Outputs Broke Codex Threads on xAI** (refs #7074): Codex Desktop injects `function_call_output` receipts (create*thread, automation_update, heartbeat, cross-thread messages) with only an `fco*`id. xAI's native Responses API rejects the whole request with 422 (missing field`call_id`), and since the receipt stays in history the thread never recovers. The xAI-only compat layer now rewrites these items into user messages with the same marker the Chat bridge uses, keeping text and image parts. Items with a `call_id` and other upstreams are untouched.
 - **OpenAI-format Claude Upstreams Received `x-api-key`**: Claude routing picked the auth header from the env var name alone, so a provider with `ANTHROPIC_API_KEY` and an OpenAI Chat or Responses upstream sent `x-api-key`, which those protocols reject. OpenAI formats now always use `Authorization: Bearer`; Anthropic Messages upstreams keep the env var semantics. The form no longer shows the auth field for those formats (Copilot cards keep it).
 - **Aggregation Used Only the Default Provider's Compatibility Switches**: Picking another member's model in Claude aggregation could send features that member rejects. Switches of all publishing members are now merged by kind: disabling experimental betas, Artifact or the auto mode server applies when any member asks for it; tool search, always-on effort and fine-grained tool streaming stay on only when every member turns them on. Extra body, thinking and window switches still follow the default provider.
 - **UI Language on Cold Start**: The first-screen language came from a localStorage cache of the saved setting. When the cache was empty or stale (dev and release builds use different WebView origins, WebView data was cleared, `~/.cc-switch` was copied to a new machine) the UI showed the system language until a page that loads settings was opened. Settings are now fetched once during bootstrap and the saved language applied.
@@ -1596,11 +1664,11 @@ Development since v3.18.0 is headlined by a security-hardening wave and a proxy 
 
 ### Security
 
-- **Gemini Common Config No Longer Leaks Credentials, With a One-Time Cleanup**: The Gemini common-config extractor stripped only `GEMINI_API_KEY` and `GOOGLE_GEMINI_BASE_URL` from the shared snippet and copied every other `env` entry verbatim — but `GOOGLE_API_KEY` is a first-class Gemini credential, so one account's key (along with anything else credential-shaped) was deep-merged into every other Gemini provider using the common config and sent to that provider's base URL, which may be a third-party relay. The extractor now skips any key matching the same credential-pattern matcher the Claude extractor already uses, and the frontend snippet validator was aligned so a hand-edited snippet cannot put a key straight back. Because a Gemini snippet is never re-extracted once it exists, a one-time startup cleanup also scrubs credentials that already leaked — from the snippet, from every provider they were merged into, and from `~/.gemini/.env`, matching by key *and* value so a provider's own same-named key with a different value survives. (#5811)
+- **Gemini Common Config No Longer Leaks Credentials, With a One-Time Cleanup**: The Gemini common-config extractor stripped only `GEMINI_API_KEY` and `GOOGLE_GEMINI_BASE_URL` from the shared snippet and copied every other `env` entry verbatim — but `GOOGLE_API_KEY` is a first-class Gemini credential, so one account's key (along with anything else credential-shaped) was deep-merged into every other Gemini provider using the common config and sent to that provider's base URL, which may be a third-party relay. The extractor now skips any key matching the same credential-pattern matcher the Claude extractor already uses, and the frontend snippet validator was aligned so a hand-edited snippet cannot put a key straight back. Because a Gemini snippet is never re-extracted once it exists, a one-time startup cleanup also scrubs credentials that already leaked — from the snippet, from every provider they were merged into, and from `~/.gemini/.env`, matching by key _and_ value so a provider's own same-named key with a different value survives. (#5811)
 - **Skill Repository Install Hardening**: Installing or browsing skills from a GitHub repository could write files outside the intended directory: archive entries were joined onto the destination path without normalisation (zip-slip), and repository coordinates were never validated, so a branch like `../../../releases/download/v1/evil` retargeted the download at an arbitrary release asset — and since skill repositories can arrive via an untrusted `ccswitch://` deeplink and are enabled by default, merely opening the Skills panel could trigger the download. Skill `directory` values from restored backups, sync snapshots, and import-from-apps were likewise joined raw, letting uninstall `remove_dir_all` outside the managed skills directory. Every sink now validates the directory name, repository owner/name/branch are whitelisted at the single download convergence point, and extraction is capped (10,000 entries, 512 MB written, 128 MB download, 4 KB symlink targets, self-referential symlinks rejected), with the new errors localized in all four languages. (#5811)
 - **Deep-Link Import Confirmations Show the Whole Payload (Credentials Masked) and Flag Risky Values**: The `ccswitch://` MCP import confirmation previously rendered a single truncated `Command:` line and showed neither `args`, `url`, nor `env` — so a link carrying `command: "sh"` with `args: ["-c", "curl …|sh"]` and an `LD_PRELOAD` variable displayed as a harmless `sh`, yet was written to the live MCP files on confirm. The dialog now renders command, each argument, URL, and env vars on separate lines that wrap instead of truncating, so nothing is clipped out of view (env values whose name contains TOKEN, KEY, SECRET, or PASSWORD are shown masked, as a prefix plus asterisks), and highlights values that warrant a second look: shell interpreters invoked with inline-command flags, env vars that change how a process loads code (`LD_*`, `DYLD_*`, `NODE_OPTIONS`, `PYTHONPATH`, `PATH`, proxy vars), and endpoints pointing at loopback, private-range, or cloud-metadata addresses. The markers are advisory and never block an import — a local Ollama endpoint is ordinary usage. The provider confirmation gains the same treatment, and the "will be written immediately" warning is now shown unconditionally instead of being gated on a link-controlled field.
 - **Usage Scripts From Deep Links Arrive Disabled and Their Code Is Shown**: A usage-query script imported through a deep link is JavaScript that runs on every usage query, and it was previously possible to acquire one without ever seeing it: the backend treated the mere presence of code as a decision to enable it, and the dialog showed only an Enabled/Disabled badge. Scripts now default to disabled — a link must explicitly carry `usageEnabled=true` — and the confirmation displays the complete decoded script in a scrollable code block with a warning that it will execute once enabled. Decoding failures fall back to displaying the raw payload, so a malformed script can never read as "there is no script".
-- **URL-Safe Base64 Payloads Could Blank the Confirmation Dialog Entirely**: The two entries above make the confirmation show more; this one is about the confirmation showing *nothing*. The backend accepts four Base64 variants including the URL-safe alphabet (RFC 4648 §5), while the frontend's `atob` accepts only the standard one and, on failure, returned its input unchanged instead of signalling an error — so for the same payload the backend decoded and imported successfully while the frontend held an undecodable string. Usage scripts and system prompts rendered as opaque Base64, and MCP configs were worse: `JSON.parse` threw, the component swallowed it, and the dialog rendered **"0 servers" with an empty list while the backend wrote the real entry into the live MCP files**. Substituting a single `/` for `_` in the payload was enough — the dialog went blank, the import stayed fully functional, and the complete-payload display added above was defeated along with it. The frontend decoder now normalises the URL-safe alphabet before decoding, so the confirmation always matches what will be imported, and the shared decoder gained its first unit tests — with in-test preconditions asserting each sample really exercises the URL-safe path rather than happening to encode identically under both alphabets. Affected every release from v3.8.0 onward; see Upgrade notes for what to check.
+- **URL-Safe Base64 Payloads Could Blank the Confirmation Dialog Entirely**: The two entries above make the confirmation show more; this one is about the confirmation showing _nothing_. The backend accepts four Base64 variants including the URL-safe alphabet (RFC 4648 §5), while the frontend's `atob` accepts only the standard one and, on failure, returned its input unchanged instead of signalling an error — so for the same payload the backend decoded and imported successfully while the frontend held an undecodable string. Usage scripts and system prompts rendered as opaque Base64, and MCP configs were worse: `JSON.parse` threw, the component swallowed it, and the dialog rendered **"0 servers" with an empty list while the backend wrote the real entry into the live MCP files**. Substituting a single `/` for `_` in the payload was enough — the dialog went blank, the import stayed fully functional, and the complete-payload display added above was defeated along with it. The frontend decoder now normalises the URL-safe alphabet before decoding, so the confirmation always matches what will be imported, and the shared decoder gained its first unit tests — with in-test preconditions asserting each sample really exercises the URL-safe path rather than happening to encode identically under both alphabets. Affected every release from v3.8.0 onward; see Upgrade notes for what to check.
 - **SQL Import Rejects Statements That Reach Outside the Import Database**: Importing a database backup validated only the file's header comment and then handed the entire text to `execute_batch`, so a crafted backup could `ATTACH DATABASE` and create a SQLite file anywhere the user can write — a side effect that landed even when the import as a whole failed, and one reachable through WebDAV/S3 sync snapshots too. A SQLite authorizer is now installed for the duration of the external batch only, denying `ATTACH`/`DETACH`, `VACUUM`, virtual-table creation, and any action SQLite reports as unknown (fail-closed), with PRAGMAs limited to the two the exporter actually emits.
 - **Prototype Pollution in Common-Config Snippet Handling**: The three walkers that apply, remove, and compare common-config snippets all followed `__proto__` into the global `Object.prototype`, so a malicious snippet — reachable via WebDAV/S3 sync, since the `settings` table is overwritten by whatever the remote sends — could write attacker-chosen values onto the global prototype the moment a provider form was opened. All three walkers now skip `__proto__`, `constructor`, and `prototype`; the "common config applied" comparison also now requires own properties, fixing a visible quirk where `{"__proto__":{}}` counted as a subset of every config.
 - **Command Substitution via Project Directory Names on Terminal Launch**: Resuming a session in an external terminal built the `cd` line with double-quote escaping, which stops spaces but not `$(…)`, backticks, or `$VAR` — and the value is the real project path recorded in the CLI's session history, which may legitimately contain those characters. Any project folder named that way executed the embedded command in the user's terminal on Resume. The three launchers that build a shell line — Terminal.app, iTerm, and kitty — now use POSIX single-quote escaping, where nothing expands, including through the AppleScript quoting layer; Ghostty, WezTerm/Kaku, and Alacritty were already safe because they pass the directory as its own argument.
@@ -2042,7 +2110,7 @@ Development since v3.15.0 focuses on making third-party Codex providers work lik
 - **22 Codex Third-Party Provider Presets with Chat Routing**: Enabled Chat Completions routing with explicit model catalogs for major Chinese/Asian providers — DeepSeek, Zhipu GLM (+ en), Kimi, MiniMax (+ en), StepFun (+ en), Baidu Qianfan Coding Plan, Bailian, ModelScope, Longcat, BaiLing, Xiaomi MiMo (+ Token Plan), Volcengine Agentplan, BytePlus, DouBao Seed, SiliconFlow (+ en), Novita AI, and Nvidia. Each preset declares its context window so the UI can size the model-mapping rows.
 - **Codex Model Mapping Table**: Codex provider forms now expose a model catalog (model + display name + context window per row) that is the single source of truth for the upstream model list, projected to `~/.codex/cc-switch-model-catalog.json`.
 - **Codex Chat Providers in Stream Check**: Stream Check now probes Chat-format Codex providers against `/chat/completions` with a Chat-shaped body instead of `/v1/responses`, and aligns its URL fallback order with the production `CodexAdapter` (origin-only base URLs hit `/v1/<endpoint>` first) so a non-404 error on the bare path no longer flags a working provider as down.
-- **Codex Chat Reasoning Auto-Detection**: When a Codex provider is served through Chat Completions routing, CC Switch now auto-detects the upstream's reasoning interface from its name, base URL, and model — injecting the correct thinking parameter (`thinking:{type}`, `enable_thinking`, `reasoning_split`, top-level `reasoning_effort`, or OpenRouter's native `reasoning:{effort}` object) with no manual setup. Aggregator/hosting platforms (OpenRouter, SiliconFlow) are matched platform-first, since the same model can expose different reasoning controls on different platforms. Providers that only expose a thinking on/off switch (Kimi, GLM, Qwen, MiniMax, MiMo, SiliconFlow) drop the effort *level* instead of forwarding an unsupported field — so changing Codex's reasoning effort has no effect for them — while providers with real effort tiers (DeepSeek, OpenRouter, and StepFun's `step-3.5-flash-2603` only) pass the level through. OpenRouter specifically uses the native `reasoning:{effort}` object, clamps `max` to `xhigh` (its enum has no `max`), and forwards an explicit `effort:"none"` so reasoning can be turned off.
+- **Codex Chat Reasoning Auto-Detection**: When a Codex provider is served through Chat Completions routing, CC Switch now auto-detects the upstream's reasoning interface from its name, base URL, and model — injecting the correct thinking parameter (`thinking:{type}`, `enable_thinking`, `reasoning_split`, top-level `reasoning_effort`, or OpenRouter's native `reasoning:{effort}` object) with no manual setup. Aggregator/hosting platforms (OpenRouter, SiliconFlow) are matched platform-first, since the same model can expose different reasoning controls on different platforms. Providers that only expose a thinking on/off switch (Kimi, GLM, Qwen, MiniMax, MiMo, SiliconFlow) drop the effort _level_ instead of forwarding an unsupported field — so changing Codex's reasoning effort has no effect for them — while providers with real effort tiers (DeepSeek, OpenRouter, and StepFun's `step-3.5-flash-2603` only) pass the level through. OpenRouter specifically uses the native `reasoning:{effort}` object, clamps `max` to `xhigh` (its enum has no `max`), and forwards an explicit `effort:"none"` so reasoning can be turned off.
 - **Codex Goal Mode and Remote Compaction Controls**: Codex config editing now exposes a Goal Mode toggle and a Remote Compaction toggle for third-party providers; new Codex templates default to `disable_response_storage = true` while still allowing explicit goal support.
 - **Xiaomi MiMo Token Plan Presets**: Added Xiaomi MiMo Token Plan presets with specs aligned to the official documentation (#2803).
 - **Claude Desktop Official Preset**: Added a Claude Desktop Official preset that restores the native Claude Desktop login, plus a localized Claude Desktop user guide (en / zh / ja).
@@ -2339,7 +2407,7 @@ Development since v3.13.0 focuses on onboarding Hermes Agent as a first-class ma
 - **Skills Import Sync**: Imported Skills are now immediately synced into enabled app directories instead of only being recorded in the database, so the UI no longer shows "installed" while the target app directory is missing the skill.
 - **Ghostty Session Restore**: Fixed Ghostty session restore launch by using shell execution with `--working-directory`, avoiding `cwd` escaping issues when the path contains spaces or special characters.
 - **Hermes Health Check Borrowing OpenClaw Schema**: Hermes providers were routed through `check_additive_app_stream` (the OpenClaw dispatcher), which reads camelCase `baseUrl` / `apiKey` / `api` and surfaced "OpenClaw provider is missing baseUrl" even when every Hermes field was filled. Introduced `check_hermes_stream` with Hermes-specific extractors that map `api_mode` (`chat_completions` / `anthropic_messages` / `codex_responses`) to the matching `check_claude_stream` `api_format`, and returns `bedrock_converse` as unsupported. `api_mode` is now resolved before URL / API key extraction, so `bedrock_converse` users see the real cause rather than a misleading "missing base_url".
-- **Usage Query Modal for Hermes & OpenClaw**: `getProviderCredentials` now reads flat `settingsConfig` fields for Hermes (snake_case `base_url` / `api_key`) and OpenClaw (camelCase `baseUrl` / `apiKey`), so the "official balance" template auto-selects for matching providers like SiliconFlow. Also refactored the BALANCE and TOKEN_PLAN test paths to reuse the precomputed `providerCredentials` instead of re-reading `env.ANTHROPIC_*` directly, fixing the "empty key" error for non-Claude apps even when the key was configured.
+- **Usage Query Modal for Hermes & OpenClaw**: `getProviderCredentials` now reads flat `settingsConfig` fields for Hermes (snake*case `base_url` / `api_key`) and OpenClaw (camelCase `baseUrl` / `apiKey`), so the "official balance" template auto-selects for matching providers like SiliconFlow. Also refactored the BALANCE and TOKEN_PLAN test paths to reuse the precomputed `providerCredentials` instead of re-reading `env.ANTHROPIC*\*` directly, fixing the "empty key" error for non-Claude apps even when the key was configured.
 
 ### Docs
 
@@ -3140,23 +3208,28 @@ Third beta release with important bug fixes for Windows compatibility, UI improv
 ### Fixed
 
 #### Windows
+
 - Wrap npx/npm commands with `cmd /c` for MCP export
 - Prevent terminal windows from appearing during version check
 
 #### macOS
+
 - Use .app bundle path for autostart to prevent terminal window popup
 
 #### UI
+
 - Resolve Dialog/Modal not opening on first click (#492)
 - Improve dark mode text contrast for form labels
 - Reduce header spacing and fix layout shift on view switch
 - Prevent header layout shift when switching views
 
 #### Database & Schema
+
 - Add missing base columns migration for proxy_config
 - Add backward compatibility check for proxy_config seed insert
 
 #### Other
+
 - Use local timezone and robust DST handling in usage stats (#500)
 - Remove deprecated `sync_enabled_to_codex` call
 - Gracefully handle invalid Codex config.toml during MCP sync
@@ -3215,28 +3288,33 @@ This beta release introduces the **Local API Proxy** feature, along with Skills 
 ### Major Features
 
 #### Local Proxy Server
+
 - **Local HTTP Proxy** - High-performance proxy server built on Axum framework
 - **Multi-app Support** - Unified proxy for Claude Code, Codex, and Gemini CLI API requests
 - **Per-app Takeover** - Independent control over which apps route through the proxy
 - **Live Config Takeover** - Automatically backs up and redirects CLI configurations to local proxy
 
 #### Auto Failover
+
 - **Circuit Breaker** - Automatically detects provider failures and triggers protection
 - **Smart Failover** - Automatically switches to backup provider when current one is unavailable
 - **Health Tracking** - Real-time monitoring of provider availability
 - **Independent Failover Queues** - Each app maintains its own failover queue
 
 #### Monitoring
+
 - **Request Logging** - Detailed logging of all proxy requests
 - **Usage Statistics** - Token consumption, latency, success rate metrics
 - **Real-time Status** - Frontend displays proxy status and statistics
 
 #### Skills Multi-App Support
+
 - **Multi-app Support** - Skills now support both Claude and Codex (#365)
 - **Multi-app Migration** - Existing Skills auto-migrate to multi-app structure (#378)
 - **Installation Path Fix** - Use directory basename for skill installation path (#358)
 
 ### Added
+
 - **Provider Icon Colors** - Customize provider icon colors (#385)
 - **Deeplink Usage Config** - Import usage query config via deeplink (#400)
 - **Error Request Logging** - Detailed logging for proxy requests (#401)
@@ -3246,6 +3324,7 @@ This beta release introduces the **Local API Proxy** feature, along with Skills 
 ### Fixed
 
 #### Proxy Related
+
 - Takeover Codex base_url via model_provider
 - Harden crash recovery with fallback detection
 - Sync UI when active provider differs from current setting
@@ -3263,17 +3342,20 @@ This beta release introduces the **Local API Proxy** feature, along with Skills 
 - Resolve 404 error and auto-setup proxy targets
 
 #### MCP Related
+
 - Skip sync when target CLI app is not installed
 - Improve upsert and import robustness
 - Use browser-compatible platform detection for MCP presets
 
 #### UI Related
+
 - Restore fade transition for Skills button
 - Add close button to all success toasts
 - Prevent card jitter when health badge appears
 - Update SettingsPage tab styles (#342)
 
 #### Other
+
 - Fix Azure website link (#407)
 - Add fallback to provider config for usage credentials (#360)
 - Fix Windows black screen on startup (use system titlebar)
@@ -3282,11 +3364,13 @@ This beta release introduces the **Local API Proxy** feature, along with Skills 
 - Security fixes for JavaScript executor and usage script (#151)
 
 ### Improved
+
 - **Proxy Active Theme** - Apply emerald theme when proxy takeover is active
 - **Card Animation** - Improved provider card hover animation
 - **Remove Restart Prompt** - No longer prompts restart when switching providers
 
 ### Technical
+
 - Implement per-app takeover mode
 - Proxy module contains 20+ Rust files with complete layered architecture
 - Add 5 new database tables for proxy functionality
@@ -3294,6 +3378,7 @@ This beta release introduces the **Local API Proxy** feature, along with Skills 
 - Remove is_proxy_target in favor of failover_queue
 
 ### Stats
+
 - 55 commits since v3.8.2
 - 164 files changed
 - +22,164 / -570 lines

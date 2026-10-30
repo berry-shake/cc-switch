@@ -127,11 +127,12 @@ pub(crate) fn session_files_for(
     d: &Dialect,
     include_children: bool,
 ) -> Result<Vec<PathBuf>, String> {
-    session_files_from_resolution((d.resolve_root)(), include_children)
+    session_files_from_resolution(d, (d.resolve_root)(), include_children)
         .map_err(|error| error.replace("Pi sessionDir", &format!("{} session directory", d.label)))
 }
 
 fn session_files_from_resolution(
+    d: &Dialect,
     resolution: SessionRootResolution,
     include_children: bool,
 ) -> Result<Vec<PathBuf>, String> {
@@ -150,7 +151,8 @@ fn session_files_from_resolution(
             Ok(files)
         }
         SessionRootResolution::RequiresProjectContext { configured_path } => Err(format!(
-            "Pi sessionDir '{configured_path}' requires a project cwd and cannot be globally enumerated"
+            "{} sessionDir '{configured_path}' requires a project cwd and cannot be globally enumerated",
+            d.label
         )),
         SessionRootResolution::Unavailable { reason } => Err(reason),
     }
@@ -1095,13 +1097,13 @@ mod tests {
             reason: "fixture unavailable".to_string(),
         };
         assert_eq!(
-            session_files_from_resolution(unavailable, true).expect_err("discovery error"),
+            session_files_from_resolution(&PI, unavailable, true).expect_err("discovery error"),
             "fixture unavailable"
         );
         let relative = SessionRootResolution::RequiresProjectContext {
             configured_path: ".pi/sessions".to_string(),
         };
-        assert!(session_files_from_resolution(relative, true).is_err());
+        assert!(session_files_from_resolution(&PI, relative, true).is_err());
     }
 
     #[test]
@@ -1253,7 +1255,7 @@ mod tests {
                 layout,
             };
             assert_eq!(
-                session_files_from_resolution(resolution, true).expect("usage files"),
+                session_files_from_resolution(&PI, resolution, true).expect("usage files"),
                 expected,
                 "{layout:?}"
             );

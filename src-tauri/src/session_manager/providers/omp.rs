@@ -5,7 +5,7 @@ use crate::session_manager::{SessionMessage, SessionMeta};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-const OMP: Dialect = Dialect {
+pub(crate) const OMP: Dialect = Dialect {
     provider_id: "omp",
     label: "Oh My Pi",
     resolve_root: resolve_session_root,
@@ -31,9 +31,11 @@ pub fn session_roots() -> Vec<PathBuf> {
     pi::session_roots_for(&OMP)
 }
 
+/// Parent-only listing, kept as the browser-facing contract for tests. The
+/// usage importer asks discovery for children explicitly and applies its own
+/// child cutoff, so this helper is not on the import path.
+#[cfg(test)]
 pub(crate) fn session_files() -> Result<Vec<PathBuf>, String> {
-    // Keep the fork's parent-session accounting boundary. Importing child files
-    // as well would overlap historical parent projections without a cutover.
     pi::session_files_for(&OMP, false)
 }
 

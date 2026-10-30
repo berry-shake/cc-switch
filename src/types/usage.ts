@@ -21,8 +21,6 @@ export interface RequestLog {
   outputTokens: number;
   cacheReadTokens: number;
   cacheCreationTokens: number;
-  /** 0 = legacy, 1 = input includes cache read/write, 2 = fresh input. */
-  inputTokenSemantics?: number;
   inputCostUsd: string;
   outputCostUsd: string;
   cacheReadCostUsd: string;
@@ -219,7 +217,7 @@ export interface UsageRangeSelection {
  * only ever show a partial number and mislead users into reading it as the
  * Desktop's full usage. The backend collapses `claude-desktop → claude` in
  * every dashboard query (see `folded_app_type_sql`).
- * `opencode` and `pi` have no proxy handler; their usage reaches this
+ * `opencode`, `pi` and `omp` have no proxy handler; their usage reaches this
  * dashboard through session importers. `openclaw` / `hermes` appear only as
  * managed apps elsewhere.
  */
@@ -233,6 +231,7 @@ export type AppType =
   | "omp"
   | "mcode"
   | "kimi"
+  | "dsh"
   | "agy";
 
 export type AppTypeFilter = "all" | AppType;
@@ -247,13 +246,19 @@ export const KNOWN_APP_TYPES: ReadonlyArray<AppType> = [
   "omp",
   "mcode",
   "kimi",
+  "dsh",
   "agy",
 ];
 
 /**
- * App types whose stored `inputTokens` may include cached tokens. The exact
- * normalization for each row is selected by `inputTokenSemantics`; see
- * [getFreshInputTokens].
+ * App types whose proxy uses an OpenAI-style protocol. Two consequences:
+ *
+ * 1. `inputTokens` already includes the cached portion (must subtract
+ *    `cacheReadTokens` to get fresh-input semantics — see
+ *    [getFreshInputTokens]).
+ * 2. The protocol does not report cache _creation_ separately, only cache
+ *    _reads_. So `cacheCreationTokens` is always 0 for these app types and
+ *    the UI should label it as N/A rather than 0.
  *
  * Mirror of the Rust `CACHE_INCLUSIVE_APP_TYPES` whitelist.
  */

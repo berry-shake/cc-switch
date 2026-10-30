@@ -45,7 +45,10 @@ describe("useClaudeAccountQuota", () => {
 
   it("refreshes the account list when the plan changed", async () => {
     mocks.getClaudeAccountQuota.mockResolvedValue(
-      quota({ subscriptionType: "max", rateLimitTier: "default_claude_max_20x" }),
+      quota({
+        subscriptionType: "max",
+        rateLimitTier: "default_claude_max_20x",
+      }),
     );
     const { hook, invalidate } = setup({ plan: "pro" });
     await waitFor(() => expect(hook.result.current.isSuccess).toBe(true));
@@ -54,9 +57,15 @@ describe("useClaudeAccountQuota", () => {
 
   it("leaves the list alone when the plan is the same or unknown", async () => {
     mocks.getClaudeAccountQuota.mockResolvedValue(
-      quota({ subscriptionType: "max", rateLimitTier: "default_claude_max_20x" }),
+      quota({
+        subscriptionType: "max",
+        rateLimitTier: "default_claude_max_20x",
+      }),
     );
-    const same = setup({ plan: "max", rate_limit_tier: "default_claude_max_20x" });
+    const same = setup({
+      plan: "max",
+      rate_limit_tier: "default_claude_max_20x",
+    });
     await waitFor(() => expect(same.hook.result.current.isSuccess).toBe(true));
     expect(same.invalidate).not.toHaveBeenCalled();
 
