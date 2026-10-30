@@ -24,11 +24,10 @@ pub(crate) const OMP: Flavor = Flavor {
     app_type: "omp",
     data_source: "omp_session",
     provider_placeholder: "_omp_session",
-    // The fork imported OMP usage before this importer existed, and parent
-    // sessions used to project nested child usage. Cut children off at the
-    // first run so files upstream now discovers for the first time cannot be
-    // counted on top of those historical parent projections.
-    cutoff_key: Some("omp:child-cutoff"),
+    // Oh My Pi parents never carry child usage as message usage, and upstream
+    // skips a parent projection whose linked child file is in the same round,
+    // so historical child files can be imported without double counting.
+    cutoff_key: None,
     id_prefix: "omp_session",
     // Frozen for the same reason: the fork's durable deduplication ledger holds
     // OMP rows hashed under Pi's domain. Changing it would re-import history.

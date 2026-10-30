@@ -615,12 +615,25 @@ mod tests {
             .unwrap()
             .1
             .into_owned();
-        let new = client
-            .get(&endpoint)
-            .query(&[("state", state.as_str()), ("error", "access_denied")])
-            .send()
-            .await
-            .unwrap();
+        // The replacement closed the previous keep-alive connection. A pooled
+        // request can observe that teardown as IncompleteMessage; retry once to
+        // open a fresh connection, which is what a browser would do.
+        let mut attempts = 0;
+        let new = loop {
+            match client
+                .get(&endpoint)
+                .query(&[("state", state.as_str()), ("error", "access_denied")])
+                .send()
+                .await
+            {
+                Ok(response) => break response,
+                Err(error) if attempts < 2 => {
+                    attempts += 1;
+                    eprintln!("retrying callback after {error}");
+                }
+                Err(error) => panic!("{error}"),
+            }
+        };
         assert_eq!(new.status(), StatusCode::OK);
         new.bytes().await.unwrap();
         manager.cancel_device_flow(&response.device_code).await;
