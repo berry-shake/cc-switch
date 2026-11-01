@@ -2825,11 +2825,12 @@ fn verified_bounded_fork(parsed: &ParsedCodexFile, index: &RolloutIndex) -> bool
         let baseline = TokenCountersSignature {
             input: Some(total.input?.checked_sub(last.input?)?),
             cached_input: Some(total.cached_input?.checked_sub(last.cached_input?)?),
-            cache_write_input: Some(
-                total
-                    .cache_write_input?
-                    .checked_sub(last.cache_write_input?)?,
-            ),
+            // Codex does not always report cache writes; a missing counter is
+            // inherited as missing instead of failing the whole fork check.
+            cache_write_input: total
+                .cache_write_input
+                .zip(last.cache_write_input)
+                .and_then(|(total, last)| total.checked_sub(last)),
             output: Some(total.output?.checked_sub(last.output?)?),
             reasoning_output: Some(
                 total
