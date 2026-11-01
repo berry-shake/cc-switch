@@ -2,7 +2,7 @@
 
 # CC Switch
 
-本仓库 `mod` 分支已合并上游正式版 **v4.0.21**，采用新版 **Oh My Pi** 名称与图标，保留独立管理与原有用量统计边界、Claude 多配置目录扫描及 Codex 用量定制。数据库维持 **schema 24**；回滚必须同时恢复旧应用和升级前数据库。参见 [当前合并与回滚说明](CHANGELOG.md)。
+本仓库 `mod` 分支已合并上游正式版 **v4.0.21**，采用新版 **Oh My Pi** 名称与图标，保留独立管理与原有用量统计边界、Claude 多配置目录扫描及 Codex 用量定制。数据库维持 **schema 25**；回滚必须同时恢复旧应用和升级前数据库。参见 [当前合并与回滚说明](CHANGELOG.md)。
 
 ### Claude Code、Claude Desktop、Codex、Gemini CLI、Grok Build、OpenCode、OpenClaw、Hermes Agent、Pi、MiniMax Code、Kimi Code、Oh My Pi 的全方位管理工具
 
@@ -31,9 +31,9 @@
 <details open>
 <summary>点击折叠</summary>
 
-[![Kimi K2.7 Code](https://gcdn.moonshot.cn/growth-cdn/sponsor/kimi-zh.png)](https://platform.kimi.com?track_id=track-7cf2b91dcde043eda6ef9a95951a042c&aff=cc-switch)
+[![Kimi K3.1 Pro](assets/partners/banners/kimi-banner-zh.png)](https://platform.kimi.com?track_id=track-7cf2b91dcde043eda6ef9a95951a042c&aff=cc-switch)
 
-Kimi K3 是 Moonshot AI 迄今能力最强的模型，也是全球首个开源 3T 级模型。K3 拥有 2.8T 参数、原生视觉能力与 100 万 Token 上下文，在长程编码、知识工作和推理任务中展现前沿性能。使用 CC Switch，可以在各类 Agent 工具中便捷配置和切换 Kimi。
+Kimi K3.1 Pro 是 Moonshot AI 迄今最强的 3T 级开放权重模型，支持 100 万 Token 上下文。基于 Kimi K3，通过更大规模的后训练计算，K3.1 Pro 在编程、Agent 工作流、3D 创作和推理等方面实现持续提升。借助 CC Switch，你可以在各种 Agentic 工具中轻松配置并切换至 Kimi K3.1 Pro。
 
 主要进行编程工作？可以试试 **Kimi Code 订阅**（[中文站](https://www.kimi.com/code?aff=cc-switch) | [Global](https://www.kimi.ai/code?aff=cc-switch)），或通过 Kimi 开放平台使用 **API**（[中文站](https://platform.kimi.com?track_id=track-7cf2b91dcde043eda6ef9a95951a042c&aff=cc-switch) | [Global](https://platform.kimi.ai?track_id=track-674ed6e2af924a5682a87421f7cf753a&aff=cc-switch)）。
 
