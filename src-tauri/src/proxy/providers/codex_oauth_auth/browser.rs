@@ -615,11 +615,14 @@ mod tests {
             .unwrap()
             .1
             .into_owned();
-        // The replacement closed the previous keep-alive connection. A pooled
-        // request can observe that teardown as IncompleteMessage; retry once to
-        // open a fresh connection, which is what a browser would do.
+        // The replaced server closes the idle keep-alive socket, but the client
+        // pool can hand it out before it has seen the FIN; that request fails
+        // with IncompleteMessage without reaching any server (#9111). Retry on
+        // a fresh connection. A socket still served by the old router would
+        // answer 400 instead and fail the status assertion.
         let mut attempts = 0;
         let new = loop {
+            attempts += 1;
             match client
                 .get(&endpoint)
                 .query(&[("state", state.as_str()), ("error", "access_denied")])
@@ -627,11 +630,8 @@ mod tests {
                 .await
             {
                 Ok(response) => break response,
-                Err(error) if attempts < 2 => {
-                    attempts += 1;
-                    eprintln!("retrying callback after {error}");
-                }
-                Err(error) => panic!("{error}"),
+                Err(error) if attempts < 3 && error.is_request() => continue,
+                Err(error) => panic!("callback request failed: {error:?}"),
             }
         };
         assert_eq!(new.status(), StatusCode::OK);
