@@ -1033,6 +1033,15 @@ pub(crate) async fn query_codex_quota(
     tool_label: &str,
     expired_message: &str,
 ) -> Result<SubscriptionQuota, String> {
+    query_codex_usage(access_token, account_id, tool_label, expired_message).await
+}
+
+pub(crate) async fn query_codex_usage(
+    access_token: &str,
+    account_id: Option<&str>,
+    tool_label: &str,
+    expired_message: &str,
+) -> Result<SubscriptionQuota, String> {
     Ok(
         query_codex_quota_with_metadata(access_token, account_id, tool_label, expired_message)
             .await?
@@ -1040,10 +1049,8 @@ pub(crate) async fn query_codex_quota(
     )
 }
 
-/// 查询 Codex 额度，并保留与额度来自同一次响应的非敏感账号元数据。
-///
-/// 通用订阅入口继续使用 [`query_codex_quota`]，只有需要展示当前官方账号的
-/// 原子快照入口才消费这里的 `email`，避免再次请求导致账号切换竞态。
+/// Quota plus the non-sensitive metadata from the same response. The atomic
+/// official snapshot consumes the email; the generic entry points do not.
 pub(crate) async fn query_codex_quota_with_metadata(
     access_token: &str,
     account_id: Option<&str>,

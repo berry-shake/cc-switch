@@ -1723,6 +1723,7 @@ fn apply_staged_codex_usage(
 
             let dedup_key = DedupKey {
                 app_type: "codex",
+                data_source: "codex_session",
                 model: &row.model,
                 input_tokens: row.input_tokens,
                 output_tokens: row.output_tokens,
@@ -3260,6 +3261,7 @@ fn insert_codex_session_entry_on_conn(
 
     let dedup_key = DedupKey {
         app_type: "codex",
+        data_source: "codex_session",
         model,
         input_tokens: delta.input,
         output_tokens: delta.output,
