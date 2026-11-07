@@ -215,6 +215,7 @@ mod tests {
             extra_usage: None,
             reset_credits: None,
             credits_balance: None,
+            plan_name: None,
             error: None,
             queried_at: Some(1_777_075_200_000), // 2026-04-24; replaced below
         }

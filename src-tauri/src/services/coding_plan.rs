@@ -128,6 +128,7 @@ fn make_error(msg: String) -> SubscriptionQuota {
         extra_usage: None,
         reset_credits: None,
         credits_balance: None,
+        plan_name: None,
         error: Some(msg),
         queried_at: Some(now_millis()),
     }
@@ -188,6 +189,7 @@ pub(crate) async fn query_kimi_at(
             extra_usage: None,
             reset_credits: None,
             credits_balance: None,
+            plan_name: None,
             error: Some(format!("Authentication failed (HTTP {status})")),
             queried_at: Some(now_millis()),
         });
@@ -268,6 +270,7 @@ pub(crate) async fn query_kimi_at(
         extra_usage: None,
         reset_credits: None,
         credits_balance: None,
+        plan_name: None,
         error: None,
         queried_at: Some(now_millis()),
     })
@@ -449,6 +452,7 @@ fn zhipu_auth_error(status: reqwest::StatusCode) -> SubscriptionQuota {
         extra_usage: None,
         reset_credits: None,
         credits_balance: None,
+        plan_name: None,
         error: Some(format!("Authentication failed (HTTP {status})")),
         queried_at: Some(now_millis()),
     }
@@ -532,6 +536,7 @@ fn zhipu_quota_from_body(body: &serde_json::Value) -> SubscriptionQuota {
         extra_usage: None,
         reset_credits: None,
         credits_balance: None,
+        plan_name: None,
         error: None,
         queried_at: Some(now_millis()),
     }
@@ -575,6 +580,7 @@ async fn query_minimax(api_key: &str, is_cn: bool) -> Result<SubscriptionQuota, 
             extra_usage: None,
             reset_credits: None,
             credits_balance: None,
+            plan_name: None,
             error: Some(format!("Authentication failed (HTTP {status})")),
             queried_at: Some(now_millis()),
         });
@@ -623,6 +629,7 @@ async fn query_minimax(api_key: &str, is_cn: bool) -> Result<SubscriptionQuota, 
         extra_usage: None,
         reset_credits: None,
         credits_balance: None,
+        plan_name: None,
         error: None,
         queried_at: Some(now_millis()),
     })
@@ -657,6 +664,7 @@ async fn query_zenmux(base_url: &str, api_key: &str) -> Result<SubscriptionQuota
             extra_usage: None,
             reset_credits: None,
             credits_balance: None,
+            plan_name: None,
             error: Some(format!("Authentication failed (HTTP {status})")),
             queried_at: Some(now_millis()),
         });
@@ -767,6 +775,7 @@ async fn query_zenmux(base_url: &str, api_key: &str) -> Result<SubscriptionQuota
         extra_usage: None,
         reset_credits: None,
         credits_balance: None,
+        plan_name: None,
         error: None,
         queried_at: Some(now_millis()),
     })
@@ -930,6 +939,7 @@ async fn query_opencode_go(api_key: &str) -> Result<SubscriptionQuota, String> {
             extra_usage: None,
             reset_credits: None,
             credits_balance: None,
+            plan_name: None,
             error: Some(format!("Authentication failed (HTTP {status})")),
             queried_at: Some(now_millis()),
         });
@@ -964,6 +974,7 @@ async fn query_opencode_go(api_key: &str) -> Result<SubscriptionQuota, String> {
         extra_usage: None,
         reset_credits: None,
         credits_balance: None,
+        plan_name: None,
         error: None,
         queried_at: Some(now_millis()),
     })
@@ -1045,6 +1056,7 @@ fn command_code_auth_error() -> SubscriptionQuota {
         extra_usage: None,
         reset_credits: None,
         credits_balance: None,
+        plan_name: None,
         error: Some("Authentication failed (HTTP 401 Unauthorized)".to_string()),
         queried_at: Some(now_millis()),
     }
@@ -1159,6 +1171,7 @@ fn parse_command_code_quota(
         extra_usage: None,
         reset_credits: None,
         credits_balance: None,
+        plan_name: None,
         error: None,
         queried_at: Some(now_millis()),
     }
@@ -1643,6 +1656,7 @@ fn volcengine_success(tiers: Vec<QuotaTier>, plan: Option<String>) -> Subscripti
         extra_usage: None,
         reset_credits: None,
         credits_balance: None,
+        plan_name: None,
         error: None,
         queried_at: Some(now_millis()),
     }
@@ -1658,6 +1672,7 @@ fn volcengine_auth_error(detail: String) -> SubscriptionQuota {
         extra_usage: None,
         reset_credits: None,
         credits_balance: None,
+        plan_name: None,
         error: Some(detail),
         queried_at: Some(now_millis()),
     }
@@ -1751,6 +1766,7 @@ fn coding_plan_not_found(error: &str) -> SubscriptionQuota {
         extra_usage: None,
         reset_credits: None,
         credits_balance: None,
+        plan_name: None,
         error: Some(error.to_string()),
         queried_at: None,
     }

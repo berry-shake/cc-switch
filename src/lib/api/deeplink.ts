@@ -9,6 +9,7 @@ export interface DeepLinkImportRequest {
   // Common fields
   app?:
     | "claude"
+    | "claude-desktop"
     | "codex"
     | "gemini"
     | "agy"
@@ -17,6 +18,9 @@ export interface DeepLinkImportRequest {
     | "openclaw"
     | "hermes"
     | "pi"
+    | "mcode"
+    | "kimi"
+    | "dsh"
     | "omp";
   name?: string;
   enabled?: boolean;
