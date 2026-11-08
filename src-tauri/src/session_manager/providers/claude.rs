@@ -88,8 +88,21 @@ fn scan_roots_with_status(
 /// fixtures and single-root callers; the multi-root path above attaches the
 /// source directory and resume command.
 #[cfg(test)]
+fn collect_jsonl_files_with_status(root: &Path, files: &mut Vec<PathBuf>, status: &mut ScanStatus) {
+    for entry in status.entries(root) {
+        let path = entry.path();
+        if status.is_dir(&path) {
+            collect_jsonl_files_with_status(&path, files, status);
+        } else if path.extension().and_then(|ext| ext.to_str()) == Some("jsonl") {
+            files.push(path);
+        }
+    }
+}
+
+#[cfg(test)]
 pub(crate) fn scan_sessions_in_root(root: &Path, status: &mut ScanStatus) -> Vec<SessionMeta> {
-    let files = claude_session_roots::collect_files(root).unwrap_or_default();
+    let mut files = Vec::new();
+    collect_jsonl_files_with_status(root, &mut files, status);
     PARSE_CACHE.scan_with_status(files, scan_session_file, status)
 }
 
