@@ -27,7 +27,7 @@ use super::blocks::{
 };
 use super::utils::{
     extract_text, parse_timestamp_to_ms, path_basename, read_head_tail_lines, truncate_summary,
-    FileParseCache, JsonlSpan, LineSpans, TITLE_MAX_CHARS,
+    FileParseCache, JsonlSpan, LineSpans, ScanStatus, TITLE_MAX_CHARS,
 };
 
 const PROVIDER_ID: &str = "claude";
@@ -39,7 +39,18 @@ pub fn scan_sessions() -> Vec<SessionMeta> {
     scan_roots(&claude_session_roots::roots())
 }
 
+pub(crate) fn scan_sessions_with_status(status: &mut ScanStatus) -> Vec<SessionMeta> {
+    scan_roots_with_status(&claude_session_roots::roots(), status)
+}
+
 fn scan_roots(roots: &[ClaudeSessionRoot]) -> Vec<SessionMeta> {
+    scan_roots_with_status(roots, &mut ScanStatus::default())
+}
+
+fn scan_roots_with_status(
+    roots: &[ClaudeSessionRoot],
+    status: &mut ScanStatus,
+) -> Vec<SessionMeta> {
     let mut files = Vec::new();
     let mut sources = HashMap::new();
     for root in roots {
@@ -59,7 +70,7 @@ fn scan_roots(roots: &[ClaudeSessionRoot]) -> Vec<SessionMeta> {
             ),
         }
     }
-    let mut sessions = PARSE_CACHE.scan(files, scan_session_file);
+    let mut sessions = PARSE_CACHE.scan_with_status(files, scan_session_file, status);
     for meta in &mut sessions {
         if let Some(dir) = meta
             .source_path
@@ -71,6 +82,15 @@ fn scan_roots(roots: &[ClaudeSessionRoot]) -> Vec<SessionMeta> {
         }
     }
     sessions
+}
+
+/// Scan one Claude projects directory. Used by the session search indexer for
+/// fixtures and single-root callers; the multi-root path above attaches the
+/// source directory and resume command.
+#[cfg(test)]
+pub(crate) fn scan_sessions_in_root(root: &Path, status: &mut ScanStatus) -> Vec<SessionMeta> {
+    let files = claude_session_roots::collect_files(root).unwrap_or_default();
+    PARSE_CACHE.scan_with_status(files, scan_session_file, status)
 }
 
 pub fn delete_session(_root: &Path, path: &Path, session_id: &str) -> Result<bool, String> {
