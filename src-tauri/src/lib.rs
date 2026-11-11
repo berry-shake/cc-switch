@@ -14,6 +14,7 @@ mod codex_rollout_file;
 mod codex_state_db;
 mod commands;
 mod config;
+mod copilot_config;
 mod database;
 mod deeplink;
 mod dsh_config;
@@ -881,7 +882,8 @@ pub fn run() {
                 app_state.db.is_providers_empty().unwrap_or(false);
 
             for app_type in
-                crate::app_config::AppType::all().filter(|t| !t.is_additive_mode())
+                crate::app_config::AppType::all()
+                    .filter(crate::services::provider::imports_default_config)
             {
                 if !crate::services::provider::should_import_default_config_on_startup(
                     &app_state,
@@ -2005,6 +2007,7 @@ pub fn run() {
             commands::copilot_get_models_for_account,
             commands::copilot_get_usage,
             commands::copilot_get_usage_for_account,
+            commands::copilot_cli_signed_in_account,
             // OMO commands
             commands::read_omo_local_file,
             commands::get_current_omo_provider_id,
@@ -2284,7 +2287,11 @@ fn is_chinese_locale() -> bool {
     std::env::var("LANG")
         .or_else(|_| std::env::var("LC_ALL"))
         .or_else(|_| std::env::var("LC_MESSAGES"))
-        .map(|lang| lang.starts_with("zh"))
+        .map(|lang| {
+            lang.split(['-', '_', '.', '@'])
+                .next()
+                .is_some_and(|language| language.eq_ignore_ascii_case("zh"))
+        })
         .unwrap_or(false)
 }
 

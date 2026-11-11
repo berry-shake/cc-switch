@@ -203,6 +203,16 @@ describe("usage trend series order", () => {
 });
 
 describe("formatUsageTrendTokenTickLabel", () => {
+  it.each(["zhb", "jam"])(
+    "avoids Chinese/Japanese axis units for %s",
+    (locale) => {
+      const formatter = createUsageTrendTokenTickFormatter(locale);
+      expect(formatUsageTrendTokenTickLabel(50_000_000, formatter)).not.toMatch(
+        /[千亿億万萬]/,
+      );
+    },
+  );
+
   it("uses localized compact units for large token axis ticks", () => {
     const zhFormatter = createUsageTrendTokenTickFormatter("zh-CN");
     const zhTwFormatter = createUsageTrendTokenTickFormatter("zh-TW");

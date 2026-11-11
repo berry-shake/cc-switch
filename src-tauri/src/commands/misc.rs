@@ -1437,6 +1437,7 @@ async fn get_single_tool_version_impl(
         "kimi" => fetch_npm_latest_for_tool(&client, "@moonshot-ai/kimi-code", tool, local).await,
         "dsh" => fetch_npm_latest_for_tool(&client, "@deepseek-ai/dsh", tool, local).await,
         "agy" => fetch_agy_latest_version(&client).await,
+        "copilot" => fetch_npm_latest_for_tool(&client, "@github/copilot", tool, local).await,
         _ => None,
     };
 
@@ -3603,6 +3604,7 @@ fn npm_package_for(tool: &str) -> Option<&'static str> {
         "mcode" => Some("@minimax-ai/code"),
         "kimi" => Some("@moonshot-ai/kimi-code"),
         "dsh" => Some("@deepseek-ai/dsh"),
+        "copilot" => Some("@github/copilot"),
         _ => None,
     }
 }

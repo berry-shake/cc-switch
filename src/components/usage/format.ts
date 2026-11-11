@@ -31,6 +31,7 @@ export const DISPLAY_CURRENCIES = [
   "JPY",
   "TWD",
   "TRY",
+  "KRW",
 ] as const;
 
 export type DisplayCurrency = (typeof DISPLAY_CURRENCIES)[number];
@@ -42,7 +43,7 @@ export type DisplayCurrency = (typeof DISPLAY_CURRENCIES)[number];
 export const DEFAULT_EXCHANGE_RATES: Record<
   Exclude<DisplayCurrency, "USD">,
   number
-> = { CNY: 6.8, EUR: 0.87, JPY: 158, TWD: 32, TRY: 48 };
+> = { CNY: 6.8, EUR: 0.87, JPY: 158, TWD: 32, TRY: 48, KRW: 1325 };
 
 /** 汇率来源：自动获取（每日更新）或手动填写 */
 export const RATE_SOURCES = ["auto", "manual"] as const;
@@ -152,6 +153,7 @@ const CURRENCY_SYMBOL: Record<DisplayCurrency, string> = {
   JPY: "¥",
   TWD: "NT$",
   TRY: "₺",
+  KRW: "₩",
 };
 
 /** 日元面额大（1 美元约 158 日元），同一处少显示两位小数：$0.0012 → ¥0.19 */

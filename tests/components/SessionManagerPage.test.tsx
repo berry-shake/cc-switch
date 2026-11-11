@@ -545,8 +545,8 @@ describe("SessionManagerPage", () => {
     await openAppMenu();
     const menu = await screen.findByRole("menu");
     const items = within(menu).getAllByRole("menuitemradio");
-    // 全部应用 + 13 个来源，按会话数从多到少
-    expect(items).toHaveLength(14);
+    // 全部应用 + 14 个来源（包含 GitHub Copilot CLI），按会话数从多到少
+    expect(items).toHaveLength(15);
     expect(items[0]).toHaveTextContent("全部应用5");
     expect(items[1]).toHaveTextContent("Codex3");
     expect(items[items.length - 1]).toHaveTextContent("无会话");
@@ -581,6 +581,7 @@ describe("SessionManagerPage", () => {
         kimi: false,
         dsh: false,
         agy: false,
+        copilot: false,
       },
     });
     renderPage("codex");

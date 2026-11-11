@@ -101,6 +101,7 @@ impl Database {
             enabled_agy BOOLEAN NOT NULL DEFAULT 0,
             enabled_kimi BOOLEAN NOT NULL DEFAULT 0,
             enabled_dsh BOOLEAN NOT NULL DEFAULT 0,
+            enabled_copilot BOOLEAN NOT NULL DEFAULT 0,
             enabled_hermes BOOLEAN NOT NULL DEFAULT 0,
             enabled_omp BOOLEAN NOT NULL DEFAULT 0,
             enabled_mcode BOOLEAN NOT NULL DEFAULT 0,
@@ -137,6 +138,7 @@ impl Database {
             enabled_agy BOOLEAN NOT NULL DEFAULT 0,
             enabled_kimi BOOLEAN NOT NULL DEFAULT 0,
             enabled_dsh BOOLEAN NOT NULL DEFAULT 0,
+            enabled_copilot BOOLEAN NOT NULL DEFAULT 0,
             enabled_hermes BOOLEAN NOT NULL DEFAULT 0,
             enabled_omp BOOLEAN NOT NULL DEFAULT 0,
             installed_at INTEGER NOT NULL DEFAULT 0,
@@ -714,7 +716,7 @@ impl Database {
                     }
                     24 => {
                         // Fork v24 predates upstream v4.0.22, which calls its own
-                        // DeepSeek Harness layout v24. Add the upstream columns on
+                        // DeepSeek Harness layout v24. Add both upstream columns on
                         // top of the fork layout instead of sharing a version number.
                         for table in ["mcp_servers", "skills"] {
                             if Self::table_exists(conn, table)? {
@@ -722,6 +724,12 @@ impl Database {
                                     conn,
                                     table,
                                     "enabled_dsh",
+                                    "BOOLEAN NOT NULL DEFAULT 0",
+                                )?;
+                                Self::add_column_if_missing(
+                                    conn,
+                                    table,
+                                    "enabled_copilot",
                                     "BOOLEAN NOT NULL DEFAULT 0",
                                 )?;
                             }
@@ -744,6 +752,19 @@ impl Database {
                     }
                 }
                 version = Self::get_user_version(conn)?;
+            }
+            // v25 is already used by the fork's DSH migration. Upstream v4.0.29
+            // uses the same version for Copilot, so reconcile the column for an
+            // existing fork database that already reports user_version=25.
+            for table in ["mcp_servers", "skills"] {
+                if Self::table_exists(conn, table)? {
+                    Self::add_column_if_missing(
+                        conn,
+                        table,
+                        "enabled_copilot",
+                        "BOOLEAN NOT NULL DEFAULT 0",
+                    )?;
+                }
             }
             Ok(())
         })();
@@ -4312,6 +4333,62 @@ mod tests {
             assert_eq!(flags, (1, 0));
         }
         Database::apply_schema_migrations_on_conn(&conn)?;
+        Ok(())
+    }
+
+    #[test]
+    fn copilot_migration_preserves_existing_flags_and_defaults_to_disabled() -> Result<(), AppError>
+    {
+        // v23 先经 dsh 迁移（v23→v24）再经 copilot 迁移（v24→v25）；v24 只走后者。
+        for start in [23, 24] {
+            let conn = Connection::open_in_memory()?;
+            conn.execute_batch("CREATE TABLE mcp_servers(id TEXT PRIMARY KEY, enabled_kimi BOOLEAN); CREATE TABLE skills(id TEXT PRIMARY KEY, enabled_claude BOOLEAN); INSERT INTO mcp_servers VALUES ('m',1); INSERT INTO skills VALUES ('s',1);")?;
+            if start == 24 {
+                conn.execute_batch("ALTER TABLE mcp_servers ADD COLUMN enabled_dsh BOOLEAN NOT NULL DEFAULT 0; ALTER TABLE skills ADD COLUMN enabled_dsh BOOLEAN NOT NULL DEFAULT 0; UPDATE mcp_servers SET enabled_dsh = 1;")?;
+            }
+            Database::set_user_version(&conn, start)?;
+            Database::apply_schema_migrations_on_conn(&conn)?;
+            assert_eq!(Database::get_user_version(&conn)?, SCHEMA_VERSION);
+            for (table, flag, dsh) in [
+                ("mcp_servers", "enabled_kimi", i64::from(start == 24)),
+                ("skills", "enabled_claude", 0),
+            ] {
+                let flags = conn.query_row(
+                    &format!("SELECT {flag}, enabled_dsh, enabled_copilot FROM {table}"),
+                    [],
+                    |row| {
+                        Ok((
+                            row.get::<_, i64>(0)?,
+                            row.get::<_, i64>(1)?,
+                            row.get::<_, i64>(2)?,
+                        ))
+                    },
+                )?;
+                assert_eq!(flags, (1, dsh, 0), "start version {start}, table {table}");
+            }
+            Database::apply_schema_migrations_on_conn(&conn)?;
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn copilot_clean_database_persists_mcp_and_skill_flags_independently() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        let server = serde_json::from_value(serde_json::json!({"id":"m", "name":"m", "server":{"command":"echo"}, "apps":{"copilot":true,"kimi":true}})).unwrap();
+        db.save_mcp_server(&server)?;
+        db.update_mcp_server_app_enabled("m", &crate::app_config::AppType::Copilot, false)?;
+        let saved = db.get_all_mcp_servers()?;
+        assert!(!saved["m"].apps.copilot);
+        assert!(saved["m"].apps.kimi);
+        let skill = serde_json::from_value(serde_json::json!({"id":"s", "name":"s", "description":"", "directory":"s", "apps":{"copilot":true,"claude":true}, "installedAt":0})).unwrap();
+        db.save_skill(&skill)?;
+        let saved = db.get_installed_skill("s")?.unwrap();
+        assert!(saved.apps.copilot && saved.apps.claude);
+        let mut apps = saved.apps.clone();
+        apps.copilot = false;
+        db.update_skill_apps("s", &apps)?;
+        let saved = db.get_all_installed_skills()?;
+        assert!(!saved["s"].apps.copilot && saved["s"].apps.claude);
         Ok(())
     }
 

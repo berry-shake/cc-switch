@@ -38,6 +38,7 @@ pub(crate) fn provider_exists_in_live_config(
         }
         AppType::Mcode => crate::mcode_config::get_providers()
             .map(|providers| providers.contains_key(provider_id)),
+        AppType::Copilot => crate::copilot_config::provider_key_exists(provider_id),
         AppType::Omp => Ok(crate::omp_config::get_providers()?.contains_key(provider_id)),
         _ => Ok(false),
     }
@@ -312,6 +313,7 @@ fn settings_contain_common_config(app_type: &AppType, settings: &Value, snippet:
         | AppType::Kimi
         | AppType::Dsh
         | AppType::Agy
+        | AppType::Copilot
         | AppType::ClaudeDesktop => false,
     }
 }
@@ -392,7 +394,8 @@ pub(crate) fn remove_common_config_from_settings(
         | AppType::Dsh
         | AppType::ClaudeDesktop
         | AppType::Agy
-        | AppType::Omp => Ok(settings.clone()),
+        | AppType::Omp
+        | AppType::Copilot => Ok(settings.clone()),
     }
 }
 
@@ -727,6 +730,11 @@ pub(crate) fn write_live_snapshot(app_type: &AppType, provider: &Provider) -> Re
                 "Antigravity configuration requires the provider switch flow".into(),
             ));
         }
+        AppType::Copilot => {
+            return Err(AppError::InvalidInput(
+                "Copilot providers use the native provider service".into(),
+            ));
+        }
     }
     Ok(())
 }
@@ -888,7 +896,12 @@ pub fn sync_current_to_live(state: &AppState) -> Result<(), AppError> {
     for app_type in AppType::all() {
         if matches!(
             app_type,
-            AppType::Pi | AppType::Mcode | AppType::Kimi | AppType::Dsh | AppType::Omp
+            AppType::Pi
+                | AppType::Mcode
+                | AppType::Kimi
+                | AppType::Dsh
+                | AppType::Omp
+                | AppType::Copilot
         ) {
             continue;
         }
@@ -1044,7 +1057,7 @@ pub fn read_live_settings(app_type: AppType) -> Result<Value, AppError> {
             let config = crate::hermes_config::yaml_to_json(&yaml_config)?;
             Ok(config)
         }
-        AppType::Pi | AppType::Omp => Err(AppError::InvalidInput(format!(
+        AppType::Pi | AppType::Omp | AppType::Copilot => Err(AppError::InvalidInput(format!(
             "{} providers are read from the native models file",
             app_type.as_str()
         ))),
@@ -1060,9 +1073,9 @@ pub fn read_live_settings(app_type: AppType) -> Result<Value, AppError> {
 /// Returns `Ok(true)` if a provider was actually imported,
 /// `Ok(false)` if skipped (providers already exist for this app).
 pub fn import_default_config(state: &AppState, app_type: AppType) -> Result<bool, AppError> {
-    // Additive mode apps (OpenCode, OpenClaw) should use their dedicated
-    // import_xxx_providers_from_live functions, not this generic default config import
-    if app_type.is_additive_mode() {
+    // Additive applications use their dedicated importers, except Copilot's
+    // official login card which is represented by the native settings file.
+    if !imports_default_config(&app_type) {
         return Ok(false);
     }
 
@@ -1165,6 +1178,18 @@ pub fn import_default_config(state: &AppState, app_type: AppType) -> Result<bool
             }
             live
         }
+        AppType::Copilot => {
+            // 刚装好、还没在 Copilot 里选过模型时没有 settings.json：同样没什么可导入，不报错。
+            if !crate::copilot_config::settings_path().exists() {
+                return Ok(false);
+            }
+            let live = crate::copilot_config::read_live_settings()?;
+            // Copilot 首次启动写出的 settings.json 没有模型，不是用户的供应商，不导入。
+            if !crate::copilot_config::has_managed_content(&live) {
+                return Ok(false);
+            }
+            live
+        }
         // OpenCode, OpenClaw and Hermes use additive mode and are handled by early return above
         AppType::OpenCode
         | AppType::OpenClaw
@@ -1205,7 +1230,7 @@ pub fn import_default_config(state: &AppState, app_type: AppType) -> Result<bool
             } else {
                 "custom"
             }
-        } else if matches!(app_type, AppType::Agy) {
+        } else if matches!(app_type, AppType::Agy | AppType::Copilot) {
             // Key 只在进程环境里，从不落盘：从 live 导入的一定是 agy 自己的登录。
             "official"
         } else {
@@ -1214,11 +1239,21 @@ pub fn import_default_config(state: &AppState, app_type: AppType) -> Result<bool
         .to_string(),
     );
 
+    if matches!(app_type, AppType::Copilot) {
+        // 导入的是 Copilot 自己的登录：和预设里的官方卡用同一套名称和图标。
+        provider.name = "GitHub Copilot".to_string();
+        provider.icon = Some("githubcopilot".to_string());
+        provider.website_url = Some("https://github.com/features/copilot/cli".to_string());
+    }
+
     state.db.save_provider(app_type.as_str(), &provider)?;
-    state
-        .db
-        .set_current_provider(app_type.as_str(), &provider.id)?;
-    crate::settings::set_current_provider(&app_type, Some(provider.id.as_str()))?;
+    // Copilot 是累加式，没有直连指针：「默认」看 Copilot 自己的 settings.json。
+    if !app_type.is_additive_mode() {
+        state
+            .db
+            .set_current_provider(app_type.as_str(), &provider.id)?;
+        crate::settings::set_current_provider(&app_type, Some(provider.id.as_str()))?;
+    }
 
     // 初次导入已有配置时随手补出官方入口，对齐其它应用"首启动 = 导入 default
     // + 播种官方条目"的观感。grokbuild 种子晚于 `official_providers_seeded`
@@ -1237,6 +1272,12 @@ pub fn import_default_config(state: &AppState, app_type: AppType) -> Result<bool
     Ok(true) // 真正导入了
 }
 
+/// 这个应用是否从 live 导入 `default` 供应商：切换式应用都导入；累加式应用里只有 Copilot
+/// （官方登录卡来自 settings.json，自带模型卡仍由原生 providers.json 管理）。
+pub(crate) fn imports_default_config(app_type: &AppType) -> bool {
+    !app_type.is_additive_mode() || matches!(app_type, AppType::Copilot)
+}
+
 /// Decide whether startup should auto-import the current live config as `default`.
 ///
 /// This is intentionally stricter than the manual import path:
@@ -1246,7 +1287,7 @@ pub fn should_import_default_config_on_startup(
     state: &AppState,
     app_type: &AppType,
 ) -> Result<bool, AppError> {
-    if app_type.is_additive_mode() {
+    if app_type.is_additive_mode() && !matches!(app_type, AppType::Copilot) {
         return Ok(false);
     }
 

@@ -5,6 +5,12 @@ All notable changes to CC Switch will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.0.29-mod] - 2026-11-11
+
+- Merged the official upstream v4.0.29 release, including native GitHub Copilot CLI management, Copilot MCP/Skills/session integration, Korean and Russian locales, and the upstream Codex/Responses fixes.
+- Retained the fork's independent Oh My Pi integration, Claude additional configuration directories, Codex capacity/forecast card and Fast/cache-write accounting, and schema 25 migration layout. Copilot columns are reconciled without changing existing DSH or OMP data.
+- Local macOS arm64 builds use ad-hoc signing, without Apple notarization.
+
 ## [4.0.28-mod] - 2026-11-08
 
 - Merged the official upstream v4.0.28 release into mod. Retained the fork's independent Oh My Pi integration, Claude additional configuration directories, Codex capacity/forecast card (Codex tab only, visible on lookup failure) and durable usage deduplication.

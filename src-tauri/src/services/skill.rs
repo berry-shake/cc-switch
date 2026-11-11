@@ -714,6 +714,9 @@ impl SkillService {
             AppType::Omp => {
                 return Ok(crate::omp_config::get_omp_agent_dir()?.join("skills"));
             }
+            AppType::Copilot => {
+                return Ok(crate::copilot_config::skills_dir());
+            }
             AppType::Agy => {
                 return Ok(crate::config::get_home_dir()
                     .join(".gemini")
@@ -742,6 +745,7 @@ impl SkillService {
             AppType::Pi => crate::pi_config::get_pi_agent_dir()?.join("skills"),
             AppType::Omp => crate::omp_config::get_omp_agent_dir()?.join("skills"),
             AppType::Agy => home.join(".gemini").join("config").join("skills"),
+            AppType::Copilot => crate::copilot_config::skills_dir(),
         })
     }
 
@@ -1092,7 +1096,13 @@ impl SkillService {
                     let ssot_dir = Self::get_ssot_dir()?;
                     let source = ssot_dir.join(&directory);
                     let mut managed_destinations = Vec::new();
-                    for app in [AppType::Mcode, AppType::Agy, AppType::Kimi, AppType::Dsh] {
+                    for app in [
+                        AppType::Mcode,
+                        AppType::Agy,
+                        AppType::Kimi,
+                        AppType::Dsh,
+                        AppType::Copilot,
+                    ] {
                         if skill.apps.is_enabled_for(&app) {
                             let destination = Self::get_distinct_app_skills_dir(&ssot_dir, &app)?
                                 .join(&directory);
@@ -1110,7 +1120,7 @@ impl SkillService {
                     let mut pi_cleanup_incomplete = false;
                     let mut removal_paths = Vec::new();
 
-                    for app in [AppType::Pi, AppType::Omp] {
+                    for app in [AppType::Pi, AppType::Omp, AppType::Copilot] {
                         match Self::get_app_skills_dir(&app) {
                             Ok(app_dir) => {
                                 if Self::paths_alias(&ssot_dir, &app_dir) {
@@ -1183,6 +1193,7 @@ impl SkillService {
                                 | AppType::Kimi
                                 | AppType::Dsh
                                 | AppType::Omp
+                                | AppType::Copilot
                         ) {
                             continue;
                         }
@@ -2041,6 +2052,7 @@ impl SkillService {
                 AppType::Kimi,
                 AppType::Dsh,
                 AppType::Omp,
+                AppType::Copilot,
             ] {
                 if skill.apps.is_enabled_for(&app) {
                     let destination = Self::get_app_skills_dir(&app)?.join(&directory);
@@ -2641,6 +2653,7 @@ impl SkillService {
                 | AppType::Kimi
                 | AppType::Dsh
                 | AppType::Omp
+                | AppType::Copilot
         ) {
             return Ok(());
         }
