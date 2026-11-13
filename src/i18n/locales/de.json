@@ -439,7 +439,8 @@
       "title": "Automatische Synchronisierung aktivieren",
       "message": "Wenn die automatische Synchronisierung aktiviert ist, wird jede Änderung an der Datenbank automatisch auf den WebDAV-Server hochgeladen.\n\nDas kann erheblichen Netzwerkverkehr verursachen. Bitte stellen Sie sicher, dass Ihr Netzwerk und Ihr WebDAV-Dienst häufige Datenübertragungen bewältigen können.",
       "confirm": "Verstanden, aktivieren"
-    }
+    },
+    "ompDefaultProviderWarning": "Der globale Standard von Oh My Pi zeigt derzeit auf diesen Anbieter. Wenn du fortfährst, versucht Oh My Pi ein anderes verfügbares Modell; nutze /model, um eines zu wählen, oder /login, um dich bei einem anderen Anbieter anzumelden."
   },
   "settings": {
     "title": "Einstellungen",
@@ -1171,6 +1172,20 @@
     },
     "data": {
       "location": "Speicherort"
+    },
+    "claudeScan": {
+      "title": "Zusätzliche Claude-Scanverzeichnisse",
+      "description": "Nur Sitzungen und Nutzung scannen; es werden keine Anbieter-, MCP- oder Skills-Konfigurationen geschrieben. Wähle ein Konfigurationsstammverzeichnis mit projects. Entfernen löscht keine Dateien und keine historische Nutzung. Wirkt beim Speichern.",
+      "placeholder": "z. B. ~/.claude-work (nicht das projects-Unterverzeichnis)",
+      "add": "Scanverzeichnis hinzufügen",
+      "remove": "Scanverzeichnis entfernen: {{path}}",
+      "status": {
+        "ready": "Bereit",
+        "missing": "projects noch nicht gefunden",
+        "unavailable": "Verzeichnis nicht lesbar",
+        "duplicate": "Verzeichnis bereits enthalten",
+        "invalid": "Absoluten Pfad oder ~/Pfad eingeben"
+      }
     }
   },
   "apps": {
@@ -2477,7 +2492,8 @@
       "confirmAction": "Sichern und neu aufbauen",
       "completed": "Neuaufbau abgeschlossen: {{imported}} importiert, {{errors}} Fehler, {{suspected}} vermutete Duplikate, {{deferred}} zurückgestellte Dateien",
       "failed": "Neuaufbau der Codex-Nutzung fehlgeschlagen: {{error}}",
-      "actionEllipsis": "Codex-Nutzung neu aufbauen"
+      "actionEllipsis": "Codex-Nutzung neu aufbauen",
+      "legacyHint": "Beim Upgrade von einer älteren Version wird die Codex-Sitzungsnutzung nicht mehr gelöscht – der Verlauf bleibt immer unverändert erhalten. Wenn geforkte Sitzungen nach einem Upgrade doppelt oder verschoben wirken, baue sie hier neu auf, um sie auszurichten."
     },
     "totalRecords": "{{total}} Einträge insgesamt",
     "pageSize": "{{count}} pro Seite",
@@ -2800,6 +2816,115 @@
       "title": "Nutzungseinstellungen",
       "pricingSummary": "Preise pro Million Token je Modell festlegen oder von models.dev synchronisieren",
       "managePricing": "Preise verwalten …"
+    },
+    "personalCredits": {
+      "unknown": "Daten ausstehend / Schätzung",
+      "partial": "Nur bekannte Werte. Fehlende Werte sind nicht null; die entsprechende Kapazitätsprognose pausiert.",
+      "used": "Verbrauchte Credits (Rohwert der API)",
+      "rate": "Umrechnung: Credits pro 1 USD",
+      "rateHint": "Eigene Äquivalenz, kein offizieller Abrechnungskurs.",
+      "invalidRate": "Gib einen Kurs größer als 0 und höchstens 1.000.000.000 ein.",
+      "invalidTotals": "Tageseinheiten, Daten oder Schema haben die Prüfung nicht bestanden. Diese Werte wurden nicht als Roh-Credits verwendet.",
+      "unavailableTotals": "Tagessummen sind nicht verfügbar. Kontingent- und Tempo-prognosen bleiben sichtbar.",
+      "boundary": "Grenztage umfassen den ganzen Tag und können Nutzung außerhalb des Zyklus enthalten:",
+      "basis": "Offizielle tägliche Roh-Credits; USD ist eine eigene Äquivalenz",
+      "compactBasis": "Offizielle Roh-Credits",
+      "disclaimer": "USD ist eine eigene Umrechnung der Roh-Credits, keine Rechnung. Tagessummen können verzögert sein und lassen sich an Zyklusgrenzen nicht exakt aufteilen.",
+      "quota": "Offizielles Kontingent",
+      "analyticsUnavailable": "Offizielle Tagesanalysen sind nicht verfügbar. Dieser erfolgreiche Kontingent-Snapshot und die Tempo-prognose bleiben erhalten; du kannst später aktualisieren."
+    },
+    "cycleCapacity": {
+      "title": "Codex zyklusäquivalente Kapazität (Schätzung)",
+      "used": "Verbraucht",
+      "estimate": "Äquivalente Schätzung",
+      "basis": "Basierend auf aktuellem Modell, Tempo und Token-Mix",
+      "compactBasis": "Modell · Tempo · Token-Mix",
+      "calculationMode": "Schätzmethode",
+      "localCalculation": "Lokale Protokolle",
+      "analyticsCalculation": "Offizielle API",
+      "accountEmail": "E-Mail",
+      "lastRefresh": "Zuletzt aktualisiert",
+      "waitingCycleRange": "Zyklusinformationen werden synchronisiert",
+      "quotaUnavailable": "Kontingentabfrage fehlgeschlagen",
+      "quotaUnavailableHint": "Deine Codex-Anmeldung ist möglicherweise abgelaufen oder das Netzwerk nicht erreichbar. Führe `codex login` in einem Terminal aus und versuche es erneut.",
+      "retry": "Erneut versuchen",
+      "analyticsPersonalBasis": "Basierend auf täglichen Tokens und Modell-/Tempo-Creditanteilen aus der offiziellen Nutzungs-API",
+      "analyticsWorkspaceBasis": "Basierend auf Modell-Tokens und Tempo aus der offiziellen Nutzungs-API",
+      "analyticsWaitingBasis": "Warte auf Synchronisierung offizieller Nutzungs- und Modell-/Tempo-Daten",
+      "analyticsPersonalCompactBasis": "Offizielle Tagestokens · Modell/Tempo",
+      "analyticsWorkspaceCompactBasis": "Offizielle Modelltokens · Tempo",
+      "analyticsWaitingCompactBasis": "Offizielle API · synchronisiert",
+      "totalTokens": "Token-äquivalente Kapazität des ganzen Zyklus",
+      "usedTokens": "Verbrauchte token-äquivalente Kapazität",
+      "remainingTokens": "Verbleibende token-äquivalente Kapazität",
+      "totalUsd": "USD-äquivalente Kapazität des ganzen Zyklus",
+      "usedUsd": "Verbrauchte USD-äquivalente Kapazität",
+      "remainingUsd": "Verbleibende USD-äquivalente Kapazität",
+      "disclaimer": "Dies extrapoliert die Einzelkonto-Nutzung dieses Computers aus dem offiziellen Verbrauchsprozentsatz in USD-/Token-äquivalente Werte. Es hängt von Vollständigkeit der lokalen Protokolle und Synchronisierungslatenz ab und ist weder eine offizielle Rechnung noch ein festes Token-Limit.",
+      "analyticsPersonalDisclaimer": "Dies rechnet die von der offiziellen Nutzungs-API gelieferten Tagestokens mit Modell-/Tempo-Creditanteilen kurskorrigiert um und extrapoliert sie aus dem gemeldeten Verbrauchsprozentsatz. Multi-Modell-Zuordnung, tägliche Bucket-Synchronisierung und Zyklus-Reset am selben Tag können Fehler verursachen; dies ist weder eine offizielle Rechnung noch ein festes Token-Limit.",
+      "analyticsWorkspaceDisclaimer": "Dies extrapoliert die von der offiziellen Nutzungs-API gelieferten täglichen Modellstatistiken aus dem gemeldeten Verbrauchsprozentsatz in USD-/Token-äquivalente Werte. Tages-Buckets können verzögert sein und der erste Tag kann überschätzt werden, wenn ein Zyklus am selben Tag zurückgesetzt wird; dies ist weder eine offizielle Rechnung noch ein festes Token-Limit.",
+      "analyticsWaitingDisclaimer": "Offizieller Zyklus oder Nutzung werden möglicherweise noch synchronisiert. Die Kapazität wird nicht extrapoliert, bis sowohl Verbrauchsprozentsatz als auch bepreisbare Nutzung gültig sind.",
+      "unknownPricing": "Mit * markierte Beträge enthalten nur Modelle mit erkannten öffentlichen Preisen.",
+      "analyticsMissingTokenTitle": "Offizielle Token-Summen werden noch synchronisiert",
+      "analyticsMissingTokenDescription": "Für diese Daten sind Modell-Creditdaten verfügbar, aber tägliche Token-Summen fehlen: {{dates}}. Token-/USD-Kapazität nutzt derzeit nur synchronisierte Daten und kann unterschätzt sein; die Summen holen üblicherweise innerhalb von 1–2 Tagen auf.",
+      "analyticsMissingModelTitle": "Modell- und Tempo-Details werden noch synchronisiert",
+      "analyticsMissingModelDescription": "Für diese Daten sind tägliche Token-Summen verfügbar, aber Modell-/Tempo-Creditdetails fehlen: {{dates}}. Token-Summen bleiben erhalten, während USD und Modellzuordnung unvollständig sein können.",
+      "analyticsPartialStartTitle": "Der Zyklusstarttag lässt sich nicht exakt aufteilen",
+      "analyticsPartialStartDescription": "Der aktuelle Zyklus begann teils innerhalb des offiziellen Statistiktags {{date}}, und die API kann die Nutzung vor und nach dem Reset dieses Tages nicht aufteilen. Basierend auf der Nutzung dieses Tages kann die Token-/USD-Kapazität um etwa {{share}} überschätzt sein.",
+      "empty": {
+        "cycleTitle": "Warte auf Zyklusdaten",
+        "cycleDescription": "Die offizielle API hat noch keinen gültigen langen Zyklus geliefert, möglicherweise weil er gerade zurückgesetzt wurde. Die App versucht es automatisch erneut, oder du aktualisierst manuell.",
+        "utilizationTitle": "Warte auf Verbrauchsprozentsatz",
+        "utilizationDescription": "Der Zyklusbereich ist verfügbar, aber der offizielle Verbrauchsprozentsatz wurde noch nicht synchronisiert. Ein fehlender Wert wird nicht als 0 % behandelt.",
+        "firstUsageTitle": "Ein neuer Zyklus hat begonnen",
+        "firstUsageDescription": "Der offizielle Verbrauchsprozentsatz ist 0 %. Token- und USD-äquivalente Kapazität wird nach Synchronisierung der ersten Nutzung berechnet.",
+        "analyticsTitle": "Warte auf offizielle Nutzung",
+        "analyticsDescription": "Der Verbrauchsprozentsatz ist verfügbar, aber offizielle Token-Details oder Modellpreise wurden noch nicht synchronisiert. Versuche später zu aktualisieren.",
+        "localTitle": "Warte auf lokale Nutzung",
+        "localDescription": "Der Verbrauchsprozentsatz ist verfügbar, aber dieser Zyklus hat noch nicht genug lokale Token- oder Kostendaten, um die Kapazität zu schätzen.",
+        "metricValue": "Ausstehend",
+        "ringLabel": "Warte auf schätzbare Nutzung"
+      },
+      "currentStatus": "Aktueller Status",
+      "status": {
+        "warmingUp": "Zyklus gerade gestartet, nicht genug Stichproben",
+        "belowPace": "Unter der gleichmäßigen Basislinie",
+        "onPace": "Nahe der gleichmäßigen Basislinie",
+        "abovePace": "Über der gleichmäßigen Basislinie",
+        "farAbovePace": "Deutlich über der gleichmäßigen Basislinie",
+        "exhausted": "Kontingent erschöpft"
+      },
+      "comparison": {
+        "warmingUp": "noch nicht beurteilt",
+        "belowPace": "unter Basislinie",
+        "onPace": "etwa im Rahmen",
+        "abovePace": "Nutzung erhöht",
+        "farAbovePace": "deutlich über Basislinie",
+        "exhausted": "erschöpft"
+      },
+      "timeProgress": "Zeitfortschritt im Zyklus",
+      "timeProgressValue": "{{progress}} · {{elapsed}} vergangen",
+      "actualVsBaseline": "Tatsächliche / Basislinien-Nutzung (gleicher Punkt)",
+      "actualVsBaselineValue": "{{actual}} / {{baseline}} ({{comparison}})",
+      "cumulativeVsSustainableRate": "Kumulierter Durchschnitt / nachhaltige Rate",
+      "recentRate": "Aktuelle Verbrauchsrate (Stichprobenfenster)",
+      "recentRateValue": "{{rate}} · gemessen über die letzten {{duration}}",
+      "cumulativeExhaustionAt": "Geschätzte Erschöpfung aus kumuliertem Durchschnitt",
+      "recentExhaustionAt": "Geschätzte Erschöpfung aus aktueller Rate",
+      "projectedFinalUtilization": "Prognostizierte Nutzung am Zyklusende bei aktueller Rate",
+      "projectedFinalValue": "{{value}}{{suffix}}",
+      "projectedExhaustEarly": " (voraussichtlich früher erschöpft)",
+      "scheduledResetAt": "Geplanter Zyklus-Reset",
+      "remainingToReset": "Verbleibende Zeit ab Prognosepunkt",
+      "waitingForSample": "Stichproben (mindestens 1 Stunde erforderlich)",
+      "noExhaustionAtCurrentRate": "Keine Erschöpfung bei aktueller Rate",
+      "noExhaustionBeforeReset": "Vor dem Reset nicht zu erwarten",
+      "perDay": "%/Tag",
+      "duration": {
+        "day": "T",
+        "hour": "Std",
+        "minute": "Min"
+      }
     }
   },
   "usageScript": {
@@ -5349,6 +5474,9 @@
       "renameProvider": "Oh-My-Pi-Anbieterschlüssel können nicht umbenannt werden.",
       "providerMissing": "Dieser Oh-My-Pi-Anbieter ist nicht mehr gespeichert.",
       "legacyModelsJson": "Oh My Pi hat noch eine alte models.json, die omp beim nächsten Start nach models.yml migriert. Führen Sie omp einmal aus und fügen Sie den Anbieter dann erneut hinzu."
+    },
+    "prompts": {
+      "reloadNotice": "Offene OMP-Sitzungen laden nicht automatisch neu; führe im Leerlauf /reload aus. Neue Sitzungen lesen sie automatisch."
     }
   },
   "dsh": {
