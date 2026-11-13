@@ -2937,6 +2937,20 @@ fn is_foreign_pip_launcher(tool: &str, path: &Path) -> bool {
             .ends_with(&format!("/scripts/{tool}.exe"))
 }
 
+/// VS Code's `bin\copilot-shim\copilot.exe` is a placeholder that only prints
+/// "GitHub Copilot CLI was not found" when the real CLI is missing. It sits on PATH under
+/// the tool's own name but is never the CLI, so probing it reports "installed but broken"
+/// instead of "not installed". Matched by its directory, which covers `.exe` and `.cmd`.
+#[cfg(any(target_os = "windows", test))]
+fn is_vscode_copilot_shim(tool: &str, path: &Path) -> bool {
+    tool == "copilot"
+        && path
+            .to_string_lossy()
+            .replace('\\', "/")
+            .to_ascii_lowercase()
+            .contains("/copilot-shim/")
+}
+
 /// OpenCode Desktop has shipped both root-level and Electron `resources/` CLI sidecars.
 /// Some Electron releases omitted the sidecar; `resources/app.asar` still identifies the
 /// Desktop bundle, so skip its GUI instead of probing `opencode.exe` with `--version`.
@@ -2944,7 +2958,7 @@ fn is_foreign_pip_launcher(tool: &str, path: &Path) -> bool {
 /// Also skips launchers that only share the tool's name (`is_foreign_pip_launcher`).
 #[cfg(target_os = "windows")]
 fn windows_preferred_tool_executable(tool: &str, path: &Path) -> Option<std::path::PathBuf> {
-    if is_foreign_pip_launcher(tool, path) {
+    if is_foreign_pip_launcher(tool, path) || is_vscode_copilot_shim(tool, path) {
         return None;
     }
     if tool == "opencode"
@@ -5319,11 +5333,12 @@ fn wsl_distro_from_path(path: &Path) -> Option<String> {
 ///
 /// 根据提供商配置的环境变量启动一个带有该提供商特定设置的终端
 /// 无需检查是否为当前激活的提供商，任何提供商都可以打开终端
-#[allow(non_snake_case)]
+#[allow(non_snake_case, clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn open_provider_terminal(
     state: State<'_, crate::store::AppState>,
     agy_accounts: State<'_, crate::commands::AgyAccountState>,
+    copilot_auth: State<'_, crate::commands::CopilotAuthState>,
     app: String,
     #[allow(non_snake_case)] providerId: String,
     cwd: Option<String>,
@@ -5347,6 +5362,10 @@ pub async fn open_provider_terminal(
         AppType::Agy => {
             switch_agy_to_bound_account(&agy_accounts.0, provider).await?;
             agy_terminal_launch(provider)?
+        }
+        AppType::Copilot => {
+            let account = copilot_bound_account(&copilot_auth, provider).await?;
+            copilot_terminal_launch(provider, account)?
         }
         AppType::Codex => codex_terminal_launch(state.db.as_ref(), provider)?,
         AppType::GrokBuild => grok_terminal_launch(state.db.as_ref(), provider)?,
@@ -5926,6 +5945,118 @@ const AGY_MODEL_BATCH_VAR: &str = "CC_SWITCH_AGY_MODEL";
 /// 程序：用户 shell 的 rc 文件在中间执行，直接用原名会被 rc 里的 export 覆盖。
 #[cfg_attr(windows, allow(dead_code))]
 const LAUNCH_ENV_PREFIX: &str = "CC_SWITCH_LAUNCH_ENV_";
+
+/// 官方卡绑定的授权中心 GitHub 账号的 Token 和域名；没绑时为 `None`，跟着 Copilot CLI 自己的登录走。
+async fn copilot_bound_account(
+    auth: &crate::commands::CopilotAuthState,
+    provider: &crate::provider::Provider,
+) -> Result<Option<(String, String)>, String> {
+    let Some(account_id) = crate::services::provider::copilot_direct::bound_account_id(provider)
+    else {
+        return Ok(None);
+    };
+    let credentials = auth
+        .0
+        .read()
+        .await
+        .github_credentials_for_account(&account_id)
+        .await;
+    match credentials {
+        Some(credentials) => Ok(Some(credentials)),
+        None => Err(crate::error::AppError::localized(
+            "copilot.account.bound_missing",
+            format!(
+                "「{}」绑定的 GitHub 账号不在授权中心里：请先在授权中心添加它，或编辑这张卡改选账号",
+                provider.name
+            ),
+            format!(
+                "The GitHub account bound to \"{}\" is not in the Auth Center. Add it there, or edit the card to choose another account.",
+                provider.name
+            ),
+        )
+        .to_string()),
+    }
+}
+
+/// GitHub Copilot CLI：官方卡跑 `copilot`，卡上设了模型就加 `--model`；绑了授权中心账号时
+/// 经 `COPILOT_GITHUB_TOKEN` 只给这一个进程。自带模型卡要先添加进 providers.json，启动时
+/// `--model=<卡片 id>/<第一个模型>`，并清掉所有 `COPILOT_PROVIDER_*`（有它们 Copilot 就不读
+/// providers.json）。
+fn copilot_terminal_launch(
+    provider: &crate::provider::Provider,
+    account: Option<(String, String)>,
+) -> Result<ProviderLaunch, String> {
+    let launch = crate::services::provider::copilot_direct::terminal_launch(provider)
+        .map_err(|e| e.to_string())?;
+    copilot_launch_command(&provider.name, launch, account)
+}
+
+fn copilot_launch_command(
+    provider_name: &str,
+    launch: crate::copilot_config::CopilotLaunch,
+    account: Option<(String, String)>,
+) -> Result<ProviderLaunch, String> {
+    let mut env = launch.env;
+    if !launch.byok {
+        if let Some((token, domain)) = account {
+            env.push(("COPILOT_GITHUB_TOKEN", Some(token)));
+            env.push(("COPILOT_GH_HOST", Some(domain)));
+        }
+    }
+    // npm 装的是 copilot.cmd：不加 `call` 跑完不回到启动 .bat，后面删临时文件（含 Key、
+    // GitHub 令牌的 .bat 本身）的几行就不执行了。`call` 会把 `%` 再展开一遍、把引号里的 `^`
+    // 加倍，cmd 也不认 `\"`，所以模型名里有这些字符时不在 Windows 上启动。
+    // 模型名会拼进启动命令：控制字符（换行）在任何平台都拒绝，保存时已经校验过，这里兜底。
+    if launch
+        .model
+        .as_deref()
+        .is_some_and(|model| model.chars().any(char::is_control))
+    {
+        return Err(format!(
+            "「{provider_name}」的模型名里有换行等控制字符，不能用来启动"
+        ));
+    }
+    if cfg!(target_os = "windows")
+        && launch
+            .model
+            .as_deref()
+            .is_some_and(|model| model.contains(['"', '%', '^']))
+    {
+        return Err(format!(
+            "「{provider_name}」的模型名里有 Windows 终端传不过去的字符（\" % ^）"
+        ));
+    }
+    let (mut args, mut batch_command, batch_vars) = match launch.model {
+        Some(model) => (
+            vec![format!("--model={model}")],
+            format!("call copilot \"--model=%{COPILOT_MODEL_BATCH_VAR}%\""),
+            vec![(COPILOT_MODEL_BATCH_VAR, model)],
+        ),
+        None => (Vec::new(), "call copilot".to_string(), Vec::new()),
+    };
+    // 只会是 copilot_config::REASONING_EFFORTS 里的小写单词（已校验），可以直接写进命令。
+    if let Some(effort) = launch.reasoning_effort {
+        args.push(format!("--reasoning-effort={effort}"));
+        batch_command.push_str(&format!(" --reasoning-effort={effort}"));
+    }
+    Ok(ProviderLaunch {
+        title: if launch.byok {
+            "Starting GitHub Copilot CLI with this provider's model"
+        } else {
+            "Starting GitHub Copilot CLI with your GitHub sign-in"
+        },
+        detail: None,
+        program: "copilot",
+        args,
+        batch_command,
+        env,
+        batch_vars,
+        cleanup: Vec::new(),
+    })
+}
+
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+const COPILOT_MODEL_BATCH_VAR: &str = "CC_SWITCH_COPILOT_MODEL";
 
 /// 同一进程里连开几个终端也不会撞名。
 fn unique_temp_path(stem: &str, ext: &str) -> PathBuf {
@@ -12010,6 +12141,28 @@ mod tests {
         assert!(!is_foreign_pip_launcher(
             "hermes",
             Path::new(r"D:\soft\Python\Python311\Scripts\hermes.exe")
+        ));
+    }
+
+    #[test]
+    fn vscode_copilot_shim_is_rejected_but_real_copilot_is_kept() {
+        assert!(is_vscode_copilot_shim(
+            "copilot",
+            Path::new(r"D:\Microsoft VS Code\bin\copilot-shim\copilot.exe")
+        ));
+        assert!(is_vscode_copilot_shim(
+            "copilot",
+            Path::new(r"C:\Program Files\Microsoft VS Code\bin\COPILOT-SHIM\copilot.cmd")
+        ));
+        // npm's global shim is the real CLI.
+        assert!(!is_vscode_copilot_shim(
+            "copilot",
+            Path::new(r"C:\Users\me\AppData\Roaming\npm\copilot.cmd")
+        ));
+        // Only the copilot tool is affected.
+        assert!(!is_vscode_copilot_shim(
+            "codex",
+            Path::new(r"D:\x\copilot-shim\codex.exe")
         ));
     }
 

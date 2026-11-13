@@ -6,6 +6,7 @@ import {
   fillKimiModel,
   fillOpenClawModel,
   fillOpenCodeModel,
+  fillWorkBuddyModel,
   piPresetThinkingFor,
   piSendsReasoningEffort,
   piThinkingLevelMapFromEfforts,
@@ -331,5 +332,29 @@ describe("piPresetThinkingFor", () => {
         compat: { supportsReasoningEffort: false },
       }),
     ).toBeNull();
+  });
+});
+
+describe("fillWorkBuddyModel", () => {
+  it("fills blank limits and only turns capabilities on", () => {
+    expect(
+      fillWorkBuddyModel(
+        { id: "m", supportsToolCall: true, supportsImages: false },
+        metadata,
+      ),
+    ).toEqual({
+      id: "m",
+      supportsToolCall: true,
+      supportsImages: true,
+      supportsReasoning: true,
+      maxInputTokens: 262144,
+      maxOutputTokens: 32768,
+    });
+    expect(
+      fillWorkBuddyModel(
+        { id: "m", maxInputTokens: 1000, supportsReasoning: true },
+        { reasoning: false, contextWindow: 2000 },
+      ),
+    ).toEqual({ id: "m", maxInputTokens: 1000, supportsReasoning: true });
   });
 });

@@ -63,6 +63,8 @@ pub struct VisibleApps {
     pub agy: bool,
     #[serde(default = "default_true")]
     pub copilot: bool,
+    #[serde(default = "default_true")]
+    pub workbuddy: bool,
 }
 
 impl Default for VisibleApps {
@@ -83,6 +85,7 @@ impl Default for VisibleApps {
             dsh: true,
             agy: true,
             copilot: true,
+            workbuddy: true,
         }
     }
 }
@@ -106,6 +109,7 @@ impl VisibleApps {
             AppType::Dsh => self.dsh,
             AppType::Agy => self.agy,
             AppType::Copilot => self.copilot,
+            AppType::WorkBuddy => self.workbuddy,
         }
     }
 }
@@ -661,6 +665,9 @@ pub struct AppSettings {
     /// 当前 Antigravity CLI 供应商 ID
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub current_provider_agy: Option<String>,
+    /// 当前 GitHub Copilot CLI 供应商 ID（卡片只用于打开终端，保持结构一致）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current_provider_copilot: Option<String>,
 
     // ===== 本地路由（设备级）=====
     /// 写给客户端的代理主机（IP 或主机名），空/未设时按监听地址推（`0.0.0.0` → `127.0.0.1`）。
@@ -788,6 +795,7 @@ impl Default for AppSettings {
             current_provider_openclaw: None,
             current_provider_hermes: None,
             current_provider_agy: None,
+            current_provider_copilot: None,
             proxy_client_host: None,
             skill_sync_method: SyncMethod::default(),
             skill_storage_location: SkillStorageLocation::default(),
@@ -893,7 +901,7 @@ impl AppSettings {
             .language
             .as_ref()
             .map(|s| s.trim())
-            .filter(|s| matches!(*s, "en" | "zh" | "zh-TW" | "ja" | "tr"))
+            .filter(|s| matches!(*s, "en" | "zh" | "zh-TW" | "de" | "ja" | "tr" | "ko" | "ru"))
             .map(|s| s.to_string());
 
         self.quota_display = self
@@ -1508,12 +1516,13 @@ pub fn get_current_provider(app_type: &AppType) -> Option<String> {
         AppType::OpenClaw => settings.current_provider_openclaw.clone(),
         AppType::Hermes => settings.current_provider_hermes.clone(),
         AppType::Agy => settings.current_provider_agy.clone(),
+        AppType::Copilot => settings.current_provider_copilot.clone(),
         AppType::Pi
         | AppType::Mcode
         | AppType::Kimi
         | AppType::Dsh
         | AppType::Omp
-        | AppType::Copilot => None,
+        | AppType::WorkBuddy => None,
     }
 }
 
@@ -1533,12 +1542,13 @@ pub fn set_current_provider(app_type: &AppType, id: Option<&str>) -> Result<(), 
         AppType::OpenClaw => settings.current_provider_openclaw = id_owned.clone(),
         AppType::Hermes => settings.current_provider_hermes = id_owned.clone(),
         AppType::Agy => settings.current_provider_agy = id_owned.clone(),
+        AppType::Copilot => settings.current_provider_copilot = id_owned.clone(),
         AppType::Pi
         | AppType::Mcode
         | AppType::Kimi
         | AppType::Dsh
         | AppType::Omp
-        | AppType::Copilot => {}
+        | AppType::WorkBuddy => {}
     })
 }
 
@@ -1717,6 +1727,26 @@ mod tests {
     }
     use super::*;
     use crate::app_config::AppType;
+
+    #[test]
+    fn russian_language_survives_normalization() {
+        let mut settings = AppSettings {
+            language: Some("ru".into()),
+            ..Default::default()
+        };
+        settings.normalize_paths();
+        assert_eq!(settings.language.as_deref(), Some("ru"));
+    }
+
+    #[test]
+    fn korean_language_survives_normalization() {
+        let mut settings = AppSettings {
+            language: Some("ko".into()),
+            ..Default::default()
+        };
+        settings.normalize_paths();
+        assert_eq!(settings.language.as_deref(), Some("ko"));
+    }
 
     #[test]
     fn codex_stack_classic_tools_default_on_and_ignore_the_old_off_key() {

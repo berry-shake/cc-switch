@@ -11,7 +11,7 @@ import { ClaudeScanDirectories } from "./ClaudeScanDirectories";
 
 export type DirectoryAppId = Exclude<
   AppId,
-  "claude-desktop" | "mcode" | "agy" | "kimi" | "copilot"
+  "claude-desktop" | "mcode" | "agy" | "kimi" | "copilot" | "workbuddy"
 >;
 
 interface DirectorySettingsProps {

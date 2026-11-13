@@ -126,6 +126,7 @@ const APP_SHORT_NAME: Record<AppId, string> = {
   dsh: "DSH",
   agy: "Antigravity",
   copilot: "Copilot",
+  workbuddy: "WorkBuddy",
 };
 
 export function appShortName(appType: string): string {
