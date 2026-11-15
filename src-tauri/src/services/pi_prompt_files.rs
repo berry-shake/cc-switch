@@ -35,7 +35,7 @@ pub(crate) struct PiAgentsFileGuard {
 impl PiAgentsFileGuard {
     pub(crate) fn acquire(app: &AppType) -> Result<Self, AppError> {
         Ok(Self {
-            _guard: lock_prompt_files()?,
+            _guard: lock_prompt_files(),
             path: app_agent_dir(app)?.join("AGENTS.md"),
             app_name: native_app_name(app)?,
         })
@@ -115,7 +115,7 @@ pub struct PiPromptFileService;
 
 impl PiPromptFileService {
     pub fn read(app: &AppType, kind: PiPromptFileKind) -> Result<PiPromptFileSnapshot, AppError> {
-        let _guard = lock_prompt_files()?;
+        let _guard = lock_prompt_files();
         read_prompt_file(app, kind)
     }
 
@@ -127,7 +127,7 @@ impl PiPromptFileService {
     ) -> Result<PiPromptFileSnapshot, AppError> {
         validate_instruction_content(app, content)?;
 
-        let _guard = lock_prompt_files()?;
+        let _guard = lock_prompt_files();
         let root = app_agent_dir(app)?;
         let path = root.join(kind.filename());
         let label = format!("{} prompt file", native_app_name(app)?);
@@ -141,7 +141,7 @@ impl PiPromptFileService {
         kind: PiPromptFileKind,
         expected_revision: &str,
     ) -> Result<bool, AppError> {
-        let _guard = lock_prompt_files()?;
+        let _guard = lock_prompt_files();
         let path = app_agent_dir(app)?.join(kind.filename());
         let label = format!("{} prompt file", native_app_name(app)?);
         ensure_revision(&path, expected_revision, &label)?;
@@ -165,7 +165,7 @@ pub struct PiPromptTemplateService;
 
 impl PiPromptTemplateService {
     pub fn list(app: &AppType) -> Result<Vec<PiPromptTemplate>, AppError> {
-        let _guard = lock_prompt_files()?;
+        let _guard = lock_prompt_files();
         let app_name = native_app_name(app)?;
         let dir = app_agent_dir(app)?.join("prompts");
         let entries = match fs::read_dir(&dir) {
@@ -218,7 +218,7 @@ impl PiPromptTemplateService {
         }
         let label = format!("{} prompt template", native_app_name(app)?);
         validate_content_size(content, &label)?;
-        let _guard = lock_prompt_files()?;
+        let _guard = lock_prompt_files();
         let dir = app_agent_dir(app)?.join("prompts");
         let path = template_path(&dir, slug);
 
@@ -229,8 +229,13 @@ impl PiPromptTemplateService {
             fs::rename(&original_path, &path)
                 .map_err(|error| AppError::io(&original_path, error))?;
 
-            if let Err(write_error) = atomic_write(&path, content.as_bytes()) {
-                if let Err(rollback_error) = fs::rename(&path, &original_path) {
+            let rollback =
+                || fs::rename(&path, &original_path).map_err(|error| AppError::io(&path, error));
+            let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                atomic_write(&path, content.as_bytes())
+            }));
+            if let Err(write_error) = crate::sync_utils::resume_after_rollback(outcome, rollback) {
+                if let Err(rollback_error) = rollback() {
                     return Err(AppError::Message(format!(
                         "{label} save failed ({write_error}); rename rollback also failed: {rollback_error}"
                     )));
@@ -251,7 +256,7 @@ impl PiPromptTemplateService {
 
     pub fn delete(app: &AppType, slug: &str, expected_revision: &str) -> Result<bool, AppError> {
         validate_template_slug(slug)?;
-        let _guard = lock_prompt_files()?;
+        let _guard = lock_prompt_files();
         let label = format!("{} prompt template", native_app_name(app)?);
         let path = template_path(&app_agent_dir(app)?.join("prompts"), slug);
         ensure_revision(&path, expected_revision, &label)?;
@@ -263,10 +268,8 @@ impl PiPromptTemplateService {
     }
 }
 
-fn lock_prompt_files() -> Result<MutexGuard<'static, ()>, AppError> {
-    PROMPT_FILE_LOCK
-        .lock()
-        .map_err(|error| AppError::Config(format!("native prompt file lock is poisoned: {error}")))
+fn lock_prompt_files() -> MutexGuard<'static, ()> {
+    crate::sync_utils::lock_file_operation(&PROMPT_FILE_LOCK)
 }
 
 fn app_agent_dir(app: &AppType) -> Result<PathBuf, AppError> {
