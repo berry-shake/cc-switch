@@ -1899,11 +1899,11 @@ fn resync_targets_default_to_managed_apps_and_reject_unsupported() {
             "opencode",
             "hermes",
             "pi",
-            "omp",
             "mcode",
             "kimi",
             "dsh",
             "agy",
+            "omp",
             "copilot",
             "workbuddy"
         ]
