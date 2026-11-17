@@ -7,7 +7,6 @@ import {
 import type {
   ClaudeAccountPlan,
   ClaudeAccountQuota,
-  CodexAnalyticsUsage,
   CodexOfficialUsageSnapshot,
   CodexQuotaSnapshot,
   SubscriptionQuota,
@@ -43,11 +42,6 @@ export const subscriptionApi = {
       ),
   getCodexOauthQuota: (accountId: string | null): Promise<SubscriptionQuota> =>
     invoke("get_codex_oauth_quota", { accountId }),
-  getCodexUsageAnalytics: (
-    startDate: string,
-    endDate: string,
-  ): Promise<CodexAnalyticsUsage> =>
-    invoke("get_codex_usage_analytics", { startDate, endDate }),
   getXaiOauthQuota: (accountId: string | null): Promise<SubscriptionQuota> =>
     invoke("get_xai_oauth_quota", { accountId }),
   /** 绑了账号的 Claude 官方卡：按那个账号自己的登录查，带上它的套餐 */

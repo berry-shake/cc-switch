@@ -384,14 +384,6 @@ fn now_millis() -> i64 {
         .as_millis() as i64
 }
 
-pub async fn query_codex_usage_analytics(
-    start_date: &str,
-    end_date: &str,
-) -> Result<CodexAnalyticsUsage, String> {
-    let credentials = crate::services::subscription::read_codex_request_credentials()?;
-    query_codex_usage_analytics_with_credentials(start_date, end_date, &credentials).await
-}
-
 pub(crate) async fn query_codex_usage_analytics_with_credentials(
     start_date: &str,
     end_date: &str,

@@ -1,3 +1,8 @@
+import {
+  LANGUAGES,
+  languageFromLocale,
+  normalizeLanguageTag,
+} from "@/i18n/languages";
 import type { UsageDisplaySettings } from "@/types";
 export function parseFiniteNumber(value: unknown): number | null {
   if (typeof value === "number") {
@@ -432,33 +437,11 @@ export function formatTokensCompact(value: unknown, locale?: string): string {
   return String(num);
 }
 
-function normalizeLanguageTag(language: string): string {
-  return language.toLowerCase().replace(/_/g, "-");
-}
-
-function isTraditionalChineseLanguage(normalizedLanguage: string): boolean {
-  return (
-    normalizedLanguage === "zh-tw" ||
-    normalizedLanguage.startsWith("zh-hant") ||
-    normalizedLanguage.startsWith("zh-hk") ||
-    normalizedLanguage.startsWith("zh-mo")
-  );
-}
-
+/** 语言码或系统区域对应的日期数字 locale；空值用 en-US。 */
 export function getLocaleFromLanguage(language: string): string {
   if (!language) return "en-US";
-  const normalized = normalizeLanguageTag(language);
-  if (normalized === "zh") return "zh-CN";
-  if (isTraditionalChineseLanguage(normalized)) {
-    return "zh-TW";
-  }
-  if (normalized === "zh" || normalized.startsWith("zh-")) return "zh-CN";
-  if (normalized === "de" || normalized.startsWith("de-")) return "de-DE";
-  if (normalized === "ja" || normalized.startsWith("ja-")) return "ja-JP";
-  if (normalized === "ko" || normalized.startsWith("ko-")) return "ko-KR";
-  if (normalized === "tr" || normalized.startsWith("tr-")) return "tr-TR";
-  if (normalized === "ru" || normalized.startsWith("ru-")) return "ru-RU";
-  return "en-US";
+  const id = languageFromLocale(normalizeLanguageTag(language));
+  return LANGUAGES.find((entry) => entry.id === id)!.locale;
 }
 
 interface I18nLike {

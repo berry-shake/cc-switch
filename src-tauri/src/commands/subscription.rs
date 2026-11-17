@@ -3,7 +3,6 @@ use tauri::{Emitter, Manager, State};
 
 use crate::app_config::AppType;
 use crate::services::codex_official_usage::{CodexOfficialUsageSnapshot, CodexQuotaSnapshot};
-use crate::services::codex_usage_analytics::CodexAnalyticsUsage;
 use crate::services::subscription::SubscriptionQuota;
 use crate::store::AppState;
 
@@ -44,17 +43,6 @@ pub async fn get_subscription_quota(
         }
     }
     inner
-}
-
-/// 查询当前 Codex CLI ChatGPT 账号的网页每日用量分析数据。
-/// OAuth 凭据只在 Rust 侧读取和使用，前端只接收脱敏后的 Token/模型统计。
-#[tauri::command(rename_all = "camelCase")]
-pub async fn get_codex_usage_analytics(
-    start_date: String,
-    end_date: String,
-) -> Result<CodexAnalyticsUsage, String> {
-    crate::services::codex_usage_analytics::query_codex_usage_analytics(&start_date, &end_date)
-        .await
 }
 
 /// 查询 Codex CLI 当前账号的额度，并附带不暴露账号标识的稳定缓存域。

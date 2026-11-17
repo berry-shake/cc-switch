@@ -21,7 +21,7 @@ use crate::error::AppError;
 use crate::proxy::usage::calculator::{CostCalculator, ModelPricing};
 use crate::proxy::usage::parser::TokenUsage;
 use crate::services::session_usage::{
-    estimated_first_token_ms, estimated_latency_ms, metadata_modified_nanos,
+    cost_columns, estimated_first_token_ms, estimated_latency_ms, metadata_modified_nanos,
     parse_timestamp_millis, update_sync_state, update_sync_state_on_conn, EstimatedTiming,
     SessionSyncResult,
 };
@@ -29,6 +29,7 @@ use crate::services::sql_helpers::{INPUT_TOKEN_SEMANTICS_LEGACY, INPUT_TOKEN_SEM
 use crate::services::usage_stats::{
     find_model_pricing, has_suspected_codex_session_duplicate, should_skip_session_insert, DedupKey,
 };
+use crate::sync_utils::MutexExt;
 use chrono::{DateTime, Local, TimeZone, Utc};
 use rust_decimal::Decimal;
 use serde::Deserialize;
@@ -40,7 +41,7 @@ use std::os::unix::fs::MetadataExt;
 #[cfg(windows)]
 use std::os::windows::io::AsRawHandle;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, OnceLock, PoisonError};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::SystemTime;
 #[cfg(windows)]
 use windows_sys::Win32::Foundation::{ERROR_INVALID_PARAMETER, ERROR_NOT_SUPPORTED};
@@ -729,9 +730,7 @@ fn replay_caches() -> &'static Mutex<CodexReplayCaches> {
 
 pub(crate) fn clear_codex_replay_caches() {
     // 清空即丢弃持锁 panic 时可能写了一半的内容，所以顺带解除中毒。
-    let mut caches = replay_caches()
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner);
+    let mut caches = replay_caches().lock_recover();
     *caches = CodexReplayCaches::default();
     replay_caches().clear_poison();
 }
@@ -3500,26 +3499,8 @@ fn insert_codex_session_entry_on_conn(
         .entry(model.to_string())
         .or_insert_with(|| find_codex_pricing(conn, model));
     let multiplier = service_tier.quota_cost_multiplier(model);
-    let (input_cost, output_cost, cache_read_cost, cache_creation_cost, total_cost) = match pricing
-    {
-        Some(p) => {
-            let cost = CostCalculator::calculate_for_app("codex", &usage, p, multiplier);
-            (
-                cost.input_cost.to_string(),
-                cost.output_cost.to_string(),
-                cost.cache_read_cost.to_string(),
-                cost.cache_creation_cost.to_string(),
-                cost.total_cost.to_string(),
-            )
-        }
-        None => (
-            "0".to_string(),
-            "0".to_string(),
-            "0".to_string(),
-            "0".to_string(),
-            "0".to_string(),
-        ),
-    };
+    let [input_cost, output_cost, cache_read_cost, cache_creation_cost, total_cost] =
+        cost_columns("codex", &usage, pricing.as_ref(), multiplier);
 
     let inserted_rows = conn
         .prepare_cached(
@@ -9066,8 +9047,7 @@ mod tests {
                     .expect("symlink rollout directory");
             }
         }
-        let previous_home = std::env::var_os("CC_SWITCH_TEST_HOME");
-        std::env::set_var("CC_SWITCH_TEST_HOME", temp.path());
+        let env = crate::test_support::EnvVars::new().set("CC_SWITCH_TEST_HOME", temp.path());
 
         clear_codex_replay_caches();
         // CODEX_REPLAY_DISK=1 时用临时 HOME 下的磁盘库：逐行 autocommit 的
@@ -9142,10 +9122,7 @@ mod tests {
             eprintln!("[REPLAY] wrote {} rows to {out_path}", rows.len());
         }
 
-        match previous_home {
-            Some(value) => std::env::set_var("CC_SWITCH_TEST_HOME", value),
-            None => std::env::remove_var("CC_SWITCH_TEST_HOME"),
-        }
+        drop(env);
         Ok(())
     }
 

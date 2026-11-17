@@ -1,8 +1,9 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useClaudeAccountQuota } from "@/lib/query/subscription";
+import { createTestQueryClient } from "../utils/testQueryClient";
 
 const mocks = vi.hoisted(() => ({ getClaudeAccountQuota: vi.fn() }));
 vi.mock("@/lib/api/subscription", () => ({
@@ -23,9 +24,7 @@ const quota = (plan: unknown) => ({
 });
 
 function setup(stored: { plan?: string; rate_limit_tier?: string }) {
-  const client = new QueryClient({
-    defaultOptions: { queries: { retry: false } },
-  });
+  const client = createTestQueryClient();
   client.setQueryData(statusKey, {
     provider: "claude_official",
     authenticated: true,

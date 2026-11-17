@@ -7,7 +7,7 @@ import {
   within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_VISIBLE_APPS } from "@/config/appConfig";
 import { UNKNOWN_PROJECT_DIR_KEY } from "@/components/sessions/utils";
 import { SessionManagerPage } from "@/components/sessions/SessionManagerPage";
@@ -154,6 +154,10 @@ const setupZetaSession = (word = "zeta") => {
 
 describe("SessionManagerPage", () => {
   beforeEach(() => {
+    // 固定在本地时间的中午：会话时间都是「现在往前几小时」，凌晨跑时会跨到昨天，
+    // 「按时间」分组就不稳定。只假 Date 且照常走时，计时器保持真实。
+    vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
+    vi.setSystemTime(new Date(2026, 5, 15, 12, 0, 0));
     toastSuccessMock.mockReset();
     toastErrorMock.mockReset();
     platform.mac = false;
@@ -251,7 +255,14 @@ describe("SessionManagerPage", () => {
     setSettings({ sessionContentSearchEnabled: true });
   });
 
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("shows Oh My Pi sessions from its app and in the all-apps filter", async () => {
+    const discovery = vi.spyOn(piApi, "getSessionDiscovery").mockResolvedValue({
+      status: "available",
+    });
     setSessionFixtures(
       [
         {
@@ -269,6 +280,7 @@ describe("SessionManagerPage", () => {
     expect(
       await screen.findByText("Native OMP conversation"),
     ).toBeInTheDocument();
+    expect(discovery).toHaveBeenCalledWith("omp");
     await openAppMenu();
     const menu = await screen.findByRole("menu");
     expect(
@@ -280,6 +292,7 @@ describe("SessionManagerPage", () => {
     expect(
       await screen.findByText("Native OMP conversation"),
     ).toBeInTheDocument();
+    discovery.mockRestore();
   });
 
   it("surfaces a relative Pi sessionDir instead of presenting an empty scan as authoritative", async () => {
