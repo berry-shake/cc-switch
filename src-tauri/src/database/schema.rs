@@ -2092,6 +2092,13 @@ impl Database {
             ("gpt-6-astra", "GPT-6 Astra", "10", "50", "1", "12.5"),
             // 2026-09-22: Standard API rates; subscription Fast is applied
             // separately by the Codex quota estimator, never baked into prices.
+            // GPT-6.2 Sol / Astra（2026-11-17 发布）：2026-11-17 核对官方模型页 + 价页 + models.dev，
+            // 取 Standard ≤272K 短上下文价，cache write 取 30 分钟档（12 小时档为 2 倍）。
+            // 长上下文档、Batch/Fast/Ultrafast 与 astra-law 配置本表无法表达，同 GPT-6 一样忽略。
+            // https://developers.openai.com/api/docs/models/gpt-6.2-sol
+            // https://developers.openai.com/api/docs/models/gpt-6.2-astra
+            ("gpt-6.2-sol", "GPT-6.2 Sol", "2", "10", "0.10", "2.50"),
+            ("gpt-6.2-astra", "GPT-6.2 Astra", "8", "40", "0.40", "10"),
             // GPT-6.1 Sol: Standard short-context pricing; cached input is 0.05× input.
             // https://developers.openai.com/api/docs/models/gpt-6.1-sol
             ("gpt-6.1-sol", "GPT-6.1 Sol", "2", "10", "0.10", "2.50"),
