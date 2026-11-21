@@ -166,9 +166,6 @@ export function resolveCodexQuotaCycleWindow(
   };
 }
 
-/** @deprecated 新调用方请使用语义更明确的 `resolveCodexQuotaCycle`。 */
-export const resolveCodexLongCycle = resolveCodexQuotaCycle;
-
 /**
  * 按官方已用比例，对同一周期内的本地 Codex Token 与 USD 等效成本作线性外推。
  * 结果是基于本周期模型、速度与 Token 结构的等效估算，不是官方承诺额度。

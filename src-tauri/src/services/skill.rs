@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::time::timeout;
@@ -20,6 +21,7 @@ use crate::app_config::{AppType, InstalledSkill, SkillApps, UnmanagedSkill};
 use crate::config::get_app_config_dir;
 use crate::database::Database;
 use crate::error::format_skill_error;
+use crate::services::skill_repo_tokens::{RepoTokenList, RepoTokenStore};
 
 // ========== Skills state coordination ==========
 
@@ -316,20 +318,12 @@ enum PiSkillDeployment {
 
 // ========== skills.sh API 类型 ==========
 
-/// skills.sh API 原始响应
-///
-/// 注意：API 命名不一致（searchType 是 camelCase，duration_ms 是 snake_case），
-/// 因此不能用 rename_all，需要逐字段指定。
+/// skills.sh API 原始响应（只取用到的字段，其余由 serde 忽略）
 #[derive(Debug, Clone, Deserialize)]
 struct SkillsShApiResponse {
     pub query: String,
-    #[serde(rename = "searchType")]
-    #[allow(dead_code)]
-    pub search_type: String,
     pub skills: Vec<SkillsShApiSkill>,
     pub count: usize,
-    #[allow(dead_code)]
-    pub duration_ms: u64,
 }
 
 /// skills.sh API 原始技能条目
@@ -418,7 +412,16 @@ const MAX_ARCHIVE_DOWNLOAD_BYTES: u64 = MAX_ARCHIVE_TOTAL_BYTES;
 /// 技能归档下载请求的 User-Agent。
 const SKILL_DOWNLOAD_USER_AGENT: &str = concat!("CC-Switch/", env!("CARGO_PKG_VERSION"));
 
-/// 平台探测的超时：它排在下载前面，占的是调用方那 60 秒的下载预算
+/// 下载停滞判定：连接、等响应头、相邻两块数据之间，任一处等这么久都没动静即放弃。
+/// 下载的是整个仓库归档，大仓库（emqx/MQTTX 这类整套客户端源码）在慢的跨境链路上
+/// 要好几分钟，按总时长掐断会把一直在传的下载判成超时；按停滞判定，只要数据还在来
+/// 就让它下完，链路真断了照样很快报错。
+const DOWNLOAD_STALL_TIMEOUT: Duration = Duration::from_secs(60);
+/// 一次仓库下载（平台探测 + 分支回落 + 下载 + 解压）的总上限，只兜底不该无限挂着的
+/// 情况，日常靠上面的停滞判定。与共享 HTTP 客户端单个请求的 600 秒上限对齐。
+const DOWNLOAD_TOTAL_TIMEOUT: Duration = Duration::from_secs(600);
+
+/// 平台探测的超时：它排在下载前面，占的是调用方那份下载总时长
 const PLATFORM_PROBE_TIMEOUT: Duration = Duration::from_secs(10);
 /// 平台探测最多读这么多响应体。Gitea 的回答只有几十个字节
 const PLATFORM_PROBE_MAX_BODY_BYTES: usize = 4 * 1024;
@@ -613,6 +616,11 @@ pub struct SkillService {
     discovery_cache: Mutex<HashMap<RepoCacheKey, (Instant, Vec<DiscoverableSkill>)>>,
     /// 主机 → 平台的探测结果，进程内有效。只记探明的，见 `resolve_platform`。
     platform_cache: Mutex<HashMap<String, RepoPlatform>>,
+    /// 访问令牌的代次，任何主机的令牌增删都加一。下载开始时记下它，探测结果回写缓存前
+    /// 比对：令牌在探测途中变了，这次的结论是按旧身份得出的，不能记下来。
+    credential_epoch: AtomicU64,
+    /// 按主机存的访问令牌（#9666），读私有仓库用。读钥匙串会起子进程，经 spawn_blocking 调。
+    repo_tokens: Arc<RepoTokenStore>,
 }
 
 /// host / owner / name / branch（branch 是配置值，不是解析后的分支）
@@ -634,6 +642,8 @@ impl SkillService {
             repo_fixture: None,
             discovery_cache: Mutex::new(HashMap::new()),
             platform_cache: Mutex::new(HashMap::new()),
+            credential_epoch: AtomicU64::new(0),
+            repo_tokens: Arc::new(RepoTokenStore::system()),
         }
     }
 
@@ -978,22 +988,7 @@ impl SkillService {
             };
 
             // 下载仓库
-            let (temp_guard, used_branch) = timeout(
-                std::time::Duration::from_secs(60),
-                self.download_repo(&repo),
-            )
-            .await
-            .map_err(|_| {
-                anyhow!(format_skill_error(
-                    "DOWNLOAD_TIMEOUT",
-                    &[
-                        ("owner", &repo.owner),
-                        ("name", &repo.name),
-                        ("timeout", "60")
-                    ],
-                    Some("checkNetwork"),
-                ))
-            })??;
+            let (temp_guard, used_branch) = self.download_repo_bounded(&repo).await?;
             let temp_dir = temp_guard.path();
             repo_branch = used_branch;
 
@@ -1516,24 +1511,11 @@ impl SkillService {
             };
 
             // 下载仓库 ZIP
-            let (temp_guard, _used_branch) = match timeout(
-                std::time::Duration::from_secs(60),
-                self.download_repo(&repo),
-            )
-            .await
-            {
-                Ok(Ok(result)) => result,
-                Ok(Err(e)) => {
+            let (temp_guard, _used_branch) = match self.download_repo_bounded(&repo).await {
+                Ok(result) => result,
+                Err(e) => {
                     log::warn!("检查更新时下载 {}/{} 失败: {e}", owner, name);
                     failures.push(Self::repo_failure(&repo, e.to_string()));
-                    continue;
-                }
-                Err(_) => {
-                    log::warn!("检查更新时下载 {}/{} 超时", owner, name);
-                    failures.push(Self::repo_failure(
-                        &repo,
-                        Self::download_timeout_error(&repo),
-                    ));
                     continue;
                 }
             };
@@ -1621,15 +1603,24 @@ impl SkillService {
     }
 
     fn download_timeout_error(repo: &SkillRepo) -> String {
+        let seconds = DOWNLOAD_TOTAL_TIMEOUT.as_secs().to_string();
         format_skill_error(
             "DOWNLOAD_TIMEOUT",
             &[
                 ("owner", &repo.owner),
                 ("name", &repo.name),
-                ("timeout", "60"),
+                ("timeout", &seconds),
             ],
             Some("checkNetwork"),
         )
+    }
+
+    /// 下载仓库并套上总时长上限。停滞判定在 `download_and_extract` 里逐块做，
+    /// 这里只兜底「一直有零星数据却始终下不完」这种不该无限挂着的情况。
+    async fn download_repo_bounded(&self, repo: &SkillRepo) -> Result<(tempfile::TempDir, String)> {
+        timeout(DOWNLOAD_TOTAL_TIMEOUT, self.download_repo(repo))
+            .await
+            .map_err(|_| anyhow!(Self::download_timeout_error(repo)))?
     }
 
     /// 持久化更新后的 Skill 元数据，并重新读取数据库中的权威应用启用状态。
@@ -1691,18 +1682,7 @@ impl SkillService {
         }
 
         // 下载仓库
-        let (temp_guard, used_branch) = timeout(
-            std::time::Duration::from_secs(60),
-            self.download_repo(&repo),
-        )
-        .await
-        .map_err(|_| {
-            anyhow!(format_skill_error(
-                "DOWNLOAD_TIMEOUT",
-                &[("owner", &owner), ("name", &name), ("timeout", "60")],
-                Some("checkNetwork"),
-            ))
-        })??;
+        let (temp_guard, used_branch) = self.download_repo_bounded(&repo).await?;
         let temp_dir = temp_guard.path();
 
         // 在解压的仓库中查找 Skill 源目录
@@ -3508,10 +3488,7 @@ impl SkillService {
 
     /// 从仓库获取技能列表
     async fn fetch_repo_skills(&self, repo: &SkillRepo) -> Result<Vec<DiscoverableSkill>> {
-        let (temp_guard, resolved_branch) =
-            timeout(std::time::Duration::from_secs(60), self.download_repo(repo))
-                .await
-                .map_err(|_| anyhow!(Self::download_timeout_error(repo)))??;
+        let (temp_guard, resolved_branch) = self.download_repo_bounded(repo).await?;
 
         let mut skills = Vec::new();
         let scan_dir = temp_guard.path();
@@ -3817,7 +3794,7 @@ impl SkillService {
     ///
     /// 白名单而不是交给 URL 解析去猜：这个值会被拼到 `https://` 后面，任何 `/`、`@`、
     /// `?`、`#`、`\` 都能改写请求落点。只收小写（入库前已规范化），IPv6 字面量不支持。
-    fn is_valid_gitlab_host(host: &str) -> bool {
+    pub(crate) fn is_valid_gitlab_host(host: &str) -> bool {
         let (name, port) = match host.rsplit_once(':') {
             Some((name, port)) => (name, Some(port)),
             None => (host, None),
@@ -3950,32 +3927,49 @@ impl SkillService {
     ///
     /// 探测对已有的 GitLab 用户必须无害：请求失败、超时、限流都按 GitLab 继续，
     /// 而且不记结果，下次下载重新探测。调用方须已校验过 `host`。
-    async fn resolve_platform(&self, host: &str) -> RepoPlatform {
+    ///
+    /// `token` 是这台主机的访问令牌：强制登录的 Gitea 对匿名的版本查询回 403，不带令牌
+    /// 会被认成 GitLab、拼错归档地址。令牌增删时清掉这台主机的缓存（`forget_platform`）。
+    /// `epoch` 是读 `token` 之前记下的 `credential_epoch`：令牌在这之后变过，探测结果不入缓存。
+    async fn resolve_platform(&self, host: &str, token: Option<&str>, epoch: u64) -> RepoPlatform {
         if host == GITHUB_HOST || !Self::is_valid_gitlab_host(host) {
             return Self::default_platform(host);
         }
         if let Some(platform) = self.platform_cache.lock_recover().get(host).copied() {
             return platform;
         }
-        match Self::probe_platform(host).await {
+        match Self::probe_platform(host, token).await {
             Some(platform) => {
-                self.platform_cache
-                    .lock_recover()
-                    .insert(host.to_string(), platform);
+                self.remember_platform(host, platform, epoch);
                 platform
             }
             None => RepoPlatform::GitLab,
         }
     }
 
+    /// 记下探测结果，除非令牌在 `epoch` 之后变过。与 `forget_platform` 同在缓存锁里
+    /// 读写代次，比对和写入之间令牌改不了。
+    fn remember_platform(&self, host: &str, platform: RepoPlatform, epoch: u64) {
+        let mut cache = self.platform_cache.lock_recover();
+        if self.credential_epoch.load(Ordering::SeqCst) == epoch {
+            cache.insert(host.to_string(), platform);
+        }
+    }
+
     /// 向主机要 `/api/v1/version`：Gitea / Forgejo 不登录就返回 `{"version": "…"}`，
     /// GitLab 没有这个地址（404，或跳去登录页）。`None` 表示这次没探明。
-    async fn probe_platform(host: &str) -> Option<RepoPlatform> {
+    async fn probe_platform(host: &str, token: Option<&str>) -> Option<RepoPlatform> {
         let url = format!("https://{host}/api/v1/version");
-        let mut response = crate::proxy::http_client::get()
+        let mut request = Self::http_client(token.is_some())
+            .inspect_err(|e| log::warn!("探测 {host} 的平台失败，按 GitLab 处理: {e}"))
+            .ok()?
             .get(&url)
             .header(reqwest::header::USER_AGENT, SKILL_DOWNLOAD_USER_AGENT)
-            .timeout(PLATFORM_PROBE_TIMEOUT)
+            .timeout(PLATFORM_PROBE_TIMEOUT);
+        if let Some(token) = token {
+            request = Self::with_bearer(request, token).ok()?;
+        }
+        let mut response = request
             .send()
             .await
             .inspect_err(|e| log::warn!("探测 {host} 的平台失败，按 GitLab 处理: {e}"))
@@ -3993,7 +3987,7 @@ impl SkillService {
                 }
             }
         }
-        Self::classify_platform_probe(status, &body)
+        Self::classify_platform_probe(status, &body, token.is_some())
     }
 
     /// 把探测响应归类。抽成纯函数是为了不联网也能单测这张判定表。
@@ -4001,8 +3995,16 @@ impl SkillService {
     /// 只有 200 且是带 `version` 字符串的 JSON 才算 Gitea：自建 GitLab 前面常有
     /// 统一登录或网关，对任何地址都回 200 的网页，不能只看状态码。
     /// 429 和 5xx 说明这次没问到，返回 `None`，不下结论。
-    fn classify_platform_probe(status: u16, body: &[u8]) -> Option<RepoPlatform> {
-        if status == 429 || status >= 500 {
+    ///
+    /// 带着令牌问到 401 也不下结论：Gitea / Forgejo 对无效令牌连版本查询都回 401
+    /// （11-19 对 codeberg.org 实测），这只说明令牌被拒，按 GitLab 记下来会让令牌填错的
+    /// Gitea 用户一直拼错归档地址。匿名的 401 仍按 GitLab 处理。
+    fn classify_platform_probe(
+        status: u16,
+        body: &[u8],
+        authenticated: bool,
+    ) -> Option<RepoPlatform> {
+        if status == 429 || status >= 500 || (authenticated && status == 401) {
             return None;
         }
         let is_gitea = status == 200
@@ -4022,7 +4024,26 @@ impl SkillService {
     /// 分支名不会和路径混在一起；而且分支不存在、项目不存在都返回 404（网页链接遇到
     /// 不存在或私有的项目会跳去登录页），正好对上 `try_repo_branches` 的换分支规则。
     /// Gitea 的 API 归档接口同样两种情况都是 404。
-    fn build_archive_url(repo: &SkillRepo, platform: RepoPlatform, branch: &str) -> Result<String> {
+    ///
+    /// `authenticated`：这次要带访问令牌。GitHub 的网页下载链接不认令牌，改走 API 的
+    /// zipball 接口（它 302 到 codeload 的一次性地址，跨主机跳转时 reqwest 会去掉令牌头）；
+    /// GitLab、Gitea 本来就走 API，地址不变。
+    fn build_archive_url(
+        repo: &SkillRepo,
+        platform: RepoPlatform,
+        branch: &str,
+        authenticated: bool,
+    ) -> Result<String> {
+        if repo.is_github() && authenticated {
+            // 写成 refs/heads/<分支>：zipball 接受任意 ref，只写分支名时同名 tag 也能命中，
+            // 分支删了却还有同名 tag 就会装上 tag 的内容，也不再 404 换分支（11-19 实测）
+            let url = format!(
+                "https://api.github.com/repos/{}/{}/zipball/refs/heads/{}",
+                repo.owner, repo.name, branch
+            );
+            Self::assert_github_api_archive_url(&url, &repo.owner, &repo.name)?;
+            return Ok(url);
+        }
         if repo.is_github() {
             let url = format!(
                 "https://github.com/{}/{}/archive/refs/heads/{}.zip",
@@ -4120,6 +4141,56 @@ impl SkillService {
             )));
         }
         Ok(())
+    }
+
+    /// 带令牌下载 GitHub 仓库时的出口断言：只许落在 api.github.com 这个仓库的 zipball 上。
+    /// 请求头里有令牌，落点被改写比匿名下载的代价大得多。
+    fn assert_github_api_archive_url(url: &str, owner: &str, name: &str) -> Result<()> {
+        let parsed = url::Url::parse(url).map_err(|e| anyhow!("Invalid archive URL: {e}"))?;
+        let expected_prefix = format!("/repos/{owner}/{name}/zipball/refs/heads/");
+        if parsed.scheme() != "https"
+            || parsed.host_str() != Some("api.github.com")
+            || parsed.port().is_some()
+            || !parsed.username().is_empty()
+            || parsed.password().is_some()
+            || parsed.query().is_some()
+            || parsed.fragment().is_some()
+            || !parsed.path().starts_with(&expected_prefix)
+        {
+            return Err(anyhow!(format_skill_error(
+                "INVALID_REPO_REF",
+                &[("owner", owner), ("name", name)],
+                Some("checkRepoUrl"),
+            )));
+        }
+        Ok(())
+    }
+
+    /// 给请求加上 `Authorization: Bearer <令牌>`，并标成敏感值（不进调试输出）。
+    ///
+    /// GitHub、GitLab、Gitea / Forgejo 都认 Bearer。不用 GitLab 惯用的 `PRIVATE-TOKEN`：
+    /// reqwest 跨主机跳转时只去掉标准认证头，自定义头会被带到新主机。
+    ///
+    /// 带令牌的请求一律用 [`Self::http_client`] 选出的只走 https 的客户端发。
+    fn with_bearer(
+        request: reqwest::RequestBuilder,
+        token: &str,
+    ) -> Result<reqwest::RequestBuilder> {
+        let mut value = reqwest::header::HeaderValue::from_str(&format!("Bearer {token}"))
+            .map_err(|_| anyhow!("访问令牌含有不能放进请求头的字符"))?;
+        value.set_sensitive(true);
+        Ok(request.header(reqwest::header::AUTHORIZATION, value))
+    }
+
+    /// 下载、探测用的客户端。带令牌时换成只走 https 的：reqwest 只在换主机或端口时
+    /// 去掉 `Authorization`，同主机非默认端口从 https 跳到 http 会把令牌明文发出去。
+    /// 匿名请求仍用共享客户端，行为不变。
+    fn http_client(authenticated: bool) -> Result<reqwest::Client> {
+        if authenticated {
+            crate::proxy::http_client::https_only().map_err(|e| anyhow!(e))
+        } else {
+            Ok(crate::proxy::http_client::get())
+        }
     }
 
     /// 在目录树中查找名称匹配且包含 SKILL.md 的子目录
@@ -4334,12 +4405,64 @@ impl SkillService {
             return Ok((temp_dir, repo.branch.clone()));
         }
 
-        let platform = self.resolve_platform(&repo.host).await;
-        let branch = Self::try_repo_branches(repo, platform, temp_path, |url| async move {
-            self.download_and_extract(&url, temp_path).await
-        })
+        let epoch = self.credential_epoch.load(Ordering::SeqCst);
+        let token = self.repo_token(&repo.host).await?;
+        let token = token.as_deref();
+        let platform = self.resolve_platform(&repo.host, token, epoch).await;
+        let branch = Self::try_repo_branches(
+            repo,
+            platform,
+            token.is_some(),
+            temp_path,
+            |url| async move { self.download_and_extract(&url, temp_path, token).await },
+        )
         .await?;
         Ok((temp_dir, branch))
+    }
+
+    /// 这台主机的访问令牌。读钥匙串在 macOS 上会起子进程，放到阻塞线程里做。
+    async fn repo_token(&self, host: &str) -> Result<Option<String>> {
+        let store = Arc::clone(&self.repo_tokens);
+        let host = host.to_string();
+        tokio::task::spawn_blocking(move || store.get(&host)).await?
+    }
+
+    /// 设置了访问令牌的主机，给仓库管理面板看（不含令牌本身）。
+    pub fn repo_token_list(&self) -> Result<RepoTokenList> {
+        self.repo_tokens.list()
+    }
+
+    /// 保存一台主机的访问令牌（覆盖旧的），返回规范化后的主机名。
+    pub fn set_repo_token(&self, host: &str, token: &str) -> Result<String> {
+        let host = self.repo_tokens.set(host, token)?;
+        self.forget_platform(&host);
+        Ok(host)
+    }
+
+    /// 删除一台主机的访问令牌，返回规范化后的主机名。
+    pub fn delete_repo_token(&self, host: &str) -> Result<String> {
+        let host = self.repo_tokens.remove(host)?;
+        self.forget_platform(&host);
+        Ok(host)
+    }
+
+    /// 令牌变了，平台要按新身份重新探测：没令牌时强制登录的 Gitea 会被认成 GitLab。
+    /// 这台主机的发现缓存也作废：删了令牌，私有仓库的技能列表不该再显示 10 分钟。
+    fn forget_platform(&self, host: &str) {
+        {
+            let mut cache = self.platform_cache.lock_recover();
+            self.credential_epoch.fetch_add(1, Ordering::SeqCst);
+            cache.remove(host);
+        }
+        self.discovery_cache
+            .lock_recover()
+            .retain(|key, _| key.0 != host);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_repo_tokens(mut self, store: RepoTokenStore) -> Self {
+        self.repo_tokens = Arc::new(store);
+        self
     }
 
     /// 依次尝试「配置分支 → main → master」，返回第一个下载成功的分支。
@@ -4350,6 +4473,7 @@ impl SkillService {
     async fn try_repo_branches<F, Fut>(
         repo: &SkillRepo,
         platform: RepoPlatform,
+        authenticated: bool,
         temp_path: &Path,
         mut attempt: F,
     ) -> Result<String>
@@ -4370,7 +4494,7 @@ impl SkillService {
 
         let mut last_error = None;
         for branch in branches {
-            let url = Self::build_archive_url(repo, platform, branch)?;
+            let url = Self::build_archive_url(repo, platform, branch, authenticated)?;
 
             match attempt(url).await {
                 Ok(()) => return Ok(branch.to_string()),
@@ -4419,26 +4543,37 @@ impl SkillService {
         anyhow::anyhow!(value.to_string())
     }
 
-    /// 下载并解压 ZIP
-    async fn download_and_extract(&self, url: &str, dest: &Path) -> Result<()> {
-        let client = crate::proxy::http_client::get();
+    /// 下载并解压 ZIP。`token` 是这台主机的访问令牌，没设置为 `None`。
+    async fn download_and_extract(
+        &self,
+        url: &str,
+        dest: &Path,
+        token: Option<&str>,
+    ) -> Result<()> {
+        let client = Self::http_client(token.is_some())?;
         // 共享客户端不带默认 User-Agent；GitHub 归档下载对无 UA 请求更容易被限流成 429（#8813）
-        let response = client
+        let mut request = client
             .get(url)
-            .header(reqwest::header::USER_AGENT, SKILL_DOWNLOAD_USER_AGENT)
-            .send()
-            .await?;
+            .header(reqwest::header::USER_AGENT, SKILL_DOWNLOAD_USER_AGENT);
+        if let Some(token) = token {
+            request = Self::with_bearer(request, token)?;
+        }
+        let response = timeout(DOWNLOAD_STALL_TIMEOUT, request.send())
+            .await
+            .map_err(|_| Self::download_stalled_error())??;
         if !response.status().is_success() {
-            let status = response.status().as_u16().to_string();
+            let status = response.status().as_u16();
+            let github = url::Url::parse(url)
+                .is_ok_and(|u| matches!(u.host_str(), Some("github.com" | "api.github.com")));
+            let status = status.to_string();
             return Err(anyhow::anyhow!(format_skill_error(
                 "DOWNLOAD_FAILED",
                 &[("status", &status)],
-                match status.as_str() {
-                    "403" => Some("http403"),
-                    "404" => Some("http404"),
-                    "429" => Some("http429"),
-                    _ => Some("checkNetwork"),
-                },
+                Some(Self::download_failure_hint(
+                    &status,
+                    token.is_some(),
+                    github
+                )),
             )));
         }
 
@@ -4449,7 +4584,10 @@ impl SkillService {
         let mut response = response;
         let mut body = std::io::BufWriter::new(tempfile::tempfile()?);
         let mut received: u64 = 0;
-        while let Some(chunk) = response.chunk().await? {
+        while let Some(chunk) = timeout(DOWNLOAD_STALL_TIMEOUT, response.chunk())
+            .await
+            .map_err(|_| Self::download_stalled_error())??
+        {
             received = received.saturating_add(chunk.len() as u64);
             if received > MAX_ARCHIVE_DOWNLOAD_BYTES {
                 let limit_mb = (MAX_ARCHIVE_DOWNLOAD_BYTES / 1024 / 1024).to_string();
@@ -4465,6 +4603,34 @@ impl SkillService {
         let file = body.into_inner().map_err(|e| e.into_error())?;
         let archive = zip::ZipArchive::new(file)?;
         Self::extract_repo_archive(archive, dest)
+    }
+
+    /// 下载停滞的结构化错误。owner / name 由分支回落那一层的 `with_repo_context` 补上。
+    fn download_stalled_error() -> anyhow::Error {
+        let seconds = DOWNLOAD_STALL_TIMEOUT.as_secs().to_string();
+        anyhow!(format_skill_error(
+            "DOWNLOAD_STALLED",
+            &[("timeout", &seconds)],
+            Some("checkNetwork"),
+        ))
+    }
+
+    /// 归档下载失败时给前端的提示键。带没带令牌要分开说：私有仓库不带令牌时 GitHub、
+    /// GitLab 都回 404，只说「仓库不存在」会把人引到检查地址上；带了令牌还被拒，
+    /// 就是令牌本身的问题。强制登录的 Gitea 对匿名请求回 401 / 403。
+    fn download_failure_hint(status: &str, authenticated: bool, github: bool) -> &'static str {
+        match (status, authenticated) {
+            ("401", true) => "http401Token",
+            ("403", true) => "http403Token",
+            ("404", true) => "http404Token",
+            ("401", false) => "httpAuthRequired",
+            // GitHub 匿名 403 多半是限流（#8813），别的主机匿名 403 是要求登录
+            ("403", false) if github => "http403",
+            ("403", false) => "httpAuthRequired",
+            ("404", false) => "http404",
+            ("429", _) => "http429",
+            _ => "checkNetwork",
+        }
     }
 
     /// 按预算把单个归档条目写出，累计超限即中止。
@@ -5886,7 +6052,7 @@ mod tests {
         let temp = tempdir().unwrap();
         let mut attempted = Vec::new();
         let platform = SkillService::default_platform(&repo.host);
-        let result = SkillService::try_repo_branches(repo, platform, temp.path(), |url| {
+        let result = SkillService::try_repo_branches(repo, platform, false, temp.path(), |url| {
             let branch = url
                 .rsplit('/')
                 .next()
@@ -5944,6 +6110,37 @@ mod tests {
         .await;
         assert_eq!(attempted, ["main"]);
         assert_eq!(result.unwrap_err().to_string(), "operation timed out");
+    }
+
+    #[tokio::test]
+    async fn stalled_download_stops_branch_fallback_and_carries_repo_coordinates() {
+        // 下载停滞换个分支也不会好：不去试 master，停滞原因原样报出并补上坐标
+        let (result, attempted) =
+            run_branch_fallback(&branch_fallback_repo("main"), |branch| match branch {
+                "main" => Err(SkillService::download_stalled_error()),
+                _ => Err(http404_error()),
+            })
+            .await;
+        assert_eq!(attempted, ["main"]);
+        let err = error_json(&result.unwrap_err());
+        assert_eq!(err["code"], "DOWNLOAD_STALLED");
+        assert_eq!(err["context"]["owner"], "acme");
+        assert_eq!(err["context"]["name"], "skills");
+        assert_eq!(err["context"]["timeout"], "60");
+        assert_eq!(err["suggestion"], "checkNetwork");
+    }
+
+    #[test]
+    fn total_download_timeout_reports_the_real_ceiling() {
+        let err: serde_json::Value = serde_json::from_str(&SkillService::download_timeout_error(
+            &branch_fallback_repo("main"),
+        ))
+        .expect("structured skill error");
+        assert_eq!(err["code"], "DOWNLOAD_TIMEOUT");
+        assert_eq!(
+            err["context"]["timeout"],
+            DOWNLOAD_TOTAL_TIMEOUT.as_secs().to_string()
+        );
     }
 
     #[tokio::test]
@@ -6102,12 +6299,12 @@ mod tests {
         );
         // 项目路径是一段，`/` 编码成 %2F；分支在查询参数里，带 `/` 也不会混进路径
         assert_eq!(
-            SkillService::build_archive_url(&repo, RepoPlatform::GitLab, "feature/env").unwrap(),
+            SkillService::build_archive_url(&repo, RepoPlatform::GitLab, "feature/env", false).unwrap(),
             "https://gitlab.example.com:8443/api/v4/projects/group%2Fsubgroup%2Fskills/repository/archive.zip?sha=feature%2Fenv"
         );
         // 分支名允许 `&` `=`，不能让它们变成额外的查询参数
         assert_eq!(
-            SkillService::build_archive_url(&repo, RepoPlatform::GitLab, "a&ref=b").unwrap(),
+            SkillService::build_archive_url(&repo, RepoPlatform::GitLab, "a&ref=b", false).unwrap(),
             "https://gitlab.example.com:8443/api/v4/projects/group%2Fsubgroup%2Fskills/repository/archive.zip?sha=a%26ref%3Db"
         );
         // GitHub 的地址不变
@@ -6115,11 +6312,123 @@ mod tests {
             SkillService::build_archive_url(
                 &branch_fallback_repo("main"),
                 RepoPlatform::GitHub,
-                "main"
+                "main",
+                false,
             )
             .unwrap(),
             "https://github.com/acme/skills/archive/refs/heads/main.zip"
         );
+    }
+
+    #[test]
+    fn authenticated_github_downloads_go_through_the_api_zipball() {
+        let repo = branch_fallback_repo("main");
+        assert_eq!(
+            SkillService::build_archive_url(&repo, RepoPlatform::GitHub, "feature/x", true)
+                .unwrap(),
+            "https://api.github.com/repos/acme/skills/zipball/refs/heads/feature/x"
+        );
+        // GitLab、Gitea 带不带令牌都是同一个 API 地址
+        let gitlab = gitlab_repo("gitlab.example.com", "group", "skills", "main");
+        assert_eq!(
+            SkillService::build_archive_url(&gitlab, RepoPlatform::GitLab, "main", true).unwrap(),
+            SkillService::build_archive_url(&gitlab, RepoPlatform::GitLab, "main", false).unwrap(),
+        );
+
+        let ok = "https://api.github.com/repos/acme/skills/zipball/refs/heads/main";
+        assert!(SkillService::assert_github_api_archive_url(ok, "acme", "skills").is_ok());
+        for bad in [
+            "http://api.github.com/repos/acme/skills/zipball/main",
+            "https://github.com/repos/acme/skills/zipball/main",
+            "https://api.github.com:8443/repos/acme/skills/zipball/main",
+            "https://evil@api.github.com/repos/acme/skills/zipball/main",
+            "https://api.github.com/repos/acme/other/zipball/main",
+            "https://api.github.com/repos/acme/skills/tarball/main",
+            "https://api.github.com/repos/acme/skills/zipball/main?x=1",
+            // 不带 refs/heads/ 的会命中同名 tag
+            "https://api.github.com/repos/acme/skills/zipball/main",
+        ] {
+            assert!(
+                SkillService::assert_github_api_archive_url(bad, "acme", "skills").is_err(),
+                "{bad}"
+            );
+        }
+    }
+
+    #[test]
+    fn download_failure_hints_separate_missing_tokens_from_rejected_ones() {
+        let hint = SkillService::download_failure_hint;
+        // 不带令牌：404 提示私有仓库要设令牌，GitHub 的 403 仍按限流说
+        assert_eq!(hint("404", false, true), "http404");
+        assert_eq!(hint("404", false, false), "http404");
+        assert_eq!(hint("403", false, true), "http403");
+        assert_eq!(hint("403", false, false), "httpAuthRequired");
+        assert_eq!(hint("401", false, false), "httpAuthRequired");
+        // 带了令牌：问题在令牌
+        assert_eq!(hint("401", true, false), "http401Token");
+        assert_eq!(hint("403", true, true), "http403Token");
+        assert_eq!(hint("404", true, false), "http404Token");
+        assert_eq!(hint("429", true, true), "http429");
+        assert_eq!(hint("500", false, true), "checkNetwork");
+    }
+
+    #[tokio::test]
+    async fn set_and_delete_repo_token_reprobe_the_platform() {
+        let dir = tempfile::tempdir().unwrap();
+        let (store, secrets) = crate::services::skill_repo_tokens::tests::memory_store(dir.path());
+        let service = SkillService::new().with_repo_tokens(store);
+        service
+            .platform_cache
+            .lock_recover()
+            .insert("git.example.com".into(), RepoPlatform::GitLab);
+        let cached = |host: &str| (host.to_string(), "o".into(), "n".into(), "main".into());
+        for host in ["git.example.com", "other.example.com"] {
+            service
+                .discovery_cache
+                .lock_recover()
+                .insert(cached(host), (Instant::now(), Vec::new()));
+        }
+        // 匿名探测还在途中时保存了令牌
+        let stale_epoch = service.credential_epoch.load(Ordering::SeqCst);
+
+        let host = service
+            .set_repo_token("Git.Example.com", "tok_123")
+            .unwrap();
+        assert_eq!(host, "git.example.com");
+        assert!(!service.platform_cache.lock_recover().contains_key(&host));
+        // 这台主机的发现缓存作废，别的主机不动
+        {
+            let discovery = service.discovery_cache.lock_recover();
+            assert!(!discovery.contains_key(&cached("git.example.com")));
+            assert!(discovery.contains_key(&cached("other.example.com")));
+        }
+        // 按旧身份得出的探测结论不入缓存，新的照常记
+        service.remember_platform(&host, RepoPlatform::GitLab, stale_epoch);
+        assert!(!service.platform_cache.lock_recover().contains_key(&host));
+        let epoch = service.credential_epoch.load(Ordering::SeqCst);
+        service.remember_platform(&host, RepoPlatform::Gitea, epoch);
+        assert_eq!(
+            service.platform_cache.lock_recover().get(&host).copied(),
+            Some(RepoPlatform::Gitea)
+        );
+        assert_eq!(
+            service.repo_token(&host).await.unwrap().as_deref(),
+            Some("tok_123")
+        );
+        assert_eq!(service.repo_token("github.com").await.unwrap(), None);
+        assert_eq!(
+            service.repo_token_list().unwrap().hosts,
+            vec!["git.example.com".to_string()]
+        );
+
+        service
+            .platform_cache
+            .lock_recover()
+            .insert(host.clone(), RepoPlatform::Gitea);
+        service.delete_repo_token(&host).unwrap();
+        assert!(!service.platform_cache.lock_recover().contains_key(&host));
+        assert_eq!(service.repo_token(&host).await.unwrap(), None);
+        assert!(secrets.entries.lock_recover().is_empty());
     }
 
     #[tokio::test]
@@ -6127,8 +6436,12 @@ mod tests {
         let repo = gitlab_repo("gitlab.com", "group/sub", "skills", "develop");
         let temp = tempdir().unwrap();
         let mut attempted = Vec::new();
-        let result =
-            SkillService::try_repo_branches(&repo, RepoPlatform::GitLab, temp.path(), |url| {
+        let result = SkillService::try_repo_branches(
+            &repo,
+            RepoPlatform::GitLab,
+            false,
+            temp.path(),
+            |url| {
                 let found = url.ends_with("?sha=master");
                 attempted.push(url);
                 async move {
@@ -6138,8 +6451,9 @@ mod tests {
                         Err(http404_error())
                     }
                 }
-            })
-            .await;
+            },
+        )
+        .await;
         assert_eq!(result.unwrap(), "master");
         let prefix =
             "https://gitlab.com/api/v4/projects/group%2Fsub%2Fskills/repository/archive.zip";
@@ -6187,7 +6501,8 @@ mod tests {
     #[test]
     fn platform_probe_only_treats_a_version_json_as_gitea() {
         use RepoPlatform::{GitLab, Gitea};
-        let classify = SkillService::classify_platform_probe;
+        let classify =
+            |status: u16, body: &[u8]| SkillService::classify_platform_probe(status, body, false);
         // Gitea 与 Forgejo（Codeberg）的真实回答
         assert_eq!(classify(200, br#"{"version":"1.22.3"}"#), Some(Gitea));
         assert_eq!(
@@ -6211,6 +6526,13 @@ mod tests {
         oversized.resize(PLATFORM_PROBE_MAX_BODY_BYTES + 1, b'a');
         oversized.extend_from_slice(br#""}"#);
         assert_eq!(classify(200, &oversized), Some(GitLab));
+
+        // 带令牌（#9666）：401 只说明令牌被拒，不下结论；令牌有效时照常判
+        let with_token =
+            |status: u16, body: &[u8]| SkillService::classify_platform_probe(status, body, true);
+        assert_eq!(with_token(401, b""), None);
+        assert_eq!(with_token(200, br#"{"version":"1.22.3"}"#), Some(Gitea));
+        assert_eq!(with_token(404, b""), Some(GitLab));
     }
 
     #[tokio::test]
@@ -6218,7 +6540,7 @@ mod tests {
         let service = SkillService::new();
         // github.com 不联网直接定；没探过的主机拼文档链接时按 GitLab
         assert_eq!(
-            service.resolve_platform(GITHUB_HOST).await,
+            service.resolve_platform(GITHUB_HOST, None, 0).await,
             RepoPlatform::GitHub
         );
         assert_eq!(service.known_platform(GITHUB_HOST), RepoPlatform::GitHub);
@@ -6228,7 +6550,9 @@ mod tests {
         );
         // 不合法的主机不发请求
         assert_eq!(
-            service.resolve_platform("git.example.com/evil").await,
+            service
+                .resolve_platform("git.example.com/evil", None, 0)
+                .await,
             RepoPlatform::GitLab
         );
 
@@ -6237,7 +6561,7 @@ mod tests {
             .lock_recover()
             .insert("git.example.com".to_string(), RepoPlatform::Gitea);
         assert_eq!(
-            service.resolve_platform("git.example.com").await,
+            service.resolve_platform("git.example.com", None, 0).await,
             RepoPlatform::Gitea
         );
         assert_eq!(
@@ -6249,7 +6573,7 @@ mod tests {
     #[test]
     fn build_archive_url_targets_the_gitea_api() {
         let build = |repo: &SkillRepo, branch: &str| {
-            SkillService::build_archive_url(repo, RepoPlatform::Gitea, branch)
+            SkillService::build_archive_url(repo, RepoPlatform::Gitea, branch, false)
         };
         let repo = gitlab_repo("git.example.com:3000", "team", "skills", "main");
         assert_eq!(
@@ -6282,8 +6606,12 @@ mod tests {
         let repo = gitlab_repo("codeberg.org", "team", "skills", "develop");
         let temp = tempdir().unwrap();
         let mut attempted = Vec::new();
-        let result =
-            SkillService::try_repo_branches(&repo, RepoPlatform::Gitea, temp.path(), |url| {
+        let result = SkillService::try_repo_branches(
+            &repo,
+            RepoPlatform::Gitea,
+            false,
+            temp.path(),
+            |url| {
                 let found = url.ends_with("/master.zip");
                 attempted.push(url);
                 async move {
@@ -6293,8 +6621,9 @@ mod tests {
                         Err(http404_error())
                     }
                 }
-            })
-            .await;
+            },
+        )
+        .await;
         assert_eq!(result.unwrap(), "master");
         let prefix = "https://codeberg.org/api/v1/repos/team/skills/archive";
         assert_eq!(

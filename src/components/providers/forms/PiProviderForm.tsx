@@ -63,6 +63,7 @@ import {
   type YamlNodeError,
 } from "./helpers/yamlNode";
 import {
+  OMP_API_FORMATS,
   ompProviderPresets,
   type OmpProviderPreset,
 } from "@/config/ompProviderPresets";
@@ -104,10 +105,11 @@ const PI_API_FORMATS = [
   { value: "anthropic-messages", label: "Anthropic Messages" },
   { value: "google-generative-ai", label: "Google Generative AI" },
   { value: "bedrock-converse-stream", label: "Amazon Bedrock" },
+  { value: "mistral-conversations", label: "Mistral" },
 ] as const satisfies ReadonlyArray<{ value: PiApiFormat; label: string }>;
 
-const OMP_API_FORMATS = [
-  ...PI_API_FORMATS,
+const OMP_API_OPTIONS = [
+  ...PI_API_FORMATS.filter(({ value }) => OMP_API_FORMATS.includes(value)),
   { value: "openai-codex-responses", label: "OpenAI Codex Responses" },
   { value: "azure-openai-responses", label: "Azure OpenAI Responses" },
   { value: "google-gemini-cli", label: "Google Gemini CLI" },
@@ -535,7 +537,7 @@ export function PiProviderForm({
     return value;
   };
   const isDarkMode = useDarkMode();
-  const apiFormats = isOmp ? OMP_API_FORMATS : PI_API_FORMATS;
+  const apiFormats = isOmp ? OMP_API_OPTIONS : PI_API_FORMATS;
   const initialConfig = useMemo(
     () => asObject(initialData?.settingsConfig),
     [initialData?.settingsConfig],

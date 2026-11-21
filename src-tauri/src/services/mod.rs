@@ -25,6 +25,7 @@ pub mod model_pricing;
 pub mod omo;
 pub mod pi_prompt_files;
 pub(crate) mod pi_state;
+pub mod plugin_manager;
 pub mod profile;
 pub mod prompt;
 pub mod provider;
@@ -40,6 +41,7 @@ pub mod session_usage_omp;
 pub mod session_usage_opencode;
 pub mod session_usage_pi;
 pub mod skill;
+pub mod skill_repo_tokens;
 pub mod speedtest;
 pub mod sql_helpers;
 pub mod stream_check;
@@ -60,15 +62,9 @@ pub use omo::OmoService;
 pub use prompt::PromptService;
 pub use provider::{ProviderService, ProviderSortUpdate, SwitchResult};
 pub use proxy::ProxyService;
-#[allow(unused_imports)]
-pub use skill::{DiscoverableSkill, SkillRepo, SkillService};
+pub use skill::SkillService;
 pub use speedtest::{EndpointLatency, SpeedtestService};
 pub use usage_cache::UsageCache;
-#[allow(unused_imports)]
-pub use usage_stats::{
-    DailyStats, LogFilters, ModelStats, PaginatedLogs, ProviderStats, RequestLogDetail,
-    UsageSummary, UsageSummaryByApp,
-};
 
 pub mod session_usage_copilot;
 pub mod session_usage_kimi;
