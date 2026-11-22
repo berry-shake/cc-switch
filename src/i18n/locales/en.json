@@ -2551,10 +2551,10 @@
     "liveEndTimeNow": "Now",
     "input": "Input",
     "output": "Output",
-    "cacheWrite": "Creation",
+    "cacheWrite": "Cache Write",
     "cacheWriteNotReported": "Gemini and Grok Build don't report cache creation; only cache hits are reported",
     "cacheWritePartial": "Some protocols (e.g. Gemini) don't report cache creation; the value may be incomplete",
-    "cacheRead": "Hit",
+    "cacheRead": "Cache Read",
     "personalCredits": {
       "unknown": "Pending data / estimate",
       "partial": "Known values only. Missing values are not zero; the corresponding capacity projection is paused.",
