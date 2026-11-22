@@ -263,13 +263,14 @@ interface OutputTokensPerSecondInput {
 
 /**
  * 一条请求的生成时间（毫秒）= 耗时 − 首字。缺耗时或首字、或差值不大于 0 时返回 null。
- * 只算路由服务记的请求：会话日志的耗时和首字都是按时间戳估的，不算精确速度
- * （会话日志另有估算，见 [getEstimatedTokensPerSecond]）；非流式请求没有首字。
+ * 只算具备精确毫秒计时的请求（路由服务，或从原生库读取 `first_token + streaming`
+ * 的 Antigravity 会话日志）；其余会话日志按时间戳估算，见 [getEstimatedTokensPerSecond]。
+ * 非流式请求没有首字。
  */
 export function getGenerationMs(
   log: OutputTokensPerSecondInput,
 ): number | null {
-  if (isSessionLogRequest(log)) return null;
+  if (!hasExactTimingSource(log)) return null;
   const latencyMs = parseFiniteNumber(log.latencyMs);
   const firstTokenMs = parseFiniteNumber(log.firstTokenMs);
   if (latencyMs == null || firstTokenMs == null) return null;
@@ -323,8 +324,17 @@ export function isSessionLogRequest(log: { dataSource?: unknown }): boolean {
 }
 
 /**
- * 这条请求能不能估速度（和后端 `speed_estimate_eligible_sql` 同口径）：会话日志导入、
- * 输出不少于 200 token、估算耗时不短于 1 秒。推出了首字的也照样按整段耗时算。
+ * 这条请求是否具备精确毫秒级首字与流式计时（路由服务，或从原生库读取
+ * `first_token + streaming` 的 Antigravity 会话日志）。
+ * 和后端 `exact_timing_source_sql` 同口径。
+ */
+export function hasExactTimingSource(log: { dataSource?: unknown }): boolean {
+  return !isSessionLogRequest(log) || log.dataSource === "agy_session";
+}
+
+/**
+ * 这条请求能不能估速度（和后端 `speed_estimate_eligible_sql` 同口径）：按时间戳估算的
+ * 会话日志导入、输出不少于 200 token、估算耗时不短于 1 秒。推出了首字的也照样按整段耗时算。
  */
 export function isSpeedEstimateEligible(
   log: OutputTokensPerSecondInput,
@@ -332,7 +342,7 @@ export function isSpeedEstimateEligible(
   const outputTokens = parseFiniteNumber(log.outputTokens);
   const latencyMs = parseFiniteNumber(log.latencyMs);
   return (
-    isSessionLogRequest(log) &&
+    !hasExactTimingSource(log) &&
     outputTokens != null &&
     outputTokens >= SPEED_ESTIMATE_MIN_OUTPUT_TOKENS &&
     latencyMs != null &&
@@ -454,8 +464,14 @@ export function getResolvedLang(i18n: I18nLike): string {
 }
 
 function isCjkLanguage(lang: string): boolean {
+  // Whole subtags only: `zha` is Zhuang, not Chinese, and `jam` is Jamaican Creole.
   const normalized = normalizeLanguageTag(lang);
-  return normalized.startsWith("zh") || normalized.startsWith("ja");
+  return (
+    normalized === "zh" ||
+    normalized.startsWith("zh-") ||
+    normalized === "ja" ||
+    normalized.startsWith("ja-")
+  );
 }
 
 /** 并列的名字：中日文用「、」，其他语言用逗号。 */

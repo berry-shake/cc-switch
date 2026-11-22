@@ -11,6 +11,7 @@ import {
   formatMoneyTick,
   formatOutputTokensPerSecond,
   formatTokensCompact,
+  formatTokensShort,
   formatTokensPerSecond,
   formatCompactCount,
   resolveMoneyDisplay,
@@ -22,11 +23,25 @@ import {
   getEstimatedTokensPerSecond,
   getOutputTokensPerSecond,
   getLocaleFromLanguage,
+  hasExactTimingSource,
+  joinNames,
+  joinClauses,
   sumSpeedTotals,
   USD_DISPLAY,
 } from "@/components/usage/format";
 
 describe("usage format helpers", () => {
+  it.each(["zha", "zhb-CN", "jam", "trv-TW"])(
+    "does not apply another language's formatting to %s",
+    (language) => {
+      expect(getLocaleFromLanguage(language)).toBe("en-US");
+      // 计数单位与语言无关：任何语言都得到同样的 K/M/B 后缀
+      expect(formatTokensShort(10_000, language)).toBe("10K");
+      expect(joinNames(["A", "B"], language)).toBe("A, B");
+      expect(joinClauses(["A", "B"], language)).toBe("A; B");
+    },
+  );
+
   it("formats every count with language-independent K, M, and B units", () => {
     expect(formatCompactCount(Number.NaN)).toBe("0");
     expect(formatCompactCount(0)).toBe("0");
@@ -183,6 +198,58 @@ describe("usage format helpers", () => {
     expect(sumSpeedTotals([withFirstToken])).toEqual({
       outputTokens: 0,
       generationMs: 0,
+    });
+  });
+
+  it("treats agy_session native timing as exact speed without falling back to estimate", () => {
+    const timedAgy = {
+      outputTokens: 2_900,
+      latencyMs: 69_000,
+      firstTokenMs: 43_000,
+      dataSource: "agy_session",
+    };
+    expect(hasExactTimingSource(timedAgy)).toBe(true);
+    expect(hasExactTimingSource({ dataSource: "proxy" })).toBe(true);
+    expect(hasExactTimingSource({ dataSource: "codex_session" })).toBe(false);
+
+    // 2900 / (69 - 43) s ≈ 111.54 tok/s
+    expect(getOutputTokensPerSecond(timedAgy)).toBeCloseTo(2_900 / 26, 5);
+    expect(formatOutputTokensPerSecond(timedAgy)).toBe("112");
+    expect(getEstimatedTokensPerSecond(timedAgy)).toBeNull();
+
+    // 100–199 token 的原生计时也走精确门槛
+    const midAgy = {
+      outputTokens: 150,
+      latencyMs: 38_000,
+      firstTokenMs: 36_500,
+      dataSource: "agy_session",
+    };
+    expect(getOutputTokensPerSecond(midAgy)).toBe(100);
+    expect(getEstimatedTokensPerSecond(midAgy)).toBeNull();
+
+    // 不足门槛或未计时：不回退到 ≈ 估算
+    const shortAgy = { ...midAgy, outputTokens: 90 };
+    const burstAgy = {
+      outputTokens: 300,
+      latencyMs: 5_050,
+      firstTokenMs: 5_000,
+      dataSource: "agy_session",
+    };
+    const untimedAgy = {
+      outputTokens: 1_000,
+      latencyMs: 0,
+      dataSource: "agy_session",
+    };
+    for (const row of [shortAgy, burstAgy, untimedAgy]) {
+      expect(getOutputTokensPerSecond(row)).toBeNull();
+      expect(getEstimatedTokensPerSecond(row)).toBeNull();
+    }
+
+    expect(
+      sumSpeedTotals([timedAgy, midAgy, shortAgy, burstAgy, untimedAgy]),
+    ).toEqual({
+      outputTokens: 3_050,
+      generationMs: 27_500,
     });
   });
 
@@ -357,14 +424,18 @@ describe("display currency", () => {
       autoExchangeRates: { CNY: 6.9 },
     };
     expect(resolveRateSource(fetched)).toBe("manual");
-    expect(resolveMoneyDisplay(fetched)).toEqual({ currency: "CNY", rate: 6.8 });
-    expect(resolveMoneyDisplay({ ...fetched, exchangeRates: { CNY: 7.1 } })).toEqual(
-      { currency: "CNY", rate: 7.1 },
-    );
-    // 用户主动选了自动才用取到的值
+    expect(resolveMoneyDisplay(fetched)).toEqual({
+      currency: "CNY",
+      rate: 6.8,
+    });
     expect(
-      resolveMoneyDisplay({ ...fetched, rateSource: "auto" }),
-    ).toEqual({ currency: "CNY", rate: 6.9 });
+      resolveMoneyDisplay({ ...fetched, exchangeRates: { CNY: 7.1 } }),
+    ).toEqual({ currency: "CNY", rate: 7.1 });
+    // 用户主动选了自动才用取到的值
+    expect(resolveMoneyDisplay({ ...fetched, rateSource: "auto" })).toEqual({
+      currency: "CNY",
+      rate: 6.9,
+    });
   });
 
   it("refreshes automatic rates only when the cache is missing or stale", () => {

@@ -11,6 +11,7 @@ export interface RequestLog {
   pricingModel?: string;
   costMultiplier: string;
   inputTokens: number;
+  freshInputTokens: number;
   outputTokens: number;
   cacheReadTokens: number;
   cacheCreationTokens: number;
@@ -232,7 +233,7 @@ export const KNOWN_APP_TYPES: ReadonlyArray<AppType> = [
 ];
 
 /**
- * App types whose proxy uses an OpenAI-style protocol. Two consequences:
+ * Apps whose proxy/session importers report `inputTokens` the way Anthropic does:
  *
  * 1. `inputTokens` already includes the cached portion (must subtract
  *    `cacheReadTokens` to get fresh-input semantics — see
@@ -249,14 +250,20 @@ export const CACHE_INCLUSIVE_APP_TYPES: ReadonlySet<string> = new Set([
   "grokbuild",
 ]);
 
-// Gemini and Grok Build do not expose cache writes. Codex can expose them in
-// TOTAL-semantics session rows, but legacy/proxy rows may not, so an app-level
-// aggregate remains partial when row semantics are unavailable. Pi sessions
-// can likewise mix protocols with different cache-write coverage.
-const CACHE_WRITE_UNAVAILABLE_APP_TYPES: ReadonlySet<string> = new Set([
+const NO_CACHE_WRITE_APP_TYPES: ReadonlySet<string> = new Set([
   "gemini",
   "grokbuild",
 ]);
+
+/** Session import stores 0 cache writes for these apps, so a 0 in the log means "not reported". */
+export function omitsCacheWrites(appType: string): boolean {
+  return NO_CACHE_WRITE_APP_TYPES.has(appType);
+}
+
+// Codex can report cache writes on TOTAL-semantics rows but not on legacy/proxy
+// rows, so an app-level aggregate stays partial. Pi and Oh My Pi sessions can mix
+// Anthropic and OpenAI APIs, but the dashboard aggregates only by app type, so
+// their cache-write coverage is partial too.
 const PARTIAL_CACHE_WRITE_APP_TYPES: ReadonlySet<string> = new Set([
   "codex",
   "pi",
@@ -273,7 +280,7 @@ export function getCacheWriteAvailability(
 ): CacheWriteAvailability {
   if (appTypes.length === 0) return "ok";
   const unavailable = appTypes.filter((appType) =>
-    CACHE_WRITE_UNAVAILABLE_APP_TYPES.has(appType),
+    NO_CACHE_WRITE_APP_TYPES.has(appType),
   ).length;
   if (unavailable === appTypes.length) return "na";
   const partial = appTypes.some((appType) =>
