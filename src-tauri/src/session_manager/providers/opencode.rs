@@ -22,9 +22,7 @@ pub(crate) fn get_opencode_base_dir() -> PathBuf {
             return PathBuf::from(xdg).join("opencode");
         }
     }
-    dirs::home_dir()
-        .map(|h| h.join(".local/share/opencode"))
-        .unwrap_or_else(|| PathBuf::from(".local/share/opencode"))
+    crate::config::get_home_dir().join(".local/share/opencode")
 }
 
 /// Return the OpenCode JSON storage directory (legacy flat-file layout).
@@ -1197,7 +1195,6 @@ mod tests {
     }
 
     #[test]
-    #[allow(deprecated)] // set_var/remove_var deprecated since Rust 1.81; safe here under mutex
     fn scan_sessions_sqlite_reads_temp_database() {
         if crate::config::sqlite_unsupported_in_temp_dir() {
             return;
@@ -1227,7 +1224,6 @@ mod tests {
 
         let sessions = scan_sessions_sqlite();
 
-        #[allow(deprecated)]
         if let Some(value) = original_xdg {
             std::env::set_var("XDG_DATA_HOME", value);
         } else {
@@ -1325,7 +1321,6 @@ mod tests {
         let _guard = opencode_env_lock().lock().expect("lock");
         let temp = tempdir().expect("tempdir");
         let original_xdg = std::env::var_os("XDG_DATA_HOME");
-        #[allow(deprecated)]
         std::env::set_var("XDG_DATA_HOME", temp.path());
 
         let base_dir = temp.path().join("opencode");
@@ -1382,7 +1377,6 @@ mod tests {
         assert_eq!(remaining_messages, 0);
         assert_eq!(remaining_parts, 0);
 
-        #[allow(deprecated)]
         if let Some(value) = original_xdg {
             std::env::set_var("XDG_DATA_HOME", value);
         } else {
@@ -1398,7 +1392,6 @@ mod tests {
         let _guard = opencode_env_lock().lock().expect("lock");
         let temp = tempdir().expect("tempdir");
         let original_xdg = std::env::var_os("XDG_DATA_HOME");
-        #[allow(deprecated)]
         std::env::set_var("XDG_DATA_HOME", temp.path());
 
         let expected_base_dir = temp.path().join("opencode");
@@ -1420,7 +1413,6 @@ mod tests {
         let err = delete_session_sqlite("ses_1", &source).expect_err("should reject foreign db");
         assert!(err.contains("expected OpenCode database"));
 
-        #[allow(deprecated)]
         if let Some(value) = original_xdg {
             std::env::set_var("XDG_DATA_HOME", value);
         } else {
@@ -1455,7 +1447,6 @@ mod tests {
     }
 
     #[test]
-    #[allow(deprecated)]
     fn scan_sessions_sqlite_v2_reads_temp_database() {
         if crate::config::sqlite_unsupported_in_temp_dir() {
             return;
@@ -1561,7 +1552,6 @@ mod tests {
     }
 
     #[test]
-    #[allow(deprecated)]
     fn delete_session_sqlite_v2_removes_session() {
         if crate::config::sqlite_unsupported_in_temp_dir() {
             return;
@@ -1670,7 +1660,6 @@ mod tests {
     }
 
     #[test]
-    #[allow(deprecated)]
     fn mixed_v1_v2_database_scans_loads_and_deletes_post_migration_v1_sessions() {
         if crate::config::sqlite_unsupported_in_temp_dir() {
             return;
