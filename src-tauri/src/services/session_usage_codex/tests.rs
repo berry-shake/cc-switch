@@ -22,11 +22,9 @@ fn test_usage_line_filter_preserves_existing_predicate() {
             .collect::<Vec<_>>()
             .join(" ");
         let event = line.contains(tags[0]);
-        let expected = (event
-            || line.contains(tags[1])
-            || line.contains(tags[2])
-            || line.contains(tags[3]))
-            && (!event || line.contains(tags[4]) || line.contains(tags[5]));
+        let expected =
+            (event || line.contains(tags[1]) || line.contains(tags[2]) || line.contains(tags[3]))
+                && (!event || line.contains(tags[4]) || line.contains(tags[5]));
         assert_eq!(is_usage_line(&line), expected, "tag mask {mask}");
     }
 }
@@ -135,8 +133,7 @@ fn test_projected_json_preserves_value_validation() {
         "01",
         "",
     ];
-    let nested =
-        (125..=130).map(|depth| format!("{}0{}", "[".repeat(depth), "]".repeat(depth)));
+    let nested = (125..=130).map(|depth| format!("{}0{}", "[".repeat(depth), "]".repeat(depth)));
     for value in values.iter().map(|value| value.to_string()).chain(nested) {
         for line in [
             value.clone(),
@@ -624,10 +621,8 @@ fn compaction_retains_fast_cache_write_and_rebuild_fingerprint() -> Result<(), A
     let mut changed = lines.clone();
     changed[2]["payload"]["response_id"] = serde_json::json!("different-response");
     write_jsonl(&path, &changed);
-    let after = CodexRebuildFileFingerprint::from_parsed(&parse_codex_file(
-        &path,
-        Some(PARENT_ID.into()),
-    )?);
+    let after =
+        CodexRebuildFileFingerprint::from_parsed(&parse_codex_file(&path, Some(PARENT_ID.into()))?);
     assert!(!before.is_prefix_compatible_with(&after));
     changed[2]["payload"]["usage"]
         .as_object_mut()
@@ -831,8 +826,7 @@ fn test_bounded_idle_fork_recovery_and_append() -> Result<(), AppError> {
         );
         meta["payload"]["history_base"]["end_byte_offset"] =
             serde_json::json!(fs::metadata(&parent).unwrap().len());
-        meta["payload"]["history_base"]["end_ordinal_exclusive"] =
-            serde_json::json!(inherited + 2);
+        meta["payload"]["history_base"]["end_ordinal_exclusive"] = serde_json::json!(inherited + 2);
         let mut event = token_count_at(1200, 1000, 120, "2026-07-10T03:00:25Z");
         event["payload"]["info"]["last_token_usage"] = serde_json::json!({"input_tokens":200,"cached_input_tokens":100,"output_tokens":20,"reasoning_output_tokens":0,"total_tokens":220});
         write_jsonl(&child, &[meta.clone(), turn_context(), event.clone()]);
@@ -886,16 +880,8 @@ fn test_bounded_idle_fork_recovery_and_append() -> Result<(), AppError> {
         // snapshot. It must not block the entire bounded fork or be counted twice.
         let usage =
             token_usage_record_at("bounded_compaction", 300, 100, 20, "2026-07-10T03:00:35Z");
-        let zero = token_count_with_last_at(
-            1400,
-            1000,
-            120,
-            0,
-            0,
-            0,
-            "default",
-            "2026-07-10T03:00:36Z",
-        );
+        let zero =
+            token_count_with_last_at(1400, 1000, 120, 0, 0, 0, "default", "2026-07-10T03:00:36Z");
         append_jsonl(&child, usage.clone());
         append_jsonl(&child, zero.clone());
         assert_eq!(sync_test_file(&db, &child, &files)?.imported, 1);
@@ -1042,8 +1028,7 @@ fn test_unchanged_incomplete_tail_is_skipped_after_cursor_reload() -> Result<(),
 }
 
 #[test]
-fn test_append_with_unchanged_mtime_survives_reload_without_duplicates() -> Result<(), AppError>
-{
+fn test_append_with_unchanged_mtime_survives_reload_without_duplicates() -> Result<(), AppError> {
     use std::io::Write;
     let db = Database::memory()?;
     let dir = tempdir().unwrap();
@@ -1095,10 +1080,9 @@ fn test_legacy_cursor_catches_up_with_unchanged_mtime() -> Result<(), AppError> 
     assert_eq!(sync_test_file(&db, &file, &[&file])?.imported, 1);
     assert_eq!(sync_test_file(&db, &file, &[&file])?.imported, 0);
     let conn = lock_conn!(db.conn);
-    let bytes: i64 =
-        conn.query_row("SELECT last_byte_offset FROM session_log_sync", [], |r| {
-            r.get(0)
-        })?;
+    let bytes: i64 = conn.query_row("SELECT last_byte_offset FROM session_log_sync", [], |r| {
+        r.get(0)
+    })?;
     assert_eq!(bytes as u64, fs::metadata(&file).unwrap().len());
     Ok(())
 }
@@ -1218,8 +1202,7 @@ fn test_partial_live_record_is_retried_after_append() -> Result<(), AppError> {
 /// 旧校验只认末尾 UUID，会把这类文件永久 deferred，其后 resume 追加
 /// 的用量全部丢失。
 #[test]
-fn test_resumed_rollout_meta_id_matching_leading_uuid_is_not_deferred() -> Result<(), AppError>
-{
+fn test_resumed_rollout_meta_id_matching_leading_uuid_is_not_deferred() -> Result<(), AppError> {
     let dir = tempdir().unwrap();
     let file = dir.path().join(format!(
         "rollout-2026-08-26T17-18-13-{PARENT_ID}_{CHILD_A_ID}.jsonl"
@@ -1249,8 +1232,7 @@ fn test_resumed_rollout_meta_id_matching_leading_uuid_is_not_deferred() -> Resul
 /// 分支线程翻页产生的双段文件名带有残留的 forked_from_id，
 /// 解析时应被识别为本线程延续（Continuation），并恢复上一页基线计算增量。
 #[test]
-fn test_parse_codex_file_recognizes_branch_thread_paginated_continuation(
-) -> Result<(), AppError> {
+fn test_parse_codex_file_recognizes_branch_thread_paginated_continuation() -> Result<(), AppError> {
     let dir = tempdir().unwrap();
     let root = rollout_path(dir.path(), CHILD_A_ID);
     write_jsonl(
@@ -1279,8 +1261,7 @@ fn test_parse_codex_file_recognizes_branch_thread_paginated_continuation(
     );
 
     let index = build_rollout_index(&[root, file.clone()]);
-    let parsed =
-        parse_codex_file_with_index(&file, thread_id_from_filename(&file), Some(&index))?;
+    let parsed = parse_codex_file_with_index(&file, thread_id_from_filename(&file), Some(&index))?;
 
     assert!(
         matches!(parsed.parent, ParentResolution::Continuation { .. }),
@@ -1356,8 +1337,7 @@ fn test_single_uuid_filename_meta_mismatch_still_deferred() -> Result<(), AppErr
 
 #[test]
 #[serial_test::serial]
-fn safe_rebuild_resumed_rollout_preserves_fast_cache_write_and_identity() -> Result<(), AppError>
-{
+fn safe_rebuild_resumed_rollout_preserves_fast_cache_write_and_identity() -> Result<(), AppError> {
     let db = Database::memory()?;
     let staging = Database::memory()?;
     let temp = tempdir().unwrap();
@@ -1446,10 +1426,9 @@ fn safe_rebuild_rejects_unverified_resumed_identity() -> Result<(), AppError> {
             (0, 1)
         );
         let conn = lock_conn!(db.conn);
-        let count: i64 =
-            conn.query_row("SELECT COUNT(*) FROM session_log_sync", [], |row| {
-                row.get(0)
-            })?;
+        let count: i64 = conn.query_row("SELECT COUNT(*) FROM session_log_sync", [], |row| {
+            row.get(0)
+        })?;
         assert_eq!(count, 0);
     }
     Ok(())
@@ -2048,8 +2027,7 @@ fn test_stale_cross_source_signature_does_not_swallow_reset() -> Result<(), AppE
 fn test_full_snapshot_dedupe_allows_counter_reset() -> Result<(), AppError> {
     let dir = tempdir().unwrap();
     let file = rollout_path(dir.path(), PARENT_ID);
-    let first =
-        token_count_with_last_at(100, 50, 10, 100, 50, 10, "codex", "2026-07-10T03:00:02Z");
+    let first = token_count_with_last_at(100, 50, 10, 100, 50, 10, "codex", "2026-07-10T03:00:02Z");
     write_jsonl(
         &file,
         &[
@@ -2057,16 +2035,7 @@ fn test_full_snapshot_dedupe_allows_counter_reset() -> Result<(), AppError> {
             turn_context(),
             first.clone(),
             first,
-            token_count_with_last_at(
-                200,
-                100,
-                20,
-                100,
-                50,
-                10,
-                "codex",
-                "2026-07-10T03:00:04Z",
-            ),
+            token_count_with_last_at(200, 100, 20, 100, 50, 10, "codex", "2026-07-10T03:00:04Z"),
             // A restarted counter may legitimately return to an older
             // total after another full snapshot has advanced the source.
             token_count_with_last_at(100, 50, 10, 50, 25, 5, "codex", "2026-07-10T03:00:05Z"),
@@ -2366,8 +2335,8 @@ fn test_thread_settings_model_without_turn_context() -> Result<(), AppError> {
 }
 
 #[test]
-fn test_thread_settings_model_ignores_invalid_metadata_and_allows_overrides(
-) -> Result<(), AppError> {
+fn test_thread_settings_model_ignores_invalid_metadata_and_allows_overrides() -> Result<(), AppError>
+{
     let dir = tempdir().unwrap();
     let file = rollout_path(dir.path(), PARENT_ID);
     let mut events = vec![
@@ -2732,9 +2701,8 @@ fn test_parent_rollout_is_cached_once_across_fork_cutoffs() -> Result<(), AppErr
     let early = "2026-07-10T03:00:05Z".parse::<DateTime<Utc>>().unwrap();
     let late = "2026-07-10T03:00:15Z".parse::<DateTime<Utc>>().unwrap();
     assert_eq!(parent_signatures_before(&parent, early).unwrap().len(), 1);
-    let first_timeline = parent_cache_supported(&parent).then(|| {
-        Arc::clone(&replay_caches().lock().unwrap().parent_timelines[&parent].timeline)
-    });
+    let first_timeline = parent_cache_supported(&parent)
+        .then(|| Arc::clone(&replay_caches().lock().unwrap().parent_timelines[&parent].timeline));
     assert_eq!(parent_signatures_before(&parent, late).unwrap().len(), 2);
 
     match first_timeline {
@@ -2986,8 +2954,8 @@ fn test_parent_future_signature_cannot_extend_replay_prefix() -> Result<(), AppE
 
 #[test]
 #[serial_test::serial]
-fn test_duplicate_parent_replica_with_missing_timestamp_rejects_both_orders(
-) -> Result<(), AppError> {
+fn test_duplicate_parent_replica_with_missing_timestamp_rejects_both_orders() -> Result<(), AppError>
+{
     clear_codex_replay_caches();
     let db = Database::memory()?;
     let temp = tempdir().unwrap();
@@ -3113,8 +3081,8 @@ fn test_paginated_parent_pages_are_merged_before_fork_cutoff() -> Result<(), App
 /// 避免因父线程无法达到翻页时刻而被永久 deferred。
 #[test]
 #[serial_test::serial]
-fn test_paginated_continuation_pages_for_forked_branch_thread_are_imported(
-) -> Result<(), AppError> {
+fn test_paginated_continuation_pages_for_forked_branch_thread_are_imported() -> Result<(), AppError>
+{
     clear_codex_replay_caches();
     let db = Database::memory()?;
     let temp = tempdir().unwrap();
@@ -3619,8 +3587,7 @@ fn test_paginated_continuation_with_counter_reset() -> Result<(), AppError> {
 
 #[test]
 #[serial_test::serial]
-fn test_missing_parent_is_deferred_and_recovered_without_child_change() -> Result<(), AppError>
-{
+fn test_missing_parent_is_deferred_and_recovered_without_child_change() -> Result<(), AppError> {
     clear_codex_replay_caches();
     let db = Database::memory()?;
     let temp = tempdir().unwrap();
@@ -3780,8 +3747,8 @@ fn test_retryable_pending_does_not_cache_unknown_parent_metadata() -> Result<(),
 
 #[test]
 #[serial_test::serial]
-fn test_retryable_pending_detects_same_size_same_mtime_parent_replacement(
-) -> Result<(), AppError> {
+fn test_retryable_pending_detects_same_size_same_mtime_parent_replacement() -> Result<(), AppError>
+{
     clear_codex_replay_caches();
     let db = Database::memory()?;
     let temp = tempdir().unwrap();
@@ -3901,8 +3868,7 @@ fn test_parent_decompression_error_after_valid_prefix_does_not_cache_partial_tim
 
 #[test]
 #[serial_test::serial]
-fn test_retryable_pending_detects_same_size_same_mtime_child_replacement(
-) -> Result<(), AppError> {
+fn test_retryable_pending_detects_same_size_same_mtime_child_replacement() -> Result<(), AppError> {
     clear_codex_replay_caches();
     let db = Database::memory()?;
     let temp = tempdir().unwrap();
@@ -4297,11 +4263,7 @@ fn test_fast_bills_cache_write_tokens_as_ordinary_subscription_input() -> Result
         &file,
         &[
             session_meta(PARENT_ID),
-            thread_settings_with_tier_at(
-                Some("priority"),
-                "gpt-5.6-sol",
-                "2026-07-10T03:00:01Z",
-            ),
+            thread_settings_with_tier_at(Some("priority"), "gpt-5.6-sol", "2026-07-10T03:00:01Z"),
             token_count_with_cache_write_at(
                 1_000_000,
                 100_000,
@@ -4408,9 +4370,7 @@ fn gpt_6_sol_luna_import_prices_fast_and_standard_without_changing_api_rates(
             Decimal::new(1, 1) * api_pricing.input_cost_per_million
         );
         // The shared price table still retains the API write premium.
-        assert!(
-            api_pricing.cache_creation_cost_per_million > api_pricing.input_cost_per_million
-        );
+        assert!(api_pricing.cache_creation_cost_per_million > api_pricing.input_cost_per_million);
     }
     Ok(())
 }
@@ -4685,8 +4645,7 @@ fn safe_rebuild_blocks_reused_request_id_with_different_timestamp() -> Result<()
 
 #[test]
 #[serial_test::serial]
-fn safe_rebuild_blocks_timestamp_collision_even_on_rollup_protected_date(
-) -> Result<(), AppError> {
+fn safe_rebuild_blocks_timestamp_collision_even_on_rollup_protected_date() -> Result<(), AppError> {
     let db = Database::memory()?;
     let temp = tempdir().unwrap();
     let cursor_path = rollout_path(&temp.path().join("sessions"), PARENT_ID);
@@ -4740,8 +4699,8 @@ fn safe_rebuild_blocks_timestamp_collision_even_on_rollup_protected_date(
 
 #[test]
 #[serial_test::serial]
-fn safe_rebuild_preserves_entire_thread_when_stage_does_not_cover_live_rows(
-) -> Result<(), AppError> {
+fn safe_rebuild_preserves_entire_thread_when_stage_does_not_cover_live_rows() -> Result<(), AppError>
+{
     let db = Database::memory()?;
     let temp = tempdir().unwrap();
     let codex_dir = temp.path();
@@ -5085,8 +5044,8 @@ fn rebuild_audit_includes_zero_delta_signatures_in_duplicate_source_fingerprint(
 
 #[test]
 #[serial_test::serial]
-fn unterminated_tail_is_excluded_from_rebuild_and_retried_after_completion(
-) -> Result<(), AppError> {
+fn unterminated_tail_is_excluded_from_rebuild_and_retried_after_completion() -> Result<(), AppError>
+{
     clear_codex_replay_caches();
     let db = Database::memory()?;
     let temp = tempdir().unwrap();
@@ -5810,8 +5769,7 @@ fn test_timing_line_is_classified_from_the_line_head() {
         Some((1_790_910_000_250, TimingLine::ToolOutput))
     );
     // 正文里出现的字样不影响判断：种类只看信封上的 type
-    let quoted =
-        r#"{"type":"message","role":"user","content":"\"type\":\"token_usage_record\""}"#;
+    let quoted = r#"{"type":"message","role":"user","content":"\"type\":\"token_usage_record\""}"#;
     assert_eq!(
         classify_timing_line(&raw_item("2026-10-02T03:00:00.250Z", quoted)).map(|line| line.1),
         Some(TimingLine::Boundary)

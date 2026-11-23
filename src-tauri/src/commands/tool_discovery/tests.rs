@@ -459,17 +459,13 @@ mod anchored_upgrade {
     fn mcode_script_install_reruns_official_installer_in_place() {
         // `~/.minimax-code/bin/mcode` 是官方 installer 的 sh launcher，不归全局 npm 管；
         // `mcode update` 非 TTY 下不安装，所以改为带 MCODE_INSTALL_DIR 重跑 installer。
-        let expected =
-            format!("MCODE_INSTALL_DIR='/Users/me/.minimax-code' {MCODE_INSTALL_UNIX}");
+        let expected = format!("MCODE_INSTALL_DIR='/Users/me/.minimax-code' {MCODE_INSTALL_UNIX}");
         for bin_path in [
             "/Users/me/.minimax-code/bin/mcode",
             "/Users/me/.local/bin/mcode",
         ] {
-            let cmd = anchored_command_from_paths(
-                "mcode",
-                bin_path,
-                "/Users/me/.minimax-code/bin/mcode",
-            );
+            let cmd =
+                anchored_command_from_paths("mcode", bin_path, "/Users/me/.minimax-code/bin/mcode");
             assert_eq!(cmd.as_deref(), Some(expected.as_str()));
         }
     }
@@ -649,8 +645,7 @@ mod anchored_upgrade {
         )
         .unwrap();
         for executable in [&claude, &npm] {
-            std::fs::set_permissions(executable, std::fs::Permissions::from_mode(0o755))
-                .unwrap();
+            std::fs::set_permissions(executable, std::fs::Permissions::from_mode(0o755)).unwrap();
         }
 
         let mut install = inst(&claude.to_string_lossy(), true);
@@ -860,11 +855,8 @@ mod anchored_upgrade {
     fn hermes_uses_cli_update_anchor() {
         // Hermes 自带 `hermes update`;锚定到命令行默认那处 CLI,避免 cc-switch 猜
         // 系统 Python/pip 时撞上 Python >=3.11 或 pyenv shim 问题。
-        let cmd = anchored_command_from_paths(
-            "hermes",
-            "/usr/local/bin/hermes",
-            "/usr/local/bin/hermes",
-        );
+        let cmd =
+            anchored_command_from_paths("hermes", "/usr/local/bin/hermes", "/usr/local/bin/hermes");
         assert_eq!(cmd.as_deref(), Some("/usr/local/bin/hermes update"));
     }
 
@@ -968,7 +960,9 @@ mod anchored_upgrade {
         let codex = bin.join("codex").to_string_lossy().into_owned();
         let real = temp
             .path()
-            .join("home dir/.nvm/versions/node/v22.14.0/lib/node_modules/@openai/codex/bin/codex.js")
+            .join(
+                "home dir/.nvm/versions/node/v22.14.0/lib/node_modules/@openai/codex/bin/codex.js",
+            )
             .to_string_lossy()
             .into_owned();
         let command = anchored_command_from_paths("codex", &codex, &real)
@@ -1035,8 +1029,7 @@ mod anchored_upgrade {
     #[test]
     fn brew_formula_extraction() {
         assert_eq!(
-            brew_formula_from_path("/opt/homebrew/Cellar/gemini-cli/0.13.0/bin/gemini")
-                .as_deref(),
+            brew_formula_from_path("/opt/homebrew/Cellar/gemini-cli/0.13.0/bin/gemini").as_deref(),
             Some("gemini-cli")
         );
         // node 全局包不在 Cellar 下 → 不是 formula。
@@ -1466,8 +1459,7 @@ fn opencode_extra_search_paths_deduplicates_bun_default_dir() {
 #[test]
 fn grok_extra_search_paths_prefers_override_then_default_native_dir() {
     let home = PathBuf::from("/home/tester");
-    let paths =
-        grok_extra_search_paths(&home, Some(std::ffi::OsString::from("/custom/grok/bin")));
+    let paths = grok_extra_search_paths(&home, Some(std::ffi::OsString::from("/custom/grok/bin")));
 
     assert_eq!(paths[0], PathBuf::from("/custom/grok/bin"));
     assert_eq!(paths[1], PathBuf::from("/home/tester/.grok/bin"));
@@ -1847,8 +1839,7 @@ fn windows_path_lookup_ignores_same_named_file_in_current_directory() {
     let expected = path_dir.path().join("codex.cmd");
     std::fs::write(&expected, "@echo path\r\n").expect("PATH shim should be created");
 
-    let effective_path =
-        std::env::join_paths([path_dir.path()]).expect("test PATH should join");
+    let effective_path = std::env::join_paths([path_dir.path()]).expect("test PATH should join");
     let output = windows_path_lookup_command("codex", &effective_path)
         .current_dir(current_dir.path())
         .output()

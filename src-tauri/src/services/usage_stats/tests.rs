@@ -665,9 +665,8 @@ fn test_effective_filter_dedups_codex_prefix_model() -> Result<(), AppError> {
     )?;
 
     let filter = effective_usage_log_filter("l");
-    let sql = format!(
-        "SELECT request_id FROM proxy_request_logs l WHERE {filter} ORDER BY request_id"
-    );
+    let sql =
+        format!("SELECT request_id FROM proxy_request_logs l WHERE {filter} ORDER BY request_id");
     let request_ids = conn
         .prepare(&sql)?
         .query_map([], |row| row.get::<_, String>(0))?
@@ -694,9 +693,8 @@ fn test_effective_filter_dedups_codex_prefix_model() -> Result<(), AppError> {
         ],
     )?;
     let filter = effective_usage_log_filter("l");
-    let sql = format!(
-        "SELECT request_id FROM proxy_request_logs l WHERE {filter} ORDER BY request_id"
-    );
+    let sql =
+        format!("SELECT request_id FROM proxy_request_logs l WHERE {filter} ORDER BY request_id");
     let request_ids = conn
         .prepare(&sql)?
         .query_map([], |row| row.get::<_, String>(0))?
@@ -723,9 +721,8 @@ fn test_effective_filter_dedups_codex_prefix_model() -> Result<(), AppError> {
         ],
     )?;
     let filter = effective_usage_log_filter("l");
-    let sql = format!(
-        "SELECT request_id FROM proxy_request_logs l WHERE {filter} ORDER BY request_id"
-    );
+    let sql =
+        format!("SELECT request_id FROM proxy_request_logs l WHERE {filter} ORDER BY request_id");
     let request_ids = conn
         .prepare(&sql)?
         .query_map([], |row| row.get::<_, String>(0))?
@@ -819,9 +816,8 @@ fn test_effective_filter_dedups_only_codex_request_model_alias() -> Result<(), A
     )?;
 
     let filter = effective_usage_log_filter("l");
-    let sql = format!(
-        "SELECT request_id FROM proxy_request_logs l WHERE {filter} ORDER BY request_id"
-    );
+    let sql =
+        format!("SELECT request_id FROM proxy_request_logs l WHERE {filter} ORDER BY request_id");
     let request_ids = conn
         .prepare(&sql)?
         .query_map([], |row| row.get::<_, String>(0))?
@@ -1484,8 +1480,7 @@ fn test_backfill_missing_usage_costs_falls_back_to_request_model() -> Result<(),
 }
 
 #[test]
-fn test_backfill_skips_request_model_fallback_for_real_unpriced_model() -> Result<(), AppError>
-{
+fn test_backfill_skips_request_model_fallback_for_real_unpriced_model() -> Result<(), AppError> {
     let db = Database::memory()?;
 
     {
@@ -2719,8 +2714,7 @@ fn test_get_model_stats_success_rate_and_speed_per_model() -> Result<(), AppErro
 }
 
 #[test]
-fn test_stats_first_token_median_only_counts_successful_proxy_streams() -> Result<(), AppError>
-{
+fn test_stats_first_token_median_only_counts_successful_proxy_streams() -> Result<(), AppError> {
     let db = Database::memory()?;
 
     {
@@ -2981,9 +2975,7 @@ fn test_get_provider_stats_estimated_speed_sums_session_rows() -> Result<(), App
                     input_tokens, output_tokens, total_cost_usd,
                     latency_ms, status_code, created_at, data_source
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                params![
-                    id, "_session", "claude", "m", 10, output, "0", latency, 200, 1000, source
-                ],
+                params![id, "_session", "claude", "m", 10, output, "0", latency, 200, 1000, source],
             )
         };
         // 计入：2000 token / 20000 ms
@@ -3030,8 +3022,7 @@ fn test_agy_session_uses_exact_speed_and_first_token_stats() -> Result<(), AppEr
                     latency_ms, first_token_ms, status_code, created_at, data_source
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 params![
-                    id, provider, app, model, 10, output, "0", latency, first, 200, 1000,
-                    source
+                    id, provider, app, model, 10, output, "0", latency, first, 200, 1000, source
                 ],
             )
         };
@@ -3286,8 +3277,7 @@ fn test_get_daily_trends_respects_shorter_than_24_hours() -> Result<(), AppError
 }
 
 #[test]
-fn test_get_daily_trends_groups_ranges_longer_than_24_hours_by_local_day(
-) -> Result<(), AppError> {
+fn test_get_daily_trends_groups_ranges_longer_than_24_hours_by_local_day() -> Result<(), AppError> {
     let db = Database::memory()?;
     let start = local_ts(2024, 3, 1, 12, 0, 0);
     let end = local_ts(2024, 3, 3, 12, 0, 0);
@@ -4570,8 +4560,7 @@ fn test_model_pricing_matching() -> Result<(), AppError> {
     );
 
     // Bedrock/Vertex 常见形态：provider 前缀 + -vN 后缀 + :0 修饰
-    let result =
-        find_model_pricing_row(&conn, "global.anthropic.claude-haiku-4-5-20251001-v1:0")?;
+    let result = find_model_pricing_row(&conn, "global.anthropic.claude-haiku-4-5-20251001-v1:0")?;
     assert!(
         result.is_some(),
         "Bedrock/Vertex 风格 Claude 模型 ID 应能归一化到基础 Claude 模型定价"
@@ -4681,8 +4670,8 @@ fn test_range_filter_dedups_codex_request_model_alias() -> Result<(), AppError> 
 }
 
 #[test]
-fn test_matching_proxy_log_distinguishes_unknown_and_known_zero_cache_write(
-) -> Result<(), AppError> {
+fn test_matching_proxy_log_distinguishes_unknown_and_known_zero_cache_write() -> Result<(), AppError>
+{
     let conn = Connection::open_in_memory()?;
     create_legacy_nullable_logs_table(&conn)?;
     conn.execute_batch(
@@ -4725,8 +4714,7 @@ fn test_matching_proxy_log_distinguishes_unknown_and_known_zero_cache_write(
 }
 
 #[test]
-fn test_effective_filter_uses_codex_semantics_for_cache_write_wildcard() -> Result<(), AppError>
-{
+fn test_effective_filter_uses_codex_semantics_for_cache_write_wildcard() -> Result<(), AppError> {
     let conn = Connection::open_in_memory()?;
     create_legacy_nullable_logs_table(&conn)?;
     conn.execute_batch(
@@ -4743,9 +4731,8 @@ fn test_effective_filter_uses_codex_semantics_for_cache_write_wildcard() -> Resu
     )?;
 
     let filter = effective_usage_log_filter("l");
-    let sql = format!(
-        "SELECT request_id FROM proxy_request_logs l WHERE {filter} ORDER BY request_id"
-    );
+    let sql =
+        format!("SELECT request_id FROM proxy_request_logs l WHERE {filter} ORDER BY request_id");
     let request_ids = conn
         .prepare(&sql)?
         .query_map([], |row| row.get::<_, String>(0))?
@@ -4904,8 +4891,7 @@ fn test_flash_and_hydrogen_tiered_pricing_backfill_and_grouping() -> Result<(), 
     assert_eq!(hydrogen_stats[0].request_count, 2);
     assert_eq!(hydrogen_stats[0].total_cost, "0.003300");
 
-    let neon_stats =
-        db.get_model_stats(None, None, Some("agy"), None, Some("gemini-4-neon"))?;
+    let neon_stats = db.get_model_stats(None, None, Some("agy"), None, Some("gemini-4-neon"))?;
     assert_eq!(neon_stats.len(), 1);
     assert_eq!(neon_stats[0].model, "gemini-4-neon");
     assert_eq!(neon_stats[0].request_count, 1);
@@ -4920,8 +4906,7 @@ fn test_flash_and_hydrogen_tiered_pricing_backfill_and_grouping() -> Result<(), 
 }
 
 #[test]
-fn test_merged_reasoning_models_keep_totals_filters_and_pooled_medians() -> Result<(), AppError>
-{
+fn test_merged_reasoning_models_keep_totals_filters_and_pooled_medians() -> Result<(), AppError> {
     let db = Database::memory()?;
     let ts = local_ts(2026, 6, 10, 12, 0, 0);
     {
@@ -5033,8 +5018,7 @@ fn test_merged_reasoning_models_keep_totals_filters_and_pooled_medians() -> Resu
         model,
     )?;
     assert_eq!(trends.iter().map(|t| t.request_count).sum::<u64>(), 8);
-    let hourly =
-        db.get_daily_trends(Some(ts - 3600), Some(ts + 1), Some("agy"), None, model)?;
+    let hourly = db.get_daily_trends(Some(ts - 3600), Some(ts + 1), Some("agy"), None, model)?;
     assert_eq!(hourly.iter().map(|t| t.request_count).sum::<u64>(), 6);
     let logs = db.get_request_logs(
         &LogFilters {
@@ -5153,7 +5137,10 @@ fn pricing_snapshot_matches_sql_and_refreshes_after_mutations() -> Result<(), Ap
         assert_eq!(row.0, expected);
         assert_eq!(catalog.prefix(base)?, Some(row));
     }
-    conn.execute("UPDATE model_pricing SET input_cost_per_million='9' WHERE model_id='gpt-under_score-a'", [])?;
+    conn.execute(
+        "UPDATE model_pricing SET input_cost_per_million='9' WHERE model_id='gpt-under_score-a'",
+        [],
+    )?;
     assert_eq!(catalog.exact("GPT-UNDER_SCORE-A")?.unwrap().0, "1");
     assert_eq!(
         PricingCatalog::load(&conn)?

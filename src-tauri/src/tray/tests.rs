@@ -2,9 +2,8 @@ use super::*;
 use crate::provider::{UsageData, UsageResult};
 use crate::services::subscription::{
     CredentialStatus, QuotaTier, SubscriptionQuota, TIER_FIVE_HOUR, TIER_GEMINI_FLASH,
-    TIER_GEMINI_FLASH_LITE, TIER_GEMINI_PRO, TIER_MONTHLY, TIER_SEVEN_DAY,
-    TIER_SEVEN_DAY_FABLE, TIER_SEVEN_DAY_OPUS, TIER_SEVEN_DAY_SONNET, TIER_THIRTY_DAY,
-    TIER_WEEKLY_LIMIT,
+    TIER_GEMINI_FLASH_LITE, TIER_GEMINI_PRO, TIER_MONTHLY, TIER_SEVEN_DAY, TIER_SEVEN_DAY_FABLE,
+    TIER_SEVEN_DAY_OPUS, TIER_SEVEN_DAY_SONNET, TIER_THIRTY_DAY, TIER_WEEKLY_LIMIT,
 };
 
 fn en() -> TrayTexts {
@@ -1229,8 +1228,7 @@ fn failover_submenu_is_read_only_and_lists_only_the_queue() {
         assert!(
             matches!(
                 row,
-                TrayEntry::Item { enabled: false, .. }
-                    | TrayEntry::Check { enabled: false, .. }
+                TrayEntry::Item { enabled: false, .. } | TrayEntry::Check { enabled: false, .. }
             ),
             "{row:?}"
         );
