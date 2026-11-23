@@ -1520,7 +1520,11 @@ fn mise_shim_target(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     // GUI 进程的工作目录是 `/`；在 home 下解析，与新开终端看到的 mise 配置一致。
-    cmd.current_dir(crate::config::get_home_dir());
+    // home 不可用（被删/未配置）时不要设置工作目录，否则 spawn 直接失败。
+    let home = crate::config::get_home_dir();
+    if home.is_dir() {
+        cmd.current_dir(home);
+    }
     isolate_child_process_group(&mut cmd);
     let out = wait_child_output(cmd.spawn().ok()?, deadline).ok()?;
     if !out.status.success() {

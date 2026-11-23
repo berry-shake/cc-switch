@@ -875,7 +875,6 @@ impl SkillService {
         let mut skills = db.get_all_installed_skills()?;
         for skill in skills.values_mut() {
             skill.apps.pi = Self::skill_exists_in_app(&skill.directory, &AppType::Pi);
-            skill.apps.omp = Self::skill_exists_in_app(&skill.directory, &AppType::Omp);
         }
         Ok(skills.into_values().collect())
     }
@@ -1692,7 +1691,6 @@ impl SkillService {
             // 其他应用保存用户选择；Pi 的 exists=active 必须直接来自原生目录。
             let mut apps = selection.apps;
             apps.pi = Self::skill_exists_in_app(&dir_name, &AppType::Pi);
-            apps.omp = Self::skill_exists_in_app(&dir_name, &AppType::Omp);
             apps.omp = Self::skill_exists_in_app(&dir_name, &AppType::Omp);
 
             // An explicitly imported MCode link must point at the managed copy

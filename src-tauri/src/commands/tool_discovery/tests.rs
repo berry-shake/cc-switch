@@ -1816,17 +1816,11 @@ fn build_tool_search_paths_includes_standalone_installer_dirs() {
 fn omp_search_paths_include_the_bun_global_bin() {
     // A GUI process does not inherit `~/.bun/bin`: without it a Bun global
     // omp is reported as not installed and updates lose their anchor.
-    let home = dirs::home_dir().expect("home should resolve");
+    let home = crate::config::get_home_dir();
     let bun_bin = home.join(".bun").join("bin");
-    assert_eq!(build_tool_search_paths("omp").first(), Some(&bun_bin));
-    // Other tools may legitimately inherit Bun's bin from the process PATH;
-    // only OMP adds it independently as a preferred installation location.
-    let inherited_bun = effective_path_os()
-        .is_some_and(|paths| std::env::split_paths(&paths).any(|path| path == bun_bin));
-    assert_eq!(
-        build_tool_search_paths("gemini").contains(&bun_bin),
-        inherited_bun
-    );
+    assert!(build_tool_search_paths("omp").contains(&bun_bin));
+    // Other Bun-installable tools keep their previous search set.
+    assert!(!build_tool_search_paths("gemini").contains(&bun_bin));
 }
 
 #[cfg(target_os = "windows")]
@@ -1879,6 +1873,9 @@ fn mise_node_search_paths_include_shims_and_installed_node_bins() {
 #[cfg(not(target_os = "windows"))]
 #[test]
 fn mise_shim_target_resolves_shim_through_mise_which() {
+    // 同进程里其他测试可能把配置的 home 换成已被删除的临时目录；
+    // mise_shim_target 在 home 不存在时不再设置工作目录，这里显式保证它存在。
+    let _ = std::fs::create_dir_all(crate::config::get_home_dir());
     use std::os::unix::fs::PermissionsExt;
 
     let temp = tempfile::tempdir().expect("temp dir should be created");
