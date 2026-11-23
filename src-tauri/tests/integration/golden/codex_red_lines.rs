@@ -16,7 +16,7 @@
 //! | 05 | `requires_openai_auth = true` 不妨碍注入 Key（否则 Codex 回退读官方 OAuth 发给第三方） | 本文件 |
 //! | 06 | 带 Key 但没有落点、或无 Key 却会回退官方登录的配置，拒绝切换 | 本文件；已有 `..._rejects_keyless_official_auth_fallback`、`..._rejects_empty_third_party_config` |
 //! | 07 | 被拒的切换没有副作用：live 字节与 mtime、当前供应商、被拒卡的行都不变 | 本文件 |
-//! | 08 | 只有 model / MCP、没有路由的卡在保留开关打开时放行（有意保留的边界） | 已有 `provider_service_switch_codex_updates_live_and_config` |
+//! | 08 | 只有 model / MCP、没有路由的卡在保留开关打开时放行（有意保留的边界） | 已有 `switch_provider_updates_codex_live_and_state` |
 //! | 09 | 旧形态 `openai_base_url` 改道不进 live：Key 进非保留的路由表，顶层不留 `openai_base_url` | 本文件；已有三条 `..._normalizes_legacy_reroute_config` |
 //! | 10 | 归一化不覆盖用户自己的同名表 | 本文件 |
 //! | 11 | inline 写法的 `model_providers = { … }`：Key 落进 inline 表 | 本文件 |
