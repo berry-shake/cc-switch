@@ -412,6 +412,7 @@ describe("UsageDashboard", () => {
         agy: false,
         copilot: false,
         workbuddy: false,
+        codebuddy: false,
       },
     });
     renderDashboard({ initialAppType: "gemini" });

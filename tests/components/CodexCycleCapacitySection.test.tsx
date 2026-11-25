@@ -20,7 +20,8 @@ const localRefetchMock = vi.hoisted(() => vi.fn());
 const officialRefetchMock = vi.hoisted(() => vi.fn());
 const pricingRefetchMock = vi.hoisted(() => vi.fn());
 
-vi.mock("@tanstack/react-query", () => ({
+vi.mock("@tanstack/react-query", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@tanstack/react-query")>()),
   useQuery: (options: unknown) => useQueryMock(options),
 }));
 

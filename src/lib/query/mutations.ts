@@ -19,7 +19,10 @@ import { usageKeys } from "@/lib/query/usage";
 import { resetCodexSubscriptionQueries } from "@/lib/query/subscription";
 import { sessionKeys } from "@/lib/query/sessions";
 import { invalidatePiProviderCaches } from "@/lib/query/pi";
-import { invalidateGrokCliLoginCaches } from "@/lib/query/subscription";
+import {
+  invalidateAgyLoginCaches,
+  invalidateGrokCliLoginCaches,
+} from "@/lib/query/subscription";
 import { GROKBUILD_OFFICIAL_PROVIDER_ID } from "@/utils/providerCapabilities";
 import { appHas } from "@/config/appSpecs";
 
@@ -172,6 +175,8 @@ export const useAddProviderMutation = (appId: AppId) => {
     onSettled: async () => {
       if (appHas(appId, "piFamily")) {
         await invalidatePiProviderCaches(queryClient, appId);
+      } else if (appId === "agy") {
+        await invalidateAgyLoginCaches(queryClient);
       }
     },
   });
@@ -242,6 +247,8 @@ export const useUpdateProviderMutation = (appId: AppId) => {
     onSettled: async () => {
       if (appHas(appId, "piFamily")) {
         await invalidatePiProviderCaches(queryClient, appId);
+      } else if (appId === "agy") {
+        await invalidateAgyLoginCaches(queryClient);
       } else if (appId === "kimi") {
         // 默认模型可能在 Kimi Code 里改过：失败时也重读，页面上的「默认」才跟得上
         await queryClient.invalidateQueries({

@@ -391,12 +391,10 @@ mod tests {
     #[test]
     fn codex_rebuild_notifies_after_successful_empty_rebuild() {
         crate::usage_events::take_test_notify_count();
-
         let result = finish_codex_rebuild(Ok(
             crate::services::session_usage::SessionSyncResult::default(),
         ))
         .expect("空重导应成功");
-
         assert_eq!(result.imported, 0);
         assert_eq!(crate::usage_events::take_test_notify_count(), 1);
     }

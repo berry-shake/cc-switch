@@ -1,5 +1,6 @@
 import { useRef } from "react";
 import {
+  queryOptions,
   useQuery,
   useQueryClient,
   type QueryClient,
@@ -7,6 +8,7 @@ import {
 } from "@tanstack/react-query";
 import { subscriptionApi } from "@/lib/api/subscription";
 import { kimiOAuthApi } from "@/lib/api/kimiOAuth";
+import { authApi } from "@/lib/api";
 import type { AppId } from "@/lib/api/types";
 import type { ProviderMeta } from "@/types";
 import type {
@@ -50,6 +52,20 @@ export async function resetCodexSubscriptionQueries(
       queryKey: subscriptionKeys.codexOfficialSnapshot(),
       exact: true,
     }),
+  ]);
+}
+
+export const agyAuthStatusQuery = queryOptions({
+  queryKey: ["managed-auth-status", "agy_oauth"],
+  queryFn: () => authApi.authGetStatus("agy_oauth"),
+  staleTime: 30_000,
+});
+
+/** Refresh the actual agy login and the quota shown on cards that follow it. */
+export async function invalidateAgyLoginCaches(queryClient: QueryClient) {
+  await Promise.all([
+    queryClient.invalidateQueries({ queryKey: agyAuthStatusQuery.queryKey }),
+    queryClient.invalidateQueries({ queryKey: subscriptionKeys.quota("agy") }),
   ]);
 }
 
@@ -246,15 +262,20 @@ export function useXaiOauthQuotaByAccountId(
   accountId: string | null,
   options: UseCodexOauthQuotaOptions = {},
 ) {
-  const { enabled = true, autoQuery = false } = options;
+  const {
+    enabled = true,
+    autoQuery = false,
+    autoQueryIntervalMinutes = 5,
+  } = options;
   const query = useQuery({
     queryKey: ["xai_oauth", "quota", accountId ?? "default"],
     queryFn: () => subscriptionApi.getXaiOauthQuota(accountId),
     enabled,
-    refetchInterval: autoQuery ? REFETCH_INTERVAL : false,
-    refetchIntervalInBackground: autoQuery,
-    refetchOnWindowFocus: autoQuery,
-    staleTime: REFETCH_INTERVAL,
+    ...autoRefetch(autoQuery, autoQueryIntervalMinutes),
+    staleTime:
+      autoQueryIntervalMinutes > 0
+        ? Math.max(autoQueryIntervalMinutes, 1) * 60 * 1000
+        : REFETCH_INTERVAL,
     retry: 1,
   });
 
@@ -309,6 +330,40 @@ export function useKimiAccountQuota(
   });
 
   return useQuotaKeepLastGood(query, accountId);
+}
+
+let codebuddyForceRefreshEpoch = 0;
+
+/** 授权中心「全部刷新」时调用：让下一次 CodeBuddy 额度重查同样跳过后端 5 分钟缓存。 */
+export function markCodebuddyQuotaForceRefresh() {
+  codebuddyForceRefreshEpoch += 1;
+}
+
+/**
+ * CodeBuddy 账号的套餐与积分（按授权中心账号 ID，用该账号副本里的令牌只读查询）。
+ * 后端 5 分钟内走缓存；`refresh()` 与授权中心「全部刷新」会跳过缓存重查。
+ */
+export function useCodebuddyAccountQuota(accountId: string, lang: string) {
+  const force = useRef(false);
+  const seenForceEpoch = useRef(codebuddyForceRefreshEpoch);
+  const query = useQuery({
+    queryKey: ["codebuddy_oauth", "quota", accountId, lang],
+    queryFn: () => {
+      const skipCache =
+        force.current || seenForceEpoch.current !== codebuddyForceRefreshEpoch;
+      force.current = false;
+      seenForceEpoch.current = codebuddyForceRefreshEpoch;
+      return authApi.codebuddyAccountQuota(accountId, lang, skipCache);
+    },
+    staleTime: REFETCH_INTERVAL,
+    refetchOnWindowFocus: false,
+    retry: 1,
+  });
+  const refresh = () => {
+    force.current = true;
+    return query.refetch();
+  };
+  return { ...query, refresh };
 }
 
 /**

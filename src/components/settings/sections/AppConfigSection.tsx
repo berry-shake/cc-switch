@@ -15,6 +15,7 @@ import {
 } from "@/config/directoryApps";
 import { ClaudeScanDirectories } from "@/components/settings/ClaudeScanDirectories";
 import { CodexAuthSettings } from "@/components/settings/CodexAuthSettings";
+import { CopilotVscodeSettings } from "@/components/settings/CopilotVscodeSettings";
 import { APP_DISPLAY_NAME, AppGlyph } from "@/components/shell/AppGlyph";
 import {
   SettingsBlock,
@@ -163,6 +164,11 @@ export function AppConfigSection({
           </SettingsCard>
         </SettingsBlock>
       ))}
+      <CopilotVscodeSettings
+        settings={settings}
+        isSaving={isSaving}
+        onAutoSave={onAutoSave}
+      />
     </>
   );
 }

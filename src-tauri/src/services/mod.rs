@@ -4,6 +4,7 @@ pub mod backup_storage;
 pub mod balance;
 pub mod claude_account;
 pub(crate) mod claude_usage_ledger;
+pub mod codebuddy_account;
 pub(crate) mod codex_auth_credentials;
 pub mod codex_oauth_models;
 pub mod codex_official_usage;
@@ -66,6 +67,7 @@ pub use skill::SkillService;
 pub use speedtest::{EndpointLatency, SpeedtestService};
 pub use usage_cache::UsageCache;
 
+pub mod session_usage_codebuddy;
 pub mod session_usage_copilot;
 pub mod session_usage_kimi;
 pub mod session_usage_mcode;
