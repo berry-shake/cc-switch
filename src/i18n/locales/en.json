@@ -2072,6 +2072,7 @@
     "deploymentGitHubCom": "GitHub.com",
     "deploymentEnterprise": "GitHub Enterprise Server",
     "enterpriseDomainPlaceholder": "e.g. company.ghe.com",
+    "autoModelName": "GitHub Copilot Auto",
     "form": {
       "officialTitle": "Uses Copilot CLI's GitHub sign-in",
       "officialHint": "Open Terminal starts copilot with this card's model. Bind an Auth Center account to start it with that account.",
@@ -2263,7 +2264,8 @@
     "autoReviewModelMainDefault": "Main model reviews itself (default)",
     "autoReviewModelNoList": "This card has no model list: Codex reviews approvals with the official codex-auto-review, which only some relays that forward to ChatGPT accounts accept; the rest return 404. Add models to the list above to pick one.",
     "officialSpeedTiersLabel": "Keep official Fast tier",
-    "officialSpeedTiersHint": "Keeps the official Fast speed tier on GPT models in the model list, so choosing Fast in Codex sends service_tier=priority. Only relays that forward to official ChatGPT accounts (such as CPA) accept it, and it uses quota faster; other upstreams may reject it or bill it at a higher price. Once on, a Fast choice you made under the official card takes effect on this provider right away. Not used in aggregation mode. Restart Codex after changing it.",
+    "officialSpeedTiersHint": "Keeps the official Fast speed tier on GPT models in the model list, so choosing Fast in Codex sends service_tier=priority. Only relays that forward to official ChatGPT accounts (such as CPA) accept it, and it uses quota faster; other upstreams may reject it or bill it at a higher price. The Codex desktop app shows Fast only while it is signed in with ChatGPT: sign in there and turn on \"Keep official login for direct switches\" in Settings (or use routing mode), and requests still go to this card. Without a sign-in only the Codex CLI can use it (/fast). Once on, a Fast choice you made under the official card takes effect on this provider right away. Not used in aggregation mode. Restart Codex after changing it.",
+    "officialSpeedTiersNoList": "This card has no model list: the Fast tier is only added to GPT models in the model list, so it can't be turned on yet. Add GPT models to the list above to turn it on.",
     "modelListHint": "Restart Codex after changes.",
     "modelListDefaultHelp": "These models appear in Codex's /model menu; the first row is the default model. Rows named after an official GPT model use the official entry, so their display name, window and reasoning levels are ignored.",
     "addCatalogModel": "Add manually",
@@ -2640,7 +2642,7 @@
       "analyticsPartialStartDescription": "The current cycle started partway through the official statistics day {{date}}, and the API cannot split usage before and after that day's reset. Based on that day's usage, Token/USD capacity may be overstated by about {{share}}.",
       "empty": {
         "cycleTitle": "Waiting for cycle data",
-        "cycleDescription": "The official API has not returned a valid long cycle yet, possibly because it just reset. The app will retry automatically, or you can refresh manually.",
+        "cycleDescription": "The official API has not returned a valid long cycle yet, possibly because it just reset.",
         "utilizationTitle": "Waiting for used percentage",
         "utilizationDescription": "The cycle range is available, but the official used percentage has not synced yet. A missing value is not treated as 0%.",
         "firstUsageTitle": "A new cycle has started",
@@ -2904,6 +2906,7 @@
       "duration": "Duration",
       "durationEstimated": "Duration (estimated)",
       "speedTooFew": "Under 100 output tokens, so no speed",
+      "speedBurst": "Arrived in a buffered burst, so no speed",
       "speedEstimateTooFew": "Under 200 output tokens, so no estimate",
       "noTimingSession": "Session logs have no timing data",
       "noFirstToken": "No first-token timing, so no speed",
@@ -4826,6 +4829,7 @@
     },
     "updatedAt": "Updated {{time}}",
     "clickToRefresh": "Click to check again",
+    "manualIdle": "Click refresh to query quota",
     "resetCredits": {
       "label": "Resets",
       "left": "Resets left: {{count}}",
@@ -5105,9 +5109,9 @@
       "disableAria": "Turn off the {{count}} selected Skills in",
       "uninstall": "Uninstall"
     },
-    "piColumnTitle": "Pi counts a Skill as enabled when its folder exists in ~/.pi/agent/skills",
+    "piColumnTitle": "Pi also reads ~/.agents/skills, so unchecked skills in that path are still directly available",
     "piHelpTitle": "How Pi counts as enabled",
-    "piHelp": "Whether the folder exists in ~/.pi/agent/skills.",
+    "piHelp": "Pi also reads ~/.agents/skills, so unchecked skills in that path are still directly available.",
     "pop": {
       "onlyApp": "Show only ones enabled in {{app}}",
       "showAll": "Show all Skills"
@@ -5481,6 +5485,10 @@
     "openBrowser": {
       "title": "Open the browser when signing in",
       "description": "Turn this off to only copy the sign-in link and open it in a browser of your choice — handy when you keep accounts in separate browser profiles."
+    },
+    "autoQuota": {
+      "title": "Query quota automatically",
+      "description": "When off, official account quotas are only queried when you click refresh: opening the Auth Center, scheduled card refreshes and hovering the tray won't query them. DeepSeek account balances are shown with the sign-in status and aren't affected by this switch."
     }
   },
   "kimi": {

@@ -1,6 +1,5 @@
 import { useRef } from "react";
 import {
-  queryOptions,
   useQuery,
   useQueryClient,
   type QueryClient,
@@ -19,7 +18,12 @@ import type { ManagedAuthStatus } from "@/lib/api/auth";
 import { resolveManagedAccountId } from "@/lib/authBinding";
 import { PROVIDER_TYPES } from "@/config/constants";
 import { appHas } from "@/config/appSpecs";
+import {
+  managedAuthStatusQuery,
+  managedAuthStatusQueryKey,
+} from "./managedAuth";
 import { resolveDisplayUsage, type LastGoodSnapshot } from "./queries";
+import { isManualIdle, useQuotaPolicy, type QuotaPolicy } from "./quotaPolicy";
 import { extractErrorMessage } from "@/utils/errorUtils";
 
 const REFETCH_INTERVAL = 5 * 60 * 1000; // 5 minutes
@@ -55,11 +59,7 @@ export async function resetCodexSubscriptionQueries(
   ]);
 }
 
-export const agyAuthStatusQuery = queryOptions({
-  queryKey: ["managed-auth-status", "agy_oauth"],
-  queryFn: () => authApi.authGetStatus("agy_oauth"),
-  staleTime: 30_000,
-});
+export const agyAuthStatusQuery = managedAuthStatusQuery("agy_oauth");
 
 /** Refresh the actual agy login and the quota shown on cards that follow it. */
 export async function invalidateAgyLoginCaches(queryClient: QueryClient) {
@@ -77,7 +77,7 @@ export async function invalidateAgyLoginCaches(queryClient: QueryClient) {
  */
 export async function invalidateGrokCliLoginCaches(queryClient: QueryClient) {
   await queryClient.invalidateQueries({
-    queryKey: ["managed-auth-status", "xai_oauth"],
+    queryKey: managedAuthStatusQueryKey("xai_oauth"),
   });
   await queryClient.invalidateQueries({
     queryKey: subscriptionKeys.quota("grokbuild"),
@@ -115,6 +115,7 @@ const QUERY_REJECTED_PLACEHOLDER: SubscriptionQuota = {
 function useQuotaKeepLastGood(
   query: UseQueryResult<SubscriptionQuota>,
   scopeKey: string,
+  policy: QuotaPolicy,
 ) {
   const lastGoodRef = useRef<{
     key: string;
@@ -133,6 +134,8 @@ function useQuotaKeepLastGood(
   lastGoodRef.current.snap = lastGood;
   return {
     ...query,
+    /** 只手动查询、还没查过：给界面放「点刷新查询额度」 */
+    manualIdle: isManualIdle(policy, query),
     data:
       data ??
       (query.isError
@@ -170,11 +173,13 @@ export function useSubscriptionQuota(
   autoQuery = false,
   autoQueryIntervalMinutes = 5,
 ) {
+  const policy = useQuotaPolicy();
+  const autoAllowed = policy.autoAllowed;
   const query = useQuery({
     queryKey: subscriptionKeys.quota(appId),
     queryFn: () => subscriptionApi.getQuota(appId),
-    enabled: enabled && appHas(appId, "officialSubscription"),
-    ...autoRefetch(autoQuery, autoQueryIntervalMinutes),
+    enabled: autoAllowed && enabled && appHas(appId, "officialSubscription"),
+    ...autoRefetch(autoAllowed && autoQuery, autoQueryIntervalMinutes),
     staleTime:
       autoQueryIntervalMinutes > 0
         ? Math.max(autoQueryIntervalMinutes, 1) * 60 * 1000
@@ -182,7 +187,7 @@ export function useSubscriptionQuota(
     retry: 1,
   });
 
-  return useQuotaKeepLastGood(query, appId);
+  return useQuotaKeepLastGood(query, appId, policy);
 }
 
 export interface UseCodexOauthQuotaOptions {
@@ -209,11 +214,13 @@ export function useCodexOauthQuotaByAccountId(
     autoQuery = false,
     autoQueryIntervalMinutes = 5,
   } = options;
+  const policy = useQuotaPolicy();
+  const autoAllowed = policy.autoAllowed;
   const query = useQuery({
     queryKey: ["codex_oauth", "quota", accountId ?? "default"],
     queryFn: () => subscriptionApi.getCodexOauthQuota(accountId),
-    enabled,
-    ...autoRefetch(autoQuery, autoQueryIntervalMinutes),
+    enabled: autoAllowed && enabled,
+    ...autoRefetch(autoAllowed && autoQuery, autoQueryIntervalMinutes),
     staleTime:
       autoQueryIntervalMinutes > 0
         ? Math.max(autoQueryIntervalMinutes, 1) * 60 * 1000
@@ -221,7 +228,7 @@ export function useCodexOauthQuotaByAccountId(
     retry: 1,
   });
 
-  return useQuotaKeepLastGood(query, accountId ?? "default");
+  return useQuotaKeepLastGood(query, accountId ?? "default", policy);
 }
 
 /**
@@ -267,11 +274,13 @@ export function useXaiOauthQuotaByAccountId(
     autoQuery = false,
     autoQueryIntervalMinutes = 5,
   } = options;
+  const policy = useQuotaPolicy();
+  const autoAllowed = policy.autoAllowed;
   const query = useQuery({
     queryKey: ["xai_oauth", "quota", accountId ?? "default"],
     queryFn: () => subscriptionApi.getXaiOauthQuota(accountId),
-    enabled,
-    ...autoRefetch(autoQuery, autoQueryIntervalMinutes),
+    enabled: autoAllowed && enabled,
+    ...autoRefetch(autoAllowed && autoQuery, autoQueryIntervalMinutes),
     staleTime:
       autoQueryIntervalMinutes > 0
         ? Math.max(autoQueryIntervalMinutes, 1) * 60 * 1000
@@ -279,7 +288,7 @@ export function useXaiOauthQuotaByAccountId(
     retry: 1,
   });
 
-  return useQuotaKeepLastGood(query, accountId ?? "default");
+  return useQuotaKeepLastGood(query, accountId ?? "default", policy);
 }
 
 /**
@@ -295,16 +304,18 @@ export function useAgyAccountQuota(
     autoQuery = false,
     autoQueryIntervalMinutes = 5,
   } = options;
+  const policy = useQuotaPolicy();
+  const autoAllowed = policy.autoAllowed;
   const query = useQuery({
     queryKey: ["agy_oauth", "quota", accountId],
     queryFn: () => subscriptionApi.getAgyAccountQuota(accountId),
-    enabled,
-    ...autoRefetch(autoQuery, autoQueryIntervalMinutes),
+    enabled: autoAllowed && enabled,
+    ...autoRefetch(autoAllowed && autoQuery, autoQueryIntervalMinutes),
     staleTime: REFETCH_INTERVAL,
     retry: 1,
   });
 
-  return useQuotaKeepLastGood(query, accountId);
+  return useQuotaKeepLastGood(query, accountId, policy);
 }
 
 /**
@@ -320,16 +331,18 @@ export function useKimiAccountQuota(
     autoQuery = false,
     autoQueryIntervalMinutes = 5,
   } = options;
+  const policy = useQuotaPolicy();
+  const autoAllowed = policy.autoAllowed;
   const query = useQuery({
     queryKey: ["kimi_oauth", "quota", accountId],
     queryFn: () => kimiOAuthApi.quota(accountId),
-    enabled,
-    ...autoRefetch(autoQuery, autoQueryIntervalMinutes),
+    enabled: autoAllowed && enabled,
+    ...autoRefetch(autoAllowed && autoQuery, autoQueryIntervalMinutes),
     staleTime: REFETCH_INTERVAL,
     retry: 1,
   });
 
-  return useQuotaKeepLastGood(query, accountId);
+  return useQuotaKeepLastGood(query, accountId, policy);
 }
 
 let codebuddyForceRefreshEpoch = 0;
@@ -346,6 +359,7 @@ export function markCodebuddyQuotaForceRefresh() {
 export function useCodebuddyAccountQuota(accountId: string, lang: string) {
   const force = useRef(false);
   const seenForceEpoch = useRef(codebuddyForceRefreshEpoch);
+  const policy = useQuotaPolicy();
   const query = useQuery({
     queryKey: ["codebuddy_oauth", "quota", accountId, lang],
     queryFn: () => {
@@ -355,6 +369,7 @@ export function useCodebuddyAccountQuota(accountId: string, lang: string) {
       seenForceEpoch.current = codebuddyForceRefreshEpoch;
       return authApi.codebuddyAccountQuota(accountId, lang, skipCache);
     },
+    enabled: policy.autoAllowed,
     staleTime: REFETCH_INTERVAL,
     refetchOnWindowFocus: false,
     retry: 1,
@@ -363,7 +378,7 @@ export function useCodebuddyAccountQuota(accountId: string, lang: string) {
     force.current = true;
     return query.refetch();
   };
-  return { ...query, refresh };
+  return { ...query, refresh, manualIdle: isManualIdle(policy, query) };
 }
 
 /**
@@ -379,6 +394,8 @@ export function useClaudeAccountQuota(
     autoQuery = false,
     autoQueryIntervalMinutes = 5,
   } = options;
+  const policy = useQuotaPolicy();
+  const autoAllowed = policy.autoAllowed;
   const queryClient = useQueryClient();
   const query = useQuery({
     queryKey: ["claude_official", "quota", accountId],
@@ -387,13 +404,13 @@ export function useClaudeAccountQuota(
       refreshAccountsOnPlanChange(queryClient, accountId, quota.plan);
       return quota;
     },
-    enabled,
-    ...autoRefetch(autoQuery, autoQueryIntervalMinutes),
+    enabled: autoAllowed && enabled,
+    ...autoRefetch(autoAllowed && autoQuery, autoQueryIntervalMinutes),
     staleTime: REFETCH_INTERVAL,
     retry: 1,
   });
 
-  return useQuotaKeepLastGood(query, accountId);
+  return useQuotaKeepLastGood(query, accountId, policy);
 }
 
 /**

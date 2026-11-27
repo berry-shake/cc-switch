@@ -2033,6 +2033,7 @@
     "directModeFormatSwitch": "Этот формат не работает в режиме прямого подключения; чтобы использовать эту карточку, переключитесь на маршрутизацию или агрегацию."
   },
   "copilot": {
+    "autoModelName": "GitHub Copilot Auto",
     "automaticFormat": "Выбирается маршрутизацией автоматически",
     "automaticFormatHint": "Маршрутизация выбирает формат upstream Copilot для каждой модели; ручные настройки формата игнорируются.",
     "authSection": "Авторизация GitHub Copilot",
@@ -2263,7 +2264,8 @@
     "autoReviewModelMainDefault": "Основная модель проверяет сама себя (по умолчанию)",
     "autoReviewModelNoList": "У этой карточки нет списка моделей: Codex проверяет одобрения официальной моделью codex-auto-review, которую принимают только некоторые ретрансляторы, пересылающие запросы на аккаунты ChatGPT; остальные возвращают 404. Чтобы выбрать модель, добавьте модели в список выше.",
     "officialSpeedTiersLabel": "Сохранить официальный уровень Fast",
-    "officialSpeedTiersHint": "Сохраняет официальный скоростной уровень Fast у моделей GPT в списке моделей, поэтому выбор Fast в Codex отправляет service_tier=priority. Его принимают только ретрансляторы, пересылающие запросы на официальные аккаунты ChatGPT (например, CPA), и квота при этом расходуется быстрее; другие upstream могут отклонить его или тарифицировать по более высокой цене. После включения выбор Fast, сделанный под официальной карточкой, сразу начинает действовать для этого провайдера. Не используется в режиме агрегации. После изменения перезапустите Codex.",
+    "officialSpeedTiersHint": "Сохраняет официальный скоростной уровень Fast у моделей GPT в списке моделей, поэтому выбор Fast в Codex отправляет service_tier=priority. Его принимают только ретрансляторы, пересылающие запросы на официальные аккаунты ChatGPT (например, CPA), и квота при этом расходуется быстрее; другие upstream могут отклонить его или тарифицировать по более высокой цене. Настольное приложение Codex показывает Fast, только когда в нём выполнен вход через ChatGPT: войдите в приложении и включите в настройках «Сохранять официальный вход для прямых переключений» (или используйте режим маршрутизации); запросы по-прежнему идут на эту карточку. Без входа Fast доступен только в Codex CLI (/fast). После включения выбор Fast, сделанный под официальной карточкой, сразу начинает действовать для этого провайдера. Не используется в режиме агрегации. После изменения перезапустите Codex.",
+    "officialSpeedTiersNoList": "У этой карточки нет списка моделей: уровень Fast добавляется только моделям GPT из списка моделей, поэтому его пока нельзя включить. Чтобы включить его, добавьте модели GPT в список выше.",
     "modelListHint": "После изменений перезапустите Codex.",
     "modelListDefaultHelp": "Эти модели появляются в меню /model Codex; первая строка — модель по умолчанию. Строки с именем официальной модели GPT используют официальную запись, поэтому их отображаемое имя, окно и уровни рассуждения игнорируются.",
     "addCatalogModel": "Добавить вручную",
@@ -2795,6 +2797,7 @@
       "duration": "Длительность",
       "durationEstimated": "Длительность (оценка)",
       "speedTooFew": "Меньше 100 токенов вывода, скорость не считается",
+      "speedBurst": "Ответ пришёл буферизованным всплеском, скорость не считается",
       "speedEstimateTooFew": "Меньше 200 токенов вывода, скорость не оценивается",
       "noTimingSession": "В логах сессий нет данных о времени",
       "noFirstToken": "Нет времени до первого токена, скорость не считается",
@@ -2909,7 +2912,7 @@
       "analyticsPartialStartDescription": "The current cycle started partway through the official statistics day {{date}}, and the API cannot split usage before and after that day's reset. Based on that day's usage, Token/USD capacity may be overstated by about {{share}}.",
       "empty": {
         "cycleTitle": "Waiting for cycle data",
-        "cycleDescription": "The official API has not returned a valid long cycle yet, possibly because it just reset. The app will retry automatically, or you can refresh manually.",
+        "cycleDescription": "The official API has not returned a valid long cycle yet, possibly because it just reset.",
         "utilizationTitle": "Waiting for used percentage",
         "utilizationDescription": "The cycle range is available, but the official used percentage has not synced yet. A missing value is not treated as 0%.",
         "firstUsageTitle": "A new cycle has started",
@@ -4826,6 +4829,7 @@
     },
     "updatedAt": "Обновлено {{time}}",
     "clickToRefresh": "Нажмите, чтобы проверить снова",
+    "manualIdle": "Нажмите обновить, чтобы запросить квоту",
     "resetCredits": {
       "label": "Сбросы",
       "left": "Осталось сбросов: {{count}}",
@@ -5105,9 +5109,9 @@
       "disableAria": "Отключить выбранные навыки ({{count}}) в",
       "uninstall": "Удалить"
     },
-    "piColumnTitle": "Pi считает навык включённым, если его каталог есть в ~/.pi/agent/skills",
+    "piColumnTitle": "Pi также читает ~/.agents/skills, поэтому неотмеченные навыки по этому пути всё равно доступны напрямую",
     "piHelpTitle": "Как Pi определяет включение",
-    "piHelp": "Есть ли каталог в ~/.pi/agent/skills.",
+    "piHelp": "Pi также читает ~/.agents/skills, поэтому неотмеченные навыки по этому пути всё равно доступны напрямую.",
     "pop": {
       "onlyApp": "Показать только включённые в {{app}}",
       "showAll": "Показать все навыки"
@@ -5481,6 +5485,10 @@
     "openBrowser": {
       "title": "Открывать браузер при входе",
       "description": "Выключите, чтобы только копировать ссылку для входа и открывать её в выбранном браузере — удобно, если аккаунты разнесены по разным профилям браузера."
+    },
+    "autoQuota": {
+      "title": "Автоматически запрашивать квоту",
+      "description": "Когда выключено, квоты официальных аккаунтов запрашиваются только по нажатию кнопки обновления: открытие Центра авторизации, плановые обновления карточек и наведение на значок в трее их не запрашивают. Баланс аккаунтов DeepSeek показывается вместе со статусом входа, поэтому этот переключатель на него не влияет."
     }
   },
   "kimi": {

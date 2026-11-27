@@ -1962,6 +1962,7 @@
     "directModeFormatSwitch": "Bu biçim doğrudan modda çalışmaz; Bu kartı kullanmak için yönlendirmeye veya Birleştirme'ya geçin."
   },
   "copilot": {
+    "autoModelName": "GitHub Copilot Auto",
     "automaticFormat": "Yönlendirme tarafından otomatik seçilir",
     "automaticFormatHint": "Yönlendirme, her model için Copilot üst akış biçimini seçer; elle belirlenen biçim ayarları yok sayılır.",
     "authSection": "GitHub Copilot Kimlik Doğrulaması",
@@ -2192,7 +2193,8 @@
     "autoReviewModelMainDefault": "Ana model kendini inceler (varsayılan)",
     "autoReviewModelNoList": "Bu kartta model listesi yok: Codex onayları yalnızca ChatGPT hesaplarına yönlendirme yapan bazı aktarım hizmetlerinin kabul ettiği resmî codex-auto-review modeliyle inceler; diğerleri 404 döndürür. Bir model seçmek için yukarıdaki listeye model ekleyin.",
     "officialSpeedTiersLabel": "Resmî Fast katmanını koru",
-    "officialSpeedTiersHint": "Model listesindeki GPT modellerinde resmî Fast hız katmanını korur; böylece Codex'te Fast seçildiğinde service_tier=priority gönderilir. Bunu yalnızca resmî ChatGPT hesaplarına yönlendiren aktarım hizmetleri (CPA gibi) kabul eder ve kota daha hızlı tükenir; diğer yukarı akışlar reddedebilir veya daha yüksek fiyattan faturalandırabilir. Açıldığında, resmî kart altında yaptığınız Fast seçimi bu sağlayıcıda hemen geçerli olur. Birleştirme modunda kullanılmaz. Değiştirdikten sonra Codex'i yeniden başlatın.",
+    "officialSpeedTiersHint": "Model listesindeki GPT modellerinde resmî Fast hız katmanını korur; böylece Codex'te Fast seçildiğinde service_tier=priority gönderilir. Bunu yalnızca resmî ChatGPT hesaplarına yönlendiren aktarım hizmetleri (CPA gibi) kabul eder ve kota daha hızlı tükenir; diğer yukarı akışlar reddedebilir veya daha yüksek fiyattan faturalandırabilir. Codex masaüstü uygulaması Fast'i yalnızca ChatGPT ile oturum açıkken gösterir: uygulamada oturum açıp Ayarlar'daki \"Doğrudan geçişler için resmi giriş bilgilerini koruyun\" seçeneğini açın (veya yönlendirme modunu kullanın); istekler yine bu karta gider. Oturum açılmadan Fast'i yalnızca Codex CLI kullanabilir (/fast). Açıldığında, resmî kart altında yaptığınız Fast seçimi bu sağlayıcıda hemen geçerli olur. Birleştirme modunda kullanılmaz. Değiştirdikten sonra Codex'i yeniden başlatın.",
+    "officialSpeedTiersNoList": "Bu kartta model listesi yok: Fast katmanı yalnızca model listesindeki GPT modellerine eklenir, bu yüzden şu anda açılamaz. Açmak için yukarıdaki listeye GPT modelleri ekleyin.",
     "modelListHint": "Değişikliklerden sonra Codex uygulamasını yeniden başlatın.",
     "modelListDefaultHelp": "Bu modeller Codex'nin /model menüsünde görünür; ilk satır varsayılan modeldir. Adını resmi bir GPT modelinden alan satırlar resmi girişi kullanır, dolayısıyla görünen adları, pencereleri ve akıl yürütme düzeyleri göz ardı edilir.",
     "addCatalogModel": "Manuel olarak ekle",
@@ -2724,6 +2726,7 @@
       "duration": "Süre",
       "durationEstimated": "Süre (tahmini)",
       "speedTooFew": "100 çıkış tokenunun altında, yani hız yok",
+      "speedBurst": "Arabelleğe alınmış ani aktarım olduğu için hız yok",
       "speedEstimateTooFew": "Çıkış tokenu 200'ün altında olduğundan tahmin yok",
       "noTimingSession": "Oturum günlüklerinde zamanlama verisi yok",
       "noFirstToken": "İlk token zamanlaması yok, dolayısıyla hız yok",
@@ -2838,7 +2841,7 @@
       "analyticsPartialStartDescription": "The current cycle started partway through the official statistics day {{date}}, and the API cannot split usage before and after that day's reset. Based on that day's usage, Token/USD capacity may be overstated by about {{share}}.",
       "empty": {
         "cycleTitle": "Waiting for cycle data",
-        "cycleDescription": "The official API has not returned a valid long cycle yet, possibly because it just reset. The app will retry automatically, or you can refresh manually.",
+        "cycleDescription": "The official API has not returned a valid long cycle yet, possibly because it just reset.",
         "utilizationTitle": "Waiting for used percentage",
         "utilizationDescription": "The cycle range is available, but the official used percentage has not synced yet. A missing value is not treated as 0%.",
         "firstUsageTitle": "A new cycle has started",
@@ -4755,6 +4758,7 @@
     },
     "updatedAt": "{{time}} tarihinde güncellendi",
     "clickToRefresh": "Tekrar kontrol etmek için tıklayın",
+    "manualIdle": "Kotayı sorgulamak için yenile düğmesine tıklayın",
     "resetCredits": {
       "label": "Sıfırlanma",
       "left": "Kalan sıfırlama: {{count}}",
@@ -5034,9 +5038,9 @@
       "disableAria": "{{count}}'de seçilen Becerileri kapatın",
       "uninstall": "Kaldır"
     },
-    "piColumnTitle": "Pi, klasörü ~/.pi/agent/skills konumunda mevcut olduğunda bir Beceriyi etkin olarak sayar",
+    "piColumnTitle": "Pi ayrıca ~/.agents/skills konumunu da okur; bu nedenle işaretlenmemiş olsa bile bu yoldaki beceriler doğrudan kullanılabilir",
     "piHelpTitle": "Pi nasıl etkin olarak sayılır?",
-    "piHelp": "Klasörün ~/.pi/agent/skills konumunda olup olmadığı.",
+    "piHelp": "Pi ayrıca ~/.agents/skills konumunu da okur; bu nedenle işaretlenmemiş olsa bile bu yoldaki beceriler doğrudan kullanılabilir.",
     "pop": {
       "onlyApp": "Yalnızca {{app}}'de etkin olanları göster",
       "showAll": "Tüm Becerileri Göster"
@@ -5410,6 +5414,10 @@
     "openBrowser": {
       "title": "Oturum açarken tarayıcıyı aç",
       "description": "Yalnızca oturum açma bağlantısını kopyalayıp istediğiniz tarayıcıda açmak için kapatın; hesapları ayrı tarayıcı profillerinde tutuyorsanız kullanışlıdır."
+    },
+    "autoQuota": {
+      "title": "Kotayı otomatik sorgula",
+      "description": "Kapalıyken resmi hesap kotaları yalnızca yenile düğmesine tıkladığınızda sorgulanır: Yetkilendirme Merkezi’ni açmak, kartların zamanlanmış yenilemeleri ve tepsi simgesinin üzerine gelmek kotaları sorgulamaz. DeepSeek hesap bakiyeleri oturum durumuyla birlikte gösterildiğinden bu anahtardan etkilenmez."
     }
   },
   "kimi": {

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { APP_IDS } from "@/config/appSpecs";
 import {
   getCacheWriteAvailability,
   omitsCacheWrites,
@@ -7,6 +8,7 @@ import {
   INPUT_TOKEN_SEMANTICS_FRESH,
   INPUT_TOKEN_SEMANTICS_LEGACY,
   INPUT_TOKEN_SEMANTICS_TOTAL,
+  KNOWN_APP_TYPES,
 } from "@/types/usage";
 
 describe("hasKnownCacheWriteTokens", () => {
@@ -55,6 +57,16 @@ describe("hasKnownCacheWriteTokens", () => {
         inputTokenSemantics: INPUT_TOKEN_SEMANTICS_LEGACY,
       }),
     ).toBe(true);
+  });
+});
+
+describe("KNOWN_APP_TYPES", () => {
+  it("matches the default app order in APP_IDS", () => {
+    expect(KNOWN_APP_TYPES).toEqual(
+      APP_IDS.filter((app) =>
+        (KNOWN_APP_TYPES as readonly string[]).includes(app),
+      ),
+    );
   });
 });
 

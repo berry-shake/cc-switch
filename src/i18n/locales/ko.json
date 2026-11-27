@@ -2033,6 +2033,7 @@
     "directModeFormatSwitch": "이 형식은 직접 연결 모드에서 사용할 수 없습니다. 이 카드를 사용하려면 라우팅 또는 통합 모드로 전환하세요."
   },
   "copilot": {
+    "autoModelName": "GitHub Copilot Auto",
     "automaticFormat": "모델에 따라 자동 선택",
     "automaticFormatHint": "Copilot의 업스트림 형식은 라우팅에서 모델에 따라 자동으로 선택합니다. 수동으로 지정한 형식은 적용되지 않습니다.",
     "authSection": "GitHub Copilot 인증",
@@ -2263,7 +2264,8 @@
     "autoReviewModelMainDefault": "주 모델이 직접 승인 (기본값)",
     "autoReviewModelNoList": "이 카드에는 모델 목록이 없습니다. Codex는 공식 codex-auto-review로 승인 여부를 판단하며, ChatGPT 계정으로 전달하는 일부 중계 서비스만 이 모델을 지원합니다. 지원하지 않으면 404 오류가 발생합니다. 위 모델 목록에 모델을 추가하면 선택할 수 있습니다.",
     "officialSpeedTiersLabel": "공식 Fast 단계 유지",
-    "officialSpeedTiersHint": "모델 목록의 GPT 모델에 공식 Fast 속도 단계를 유지하여 Codex에서 Fast를 선택하면 요청에 service_tier=priority가 포함되도록 합니다. 공식 ChatGPT 계정으로 요청을 전달하는 중계 서비스(예: CPA)만 이를 지원하며, 할당량이 더 빠르게 소모됩니다. 다른 업스트림에서는 오류가 발생하거나 더 높은 요금이 청구될 수 있습니다. 이 옵션을 켜면 이전에 공식 공급자 카드에서 선택한 Fast가 이 공급자에도 즉시 적용됩니다. 통합 모드에서는 적용되지 않습니다. 변경 후 Codex를 다시 시작하세요.",
+    "officialSpeedTiersHint": "모델 목록의 GPT 모델에 공식 Fast 속도 단계를 유지하여 Codex에서 Fast를 선택하면 요청에 service_tier=priority가 포함되도록 합니다. 공식 ChatGPT 계정으로 요청을 전달하는 중계 서비스(예: CPA)만 이를 지원하며, 할당량이 더 빠르게 소모됩니다. 다른 업스트림에서는 오류가 발생하거나 더 높은 요금이 청구될 수 있습니다. Codex 데스크톱 앱은 ChatGPT에 로그인한 경우에만 Fast를 표시합니다. 데스크톱 앱에서 로그인한 뒤 설정의 '직접 연결 전환 시 공식 로그인 유지'를 켜면(또는 라우팅 모드를 사용하면) 사용할 수 있으며, 요청은 계속 이 카드로 전송됩니다. 로그인하지 않으면 Codex CLI(/fast)에서만 사용할 수 있습니다. 이 옵션을 켜면 이전에 공식 공급자 카드에서 선택한 Fast가 이 공급자에도 즉시 적용됩니다. 통합 모드에서는 적용되지 않습니다. 변경 후 Codex를 다시 시작하세요.",
+    "officialSpeedTiersNoList": "이 카드에는 모델 목록이 없습니다. Fast 단계는 모델 목록에 있는 GPT 모델에만 추가되므로 지금은 켤 수 없습니다. 위 모델 목록에 GPT 모델을 추가하면 켤 수 있습니다.",
     "modelListHint": "변경 후 Codex를 다시 시작하세요.",
     "modelListDefaultHelp": "이 모델들은 Codex의 /model 메뉴에 표시됩니다. 첫 번째 모델이 기본 모델입니다. 공식 GPT 모델과 이름이 같으면 공식 모델 정보를 사용하므로 표시 이름, 컨텍스트 창 및 추론 수준 설정은 적용되지 않습니다.",
     "addCatalogModel": "수동으로 추가",
@@ -2790,6 +2792,7 @@
       "duration": "소요 시간",
       "durationEstimated": "소요 시간 (추정)",
       "speedTooFew": "출력이 100토큰 미만이므로 속도를 계산하지 않습니다.",
+      "speedBurst": "버퍼링 후 한 번에 전송된 것으로 보여 속도를 계산하지 않습니다.",
       "speedEstimateTooFew": "출력이 200토큰 미만이므로 속도를 추정하지 않습니다.",
       "noTimingSession": "세션 로그에는 타이밍 데이터가 없습니다.",
       "noFirstToken": "첫 토큰 시간 데이터가 없어 속도를 계산하지 않습니다.",
@@ -2909,7 +2912,7 @@
       "analyticsPartialStartDescription": "The current cycle started partway through the official statistics day {{date}}, and the API cannot split usage before and after that day's reset. Based on that day's usage, Token/USD capacity may be overstated by about {{share}}.",
       "empty": {
         "cycleTitle": "Waiting for cycle data",
-        "cycleDescription": "The official API has not returned a valid long cycle yet, possibly because it just reset. The app will retry automatically, or you can refresh manually.",
+        "cycleDescription": "The official API has not returned a valid long cycle yet, possibly because it just reset.",
         "utilizationTitle": "Waiting for used percentage",
         "utilizationDescription": "The cycle range is available, but the official used percentage has not synced yet. A missing value is not treated as 0%.",
         "firstUsageTitle": "A new cycle has started",
@@ -4826,6 +4829,7 @@
     },
     "updatedAt": "{{time}} 업데이트됨",
     "clickToRefresh": "다시 확인하려면 클릭하세요",
+    "manualIdle": "할당량을 조회하려면 새로고침을 클릭하세요",
     "resetCredits": {
       "label": "초기화",
       "left": "남은 초기화 횟수: {{count}}회",
@@ -5105,9 +5109,9 @@
       "disableAria": "선택한 스킬 {{count}}개를 비활성화할 앱",
       "uninstall": "제거"
     },
-    "piColumnTitle": "Pi는 ~/.pi/agent/skills에 폴더가 있으면 해당 스킬이 활성화된 것으로 간주합니다",
+    "piColumnTitle": "Pi는 ~/.agents/skills도 읽으므로 선택되지 않았더라도 해당 경로에 있는 스킬은 바로 사용할 수 있습니다",
     "piHelpTitle": "Pi의 활성화 판단 기준",
-    "piHelp": "~/.pi/agent/skills에 폴더가 있는지 여부입니다.",
+    "piHelp": "Pi는 ~/.agents/skills도 읽으므로 선택되지 않았더라도 해당 경로에 있는 스킬은 바로 사용할 수 있습니다.",
     "pop": {
       "onlyApp": "{{app}}에서 활성화된 항목만 표시",
       "showAll": "모든 스킬 표시"
@@ -5481,6 +5485,10 @@
     "openBrowser": {
       "title": "로그인 시 브라우저 자동 열기",
       "description": "이 옵션을 끄면 로그인 링크만 복사되며, 원하는 브라우저에서 직접 열 수 있습니다. 별도의 브라우저 프로필로 여러 계정을 관리할 때 유용합니다."
+    },
+    "autoQuota": {
+      "title": "할당량 자동 조회",
+      "description": "끄면 새로고침을 클릭할 때만 공식 계정 할당량을 조회합니다. 인증 센터 열기, 카드 예약 새로고침 및 트레이 아이콘 마우스오버 시에는 조회하지 않습니다. DeepSeek 계정 잔액은 로그인 상태와 함께 표시되므로 이 스위치의 영향을 받지 않습니다."
     }
   },
   "kimi": {

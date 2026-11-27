@@ -307,37 +307,39 @@ describe("CodexCycleCapacityCard", () => {
     expect(screen.getByText("$4.00")).toBeInTheDocument();
   });
 
-  it("shows manual refresh only in official API mode", () => {
-    const refreshAnalytics = vi.fn();
+  it("shows manual refresh when the selected source supplies a callback", () => {
+    const refresh = vi.fn();
+    const props = {
+      quota,
+      usage,
+      analyticsUsage,
+      modelPricing,
+      nowMs: queriedAt,
+    };
     const { rerender } = render(
-      <CodexCycleCapacityCard
-        quota={quota}
-        usage={usage}
-        analyticsUsage={analyticsUsage}
-        modelPricing={modelPricing}
-        nowMs={queriedAt}
-        onRefreshAnalytics={refreshAnalytics}
-      />,
+      <CodexCycleCapacityCard {...props} calculationMode="local" />,
     );
 
     expect(
       screen.queryByRole("button", { name: "刷新" }),
     ).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("radio", { name: "官方接口" }));
+    rerender(
+      <CodexCycleCapacityCard
+        {...props}
+        calculationMode="local"
+        onRefresh={refresh}
+      />,
+    );
     fireEvent.click(screen.getByRole("button", { name: "刷新" }));
-    expect(refreshAnalytics).toHaveBeenCalledTimes(1);
+    expect(refresh).toHaveBeenCalledTimes(1);
 
     rerender(
       <CodexCycleCapacityCard
-        quota={quota}
-        usage={usage}
-        analyticsUsage={analyticsUsage}
-        modelPricing={modelPricing}
-        nowMs={queriedAt}
+        {...props}
         calculationMode="analytics"
-        onRefreshAnalytics={refreshAnalytics}
-        isRefreshingAnalytics
+        onRefresh={refresh}
+        isRefreshing
       />,
     );
 
@@ -807,7 +809,7 @@ describe("CodexCycleCapacityCard", () => {
           modelPricing={pendingPricing}
           calculationMode="analytics"
           onCalculationModeChange={vi.fn()}
-          onRefreshAnalytics={vi.fn()}
+          onRefresh={vi.fn()}
           nowMs={queriedAt}
         />,
       );
@@ -849,7 +851,7 @@ describe("CodexCycleCapacityCard", () => {
         usage={null}
         calculationMode="analytics"
         onCalculationModeChange={vi.fn()}
-        onRefreshAnalytics={refreshAnalytics}
+        onRefresh={refreshAnalytics}
         nowMs={queriedAt}
       />,
     );
@@ -901,7 +903,7 @@ describe("CodexCycleCapacityCard", () => {
         usage={null}
         calculationMode="analytics"
         onCalculationModeChange={vi.fn()}
-        onRefreshAnalytics={vi.fn()}
+        onRefresh={vi.fn()}
         nowMs={queriedAt}
       />,
     );
@@ -951,7 +953,7 @@ describe("CodexCycleCapacityCard", () => {
         modelPricing={modelPricing}
         calculationMode="analytics"
         onCalculationModeChange={vi.fn()}
-        onRefreshAnalytics={refreshAnalytics}
+        onRefresh={refreshAnalytics}
         nowMs={queriedAt}
       />,
     );

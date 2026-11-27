@@ -214,14 +214,14 @@ export type AppType =
   | "grokbuild"
   | "opencode"
   | "pi"
-  | "omp"
   | "mcode"
   | "kimi"
-  | "codebuddy"
   | "dsh"
   | "agy"
+  | "omp"
   | "copilot"
-  | "workbuddy";
+  | "workbuddy"
+  | "codebuddy";
 
 export type AppTypeFilter = "all" | AppType;
 
@@ -232,14 +232,14 @@ export const KNOWN_APP_TYPES: ReadonlyArray<AppType> = [
   "grokbuild",
   "opencode",
   "pi",
-  "omp",
   "mcode",
   "kimi",
-  "codebuddy",
   "dsh",
   "agy",
+  "omp",
   "copilot",
   "workbuddy",
+  "codebuddy",
 ];
 
 /**

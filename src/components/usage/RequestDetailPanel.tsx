@@ -30,6 +30,7 @@ import {
   formatOutputTokensPerSecond,
   getLocaleFromLanguage,
   getResolvedLang,
+  isSpeedBurstExcluded,
   parseFiniteNumber,
 } from "./format";
 import { appDisplayName } from "./RequestLogTable";
@@ -330,12 +331,19 @@ function useDetailSections(request: RequestLog) {
                 value: t("usage.detail.speedTooFew"),
                 muted: true,
               }
-            : {
-                key: "speed",
-                label: t("usage.speed"),
-                value: "—",
-                muted: true,
-              };
+            : isSpeedBurstExcluded(request)
+              ? {
+                  key: "speed",
+                  label: t("usage.speed"),
+                  value: t("usage.detail.speedBurst"),
+                  muted: true,
+                }
+              : {
+                  key: "speed",
+                  label: t("usage.speed"),
+                  value: "—",
+                  muted: true,
+                };
     performance = [speedRow];
     if (firstToken != null) {
       performance.push({

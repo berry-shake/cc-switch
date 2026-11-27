@@ -2072,6 +2072,7 @@
     "deploymentGitHubCom": "GitHub.com",
     "deploymentEnterprise": "GitHub Enterprise Server",
     "enterpriseDomainPlaceholder": "z. B. company.ghe.com",
+    "autoModelName": "GitHub Copilot Auto",
     "form": {
       "officialTitle": "Verwendet die GitHub-Anmeldung der Copilot CLI",
       "officialHint": "„Terminal öffnen“ startet copilot mit dem Modell dieser Karte. Verknüpfen Sie ein Konto aus der Kontoverwaltung, um es mit diesem Konto zu starten.",
@@ -2263,7 +2264,8 @@
     "autoReviewModelMainDefault": "Hauptmodell prüft selbst (Standard)",
     "autoReviewModelNoList": "Diese Karte hat keine Modellliste: Codex prüft Genehmigungen mit dem offiziellen codex-auto-review, das nur manche Relays akzeptieren, die an ChatGPT-Konten weiterleiten; die übrigen geben 404 zurück. Fügen Sie oben Modelle zur Liste hinzu, um eines auszuwählen.",
     "officialSpeedTiersLabel": "Offizielle Fast-Stufe beibehalten",
-    "officialSpeedTiersHint": "Behält die offizielle Fast-Geschwindigkeitsstufe bei GPT-Modellen in der Modellliste bei, sodass die Wahl von Fast in Codex service_tier=priority sendet. Nur Relays, die an offizielle ChatGPT-Konten weiterleiten (z. B. CPA), akzeptieren das, und es verbraucht das Kontingent schneller; andere Upstreams lehnen es eventuell ab oder berechnen einen höheren Preis. Nach dem Aktivieren gilt eine unter der offiziellen Karte getroffene Fast-Wahl sofort für diesen Anbieter. Wird im Aggregationsmodus nicht verwendet. Starten Sie Codex nach der Änderung neu.",
+    "officialSpeedTiersHint": "Behält die offizielle Fast-Geschwindigkeitsstufe bei GPT-Modellen in der Modellliste bei, sodass die Wahl von Fast in Codex service_tier=priority sendet. Nur Relays, die an offizielle ChatGPT-Konten weiterleiten (z. B. CPA), akzeptieren das, und es verbraucht das Kontingent schneller; andere Upstreams lehnen es eventuell ab oder berechnen einen höheren Preis. Die Codex-Desktop-App zeigt Fast nur an, solange sie mit ChatGPT angemeldet ist: Melden Sie sich dort an und aktivieren Sie in den Einstellungen „Offizielle Anmeldung bei direkten Wechseln beibehalten“ (oder nutzen Sie den Routing-Modus); Anfragen gehen weiterhin an diese Karte. Ohne Anmeldung kann nur die Codex-CLI Fast verwenden (/fast). Nach dem Aktivieren gilt eine unter der offiziellen Karte getroffene Fast-Wahl sofort für diesen Anbieter. Wird im Aggregationsmodus nicht verwendet. Starten Sie Codex nach der Änderung neu.",
+    "officialSpeedTiersNoList": "Diese Karte hat keine Modellliste: Die Fast-Stufe wird nur GPT-Modellen in der Modellliste hinzugefügt und lässt sich daher noch nicht aktivieren. Fügen Sie oben GPT-Modelle zur Liste hinzu, um sie zu aktivieren.",
     "modelListHint": "Starten Sie Codex nach Änderungen neu.",
     "modelListDefaultHelp": "Diese Modelle erscheinen im /model-Menü von Codex; die erste Zeile ist das Standardmodell. Zeilen, die nach einem offiziellen GPT-Modell benannt sind, verwenden den offiziellen Eintrag; ihr Anzeigename, Fenster und Reasoning-Stufen werden ignoriert.",
     "addCatalogModel": "Manuell hinzufügen",
@@ -2795,6 +2797,7 @@
       "duration": "Dauer",
       "durationEstimated": "Dauer (geschätzt)",
       "speedTooFew": "Unter 100 Ausgabe-Token, daher keine Geschwindigkeit",
+      "speedBurst": "Als gepufferter Burst eingetroffen, daher keine Geschwindigkeit",
       "speedEstimateTooFew": "Unter 200 Ausgabe-Token, daher keine Schätzung",
       "noTimingSession": "Sitzungsprotokolle enthalten keine Zeitdaten",
       "noFirstToken": "Keine Zeit bis zum ersten Token, daher keine Geschwindigkeit",
@@ -2909,7 +2912,7 @@
       "analyticsPartialStartDescription": "Der aktuelle Zyklus begann teils innerhalb des offiziellen Statistiktags {{date}}, und die API kann die Nutzung vor und nach dem Reset dieses Tages nicht aufteilen. Basierend auf der Nutzung dieses Tages kann die Token-/USD-Kapazität um etwa {{share}} überschätzt sein.",
       "empty": {
         "cycleTitle": "Warte auf Zyklusdaten",
-        "cycleDescription": "Die offizielle API hat noch keinen gültigen langen Zyklus geliefert, möglicherweise weil er gerade zurückgesetzt wurde. Die App versucht es automatisch erneut, oder du aktualisierst manuell.",
+        "cycleDescription": "Die offizielle API hat noch keinen gültigen langen Zyklus geliefert, möglicherweise weil er gerade zurückgesetzt wurde.",
         "utilizationTitle": "Warte auf Verbrauchsprozentsatz",
         "utilizationDescription": "Der Zyklusbereich ist verfügbar, aber der offizielle Verbrauchsprozentsatz wurde noch nicht synchronisiert. Ein fehlender Wert wird nicht als 0 % behandelt.",
         "firstUsageTitle": "Ein neuer Zyklus hat begonnen",
@@ -4826,6 +4829,7 @@
     },
     "updatedAt": "Aktualisiert {{time}}",
     "clickToRefresh": "Klicken, um erneut abzufragen",
+    "manualIdle": "Zum Abfragen des Kontingents auf Aktualisieren klicken",
     "resetCredits": {
       "label": "Zurücksetzungen",
       "left": "Verbleibende Zurücksetzungen: {{count}}",
@@ -5105,9 +5109,9 @@
       "disableAria": "Die {{count}} ausgewählten Skills ausschalten in",
       "uninstall": "Deinstallieren"
     },
-    "piColumnTitle": "Pi zählt einen Skill als aktiviert, wenn sein Ordner in ~/.pi/agent/skills existiert",
+    "piColumnTitle": "Pi liest auch ~/.agents/skills, daher sind nicht ausgewählte Skills in diesem Pfad weiterhin direkt verfügbar",
     "piHelpTitle": "Wie Pi als aktiviert zählt",
-    "piHelp": "Ob der Ordner in ~/.pi/agent/skills existiert.",
+    "piHelp": "Pi liest auch ~/.agents/skills, daher sind nicht ausgewählte Skills in diesem Pfad weiterhin direkt verfügbar.",
     "pop": {
       "onlyApp": "Nur in {{app}} aktivierte anzeigen",
       "showAll": "Alle Skills anzeigen"
@@ -5481,6 +5485,10 @@
     "openBrowser": {
       "title": "Browser bei der Anmeldung öffnen",
       "description": "Schalten Sie dies aus, um nur den Anmeldelink zu kopieren und in einem Browser Ihrer Wahl zu öffnen – praktisch, wenn Sie Konten in getrennten Browserprofilen führen."
+    },
+    "autoQuota": {
+      "title": "Kontingent automatisch abfragen",
+      "description": "Wenn deaktiviert, werden offizielle Kontokontingente nur beim Klicken auf Aktualisieren abgefragt: Das Öffnen des Auth-Centers, geplante Kartenaktualisierungen und das Überfahren des Tray-Symbols fragen sie nicht ab. DeepSeek-Kontoguthaben werden zusammen mit dem Anmeldestatus angezeigt und sind von diesem Schalter nicht betroffen."
     }
   },
   "kimi": {

@@ -2072,6 +2072,7 @@
     "deploymentGitHubCom": "GitHub.com",
     "deploymentEnterprise": "GitHub Enterprise Server",
     "enterpriseDomainPlaceholder": "例如：company.ghe.com",
+    "autoModelName": "GitHub Copilot 自動選擇",
     "form": {
       "officialTitle": "使用 Copilot CLI 自己的 GitHub 登入",
       "officialHint": "「開啟終端機」以這張卡的模型啟動 copilot；綁定授權中心的帳號後改用該帳號啟動。",
@@ -2262,7 +2263,8 @@
     "autoReviewModelMainDefault": "主模型自己審批（預設）",
     "autoReviewModelNoList": "這張卡沒有模型列表：Codex 會用官方的 codex-auto-review 審批，只有部分轉發 ChatGPT 帳號的中轉認得它，不認就會回報 404。在上面的模型列表裡加上模型後就能選。",
     "officialSpeedTiersLabel": "保留官方 Fast 檔",
-    "officialSpeedTiersHint": "讓模型列表裡的 GPT 模型保留官方的 Fast 速度檔，Codex 選了 Fast 後請求會帶 service_tier=priority。只有轉發官方 ChatGPT 帳號的中轉（如 CPA）才認得，會更快消耗額度；其他上游可能報錯或按更高價計費。開啟後，先前在官方卡下選過的 Fast 會立刻在這家生效。聚合模式下不生效。改完需要重新啟動 Codex。",
+    "officialSpeedTiersHint": "讓模型列表裡的 GPT 模型保留官方的 Fast 速度檔，Codex 選了 Fast 後請求會帶 service_tier=priority。只有轉發官方 ChatGPT 帳號的中轉（如 CPA）才認得，會更快消耗額度；其他上游可能報錯或按更高價計費。Codex 桌面版要登入 ChatGPT 才顯示 Fast：在桌面版登入後，開啟設定裡的「非接管切換時保留官方登入」（或使用路由模式），請求仍發往這張卡；不登入時只有命令列版能用（/fast）。開啟後，先前在官方卡下選過的 Fast 會立刻在這家生效。聚合模式下不生效。改完需要重新啟動 Codex。",
+    "officialSpeedTiersNoList": "這張卡沒有模型列表：Fast 檔只加在模型列表裡的 GPT 模型上，所以現在打不開。在上面的模型列表裡加上 GPT 模型後才能開啟。",
     "modelListHint": "修改後需要重新啟動 Codex。",
     "modelListDefaultHelp": "這些模型會出現在 Codex 的 /model 裡，第一行是預設模型。名稱是官方 GPT 模型的行依官方條目產生，行裡的顯示名、視窗和思考等級不生效。",
     "addCatalogModel": "手動新增",
@@ -2640,7 +2642,7 @@
       "analyticsPartialStartDescription": "目前週期從官方統計日 {{date}} 中途開始，介面無法拆分該日重置前後的用量；依該日用量估算，Token/USD 容量可能因此偏高約 {{share}}。",
       "empty": {
         "cycleTitle": "等待週期資料",
-        "cycleDescription": "官方介面尚未回傳有效長週期，可能剛完成重置；稍後會自動重試，也可以手動重新整理。",
+        "cycleDescription": "官方介面尚未回傳有效長週期，可能剛完成重置。",
         "utilizationTitle": "等待額度比例",
         "utilizationDescription": "已取得週期範圍，但官方尚未同步已用比例；目前不會把缺失值當成 0%。",
         "firstUsageTitle": "新週期已開始",
@@ -2904,6 +2906,7 @@
       "duration": "耗時",
       "durationEstimated": "耗時（估算）",
       "speedTooFew": "輸出不到 100 token，不算速度",
+      "speedBurst": "疑似緩衝後突發吐出，不算速度",
       "speedEstimateTooFew": "輸出不到 200 token，不估速度",
       "noTimingSession": "工作階段日誌沒有計時資料",
       "noFirstToken": "沒有首字計時，不算速度",
@@ -4826,6 +4829,7 @@
     },
     "updatedAt": "{{time}}更新",
     "clickToRefresh": "點擊重新查詢",
+    "manualIdle": "點重新整理查詢額度",
     "resetCredits": {
       "label": "重設",
       "left": "重設剩餘 {{count}} 次",
@@ -5105,9 +5109,9 @@
       "disableAria": "在這個應用裡停用選中的 {{count}} 個 Skill",
       "uninstall": "解除安裝"
     },
-    "piColumnTitle": "Pi 按 ~/.pi/agent/skills 裡有沒有這個目錄來判斷",
+    "piColumnTitle": "Pi 會讀取 ~/.agents/skills，因此未勾選但存在於該路徑的 skills 仍可直接使用",
     "piHelpTitle": "Pi 怎麼算啟用",
-    "piHelp": "看 ~/.pi/agent/skills 裡有沒有這個目錄。",
+    "piHelp": "Pi 會讀取 ~/.agents/skills，因此未勾選但存在於該路徑的 skills 仍可直接使用。",
     "pop": {
       "onlyApp": "只看在 {{app}} 啟用的",
       "showAll": "顯示全部 Skill"
@@ -5481,6 +5485,10 @@
     "openBrowser": {
       "title": "登入時自動開啟瀏覽器",
       "description": "關掉後只複製登入連結，由你自己選瀏覽器開啟，適合用獨立的瀏覽器環境管理多個帳號。"
+    },
+    "autoQuota": {
+      "title": "自動查詢額度",
+      "description": "關掉後，官方帳號的額度只在你點重新整理時查詢，開啟授權中心、卡片定時重新整理和懸停系統匣都不會自動去查。DeepSeek 帳號的餘額和登入狀態一起顯示，不受這個開關影響。"
     }
   },
   "kimi": {

@@ -55,7 +55,7 @@ vi.mock("@/components/usage/CodexCycleCapacityCard", () => ({
     lastRefreshedAt,
     calculationMode,
     onCalculationModeChange,
-    onRefreshAnalytics,
+    onRefresh,
   }: {
     quota: SubscriptionQuota;
     quotaWindows?: readonly unknown[];
@@ -67,7 +67,7 @@ vi.mock("@/components/usage/CodexCycleCapacityCard", () => ({
     quotaSamples?: readonly unknown[];
     calculationMode?: "local" | "analytics";
     onCalculationModeChange?: (mode: "local" | "analytics") => void;
-    onRefreshAnalytics?: () => void | Promise<void>;
+    onRefresh?: () => void | Promise<void>;
   }) => (
     <div data-testid="capacity-entry">
       {quota.tool}:{usage?.realTotalTokens ?? "no-local"}:
@@ -88,9 +88,9 @@ vi.mock("@/components/usage/CodexCycleCapacityCard", () => ({
       <button onClick={() => onCalculationModeChange?.("analytics")}>
         switch-official
       </button>
-      <button onClick={() => void onRefreshAnalytics?.()}>
-        refresh-official
-      </button>
+      {onRefresh ? (
+        <button onClick={() => void onRefresh()}>refresh-active</button>
+      ) : null}
     </div>
   ),
 }));
@@ -170,6 +170,7 @@ type QueryOptions = {
 };
 
 function queryKind(options: QueryOptions) {
+  if (options.queryKey?.[0] === "settings") return "settings";
   if (options.queryKey?.[0] !== "subscription") {
     return options.queryKey?.[1] === "pricing" ? "pricing" : "usage";
   }
@@ -186,6 +187,9 @@ function installQueries({
   officialStale = false,
   officialFetching = false,
   usageSuccess = true,
+  settingsPending = false,
+  manualOnly = false,
+  quotaPending = false,
 }: {
   local?: CodexQuotaSnapshot;
   official?: CodexOfficialUsageSnapshot;
@@ -194,25 +198,36 @@ function installQueries({
   officialStale?: boolean;
   officialFetching?: boolean;
   usageSuccess?: boolean;
+  settingsPending?: boolean;
+  manualOnly?: boolean;
+  quotaPending?: boolean;
 } = {}) {
   useQueryMock.mockImplementation((options: QueryOptions) => {
     const kind = queryKind(options);
+    if (kind === "settings") {
+      return {
+        isPending: settingsPending,
+        data: settingsPending
+          ? undefined
+          : { officialQuotaManualOnly: manualOnly },
+      };
+    }
     if (kind === "local") {
       return {
-        isSuccess: localSuccess,
-        isError: !localSuccess,
+        isSuccess: !quotaPending && localSuccess,
+        isError: !quotaPending && !localSuccess,
         isFetching: false,
-        data: local,
+        data: quotaPending ? undefined : local,
         refetch: localRefetchMock,
       };
     }
     if (kind === "official") {
       return {
-        isSuccess: officialSuccess,
-        isError: !officialSuccess,
+        isSuccess: !quotaPending && officialSuccess,
+        isError: !quotaPending && !officialSuccess,
         isFetching: officialFetching,
         isStale: officialStale,
-        data: official,
+        data: quotaPending ? undefined : official,
         refetch: officialRefetchMock,
       };
     }
@@ -334,7 +349,7 @@ describe("CodexCycleCapacitySection", () => {
     expect(officialOptions.staleTime).toBe(60 * 60 * 1000);
     expect(officialOptions.refetchOnWindowFocus).toBe(false);
 
-    fireEvent.click(screen.getByText("refresh-official"));
+    fireEvent.click(screen.getByText("refresh-active"));
     await waitFor(() => {
       expect(officialRefetchMock).toHaveBeenCalledTimes(1);
       expect(pricingRefetchMock).toHaveBeenCalledTimes(1);
@@ -378,6 +393,48 @@ describe("CodexCycleCapacitySection", () => {
     );
     expect(officialRefetchMock).not.toHaveBeenCalled();
     expect(pricingRefetchMock).not.toHaveBeenCalled();
+  });
+
+  it("waits for settings and only fetches the selected quota on manual refresh", () => {
+    const expectQuotaDisabled = () => {
+      const options = useQueryMock.mock.calls
+        .map(([value]) => value as QueryOptions)
+        .filter((value) => ["local", "official"].includes(queryKind(value)));
+      expect(options.length).toBeGreaterThanOrEqual(2);
+      for (const option of options) {
+        expect(option.enabled).toBe(false);
+        expect(option.refetchInterval).toBe(false);
+        expect(option.refetchOnWindowFocus).toBe(false);
+      }
+    };
+
+    installQueries({ settingsPending: true, quotaPending: true });
+    const { rerender } = render(<CodexCycleCapacitySection enabled />);
+    expectQuotaDisabled();
+    expect(screen.queryByText(/codex login/)).not.toBeInTheDocument();
+
+    installQueries({
+      manualOnly: true,
+      quotaPending: true,
+      officialStale: true,
+    });
+    rerender(<CodexCycleCapacitySection enabled />);
+    expect(screen.getByText("quota.manualIdle")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("capacity-switch-mode"));
+    expectQuotaDisabled();
+    expect(officialRefetchMock).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByTestId("capacity-retry"));
+    expect(officialRefetchMock).toHaveBeenCalledTimes(1);
+    expect(localRefetchMock).not.toHaveBeenCalled();
+
+    installQueries({ manualOnly: true });
+    rerender(<CodexCycleCapacitySection enabled />);
+    fireEvent.click(screen.getByText("switch-local"));
+    expect(screen.getByTestId("capacity-entry")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("refresh-active"));
+    expect(localRefetchMock).toHaveBeenCalledTimes(1);
+    expect(officialRefetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("does not combine analytics from another credential scope", () => {

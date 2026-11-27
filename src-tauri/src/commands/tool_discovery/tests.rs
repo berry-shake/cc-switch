@@ -363,6 +363,26 @@ mod anchored_upgrade {
                 "/Users/me/.nvm/versions/node/v22/lib/node_modules/opencode-ai/bin/opencode.exe",
                 Some("npm_config_allow_scripts=opencode-ai npm_config_ignore_scripts=false npm_config_include=optional /Users/me/.nvm/versions/node/v22/bin/opencode upgrade || PATH='/Users/me/.nvm/versions/node/v22/bin':\"$PATH\" /Users/me/.nvm/versions/node/v22/bin/npm i -g opencode-ai@latest --ignore-scripts=false --include=optional --allow-scripts=opencode-ai"),
             ),
+            // OpenCode 2 是另一个包（@opencode/cli）：兜底装 opencode-ai 会和它抢 `opencode`
+            // 命令（npm 报 EEXIST，pnpm / bun 静默顶掉 2.x 的入口）。
+            (
+                "opencode",
+                "/Users/me/.nvm/versions/node/v22/bin/opencode",
+                "/Users/me/.nvm/versions/node/v22/lib/node_modules/@opencode/cli/bin/opencode.exe",
+                Some("npm_config_allow_scripts=@opencode/cli npm_config_ignore_scripts=false npm_config_include=optional /Users/me/.nvm/versions/node/v22/bin/opencode upgrade || PATH='/Users/me/.nvm/versions/node/v22/bin':\"$PATH\" /Users/me/.nvm/versions/node/v22/bin/npm i -g @opencode/cli@latest --ignore-scripts=false --include=optional --allow-scripts=@opencode/cli"),
+            ),
+            (
+                "opencode",
+                "/Users/me/.bun/bin/opencode",
+                "/Users/me/.bun/install/global/node_modules/@opencode/cli/bin/opencode.exe",
+                Some("/Users/me/.bun/bin/opencode upgrade || /Users/me/.bun/bin/bun add -g @opencode/cli@latest"),
+            ),
+            (
+                "opencode",
+                "/opt/homebrew/bin/opencode",
+                "/opt/homebrew/Cellar/opencode-v2/2.4.2/bin/opencode",
+                Some("/opt/homebrew/bin/brew upgrade opencode-v2"),
+            ),
             // omp special rules: bun fallback only, no npm fallback, Nix unmanaged (None)
             (
                 "omp",
@@ -707,14 +727,6 @@ mod anchored_upgrade {
             Some("/Users/me/.local/bin/pi")
         );
 
-        let raw =
-            "🚀 Welcome!\nSOME_SCRIPT=line1\nPATH=not-a-path\nPATH=/opt/homebrew/bin:/usr/bin\n";
-        assert_eq!(
-            path_line_from_env_output(raw),
-            Some("/opt/homebrew/bin:/usr/bin")
-        );
-        assert_eq!(path_line_from_env_output("HOME=/Users/me\n"), None);
-
         assert_eq!(
             merge_path_segments(
                 "/Users/me/.nvm/versions/node/v22/bin:/usr/bin:/bin",
@@ -723,6 +735,13 @@ mod anchored_upgrade {
             "/Users/me/.nvm/versions/node/v22/bin:/usr/bin:/bin:/usr/sbin"
         );
         assert_eq!(merge_path_segments("/usr/bin::/bin", ""), "/usr/bin:/bin");
+    }
+
+    #[test]
+    fn pi_search_paths_include_managed_install_bin() {
+        let home = crate::config::get_home_dir();
+        let paths = build_tool_search_paths("pi");
+        assert!(paths.contains(&home.join(".pi").join("agent").join("bin")));
     }
 
     #[cfg(target_os = "macos")]
@@ -770,6 +789,48 @@ mod anchored_upgrade {
         )
         .unwrap();
         assert_eq!(resolved, launcher);
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn parse_login_shell_env_extracts_toolchain_vars_after_marker() {
+        let raw = format!(
+            "PATH=/stale/bin\nVP_HOME=/stale\n{LOGIN_ENV_MARKER}\
+             PATH=/usr/bin\0VP_HOME=/Users/me/.vite-plus\0XDG_DATA_HOME=relative\0\
+             OTHER=value\nVP_HOME=/wrong/home\0NPM_CONFIG_REGISTRY=https://example.org\0"
+        );
+        let parsed = parse_login_shell_env_output(&raw).unwrap();
+        assert_eq!(parsed.path.as_deref(), Some("/usr/bin"));
+        assert_eq!(
+            parsed.vars,
+            [("VP_HOME".to_owned(), "/Users/me/.vite-plus".to_owned())]
+        );
+        assert!(parse_login_shell_env_output("PATH=/stale/bin").is_none());
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn apply_login_shell_vars_fills_missing_without_clobbering_process_env() {
+        let existing_home = std::env::var("HOME").expect("HOME should be set on Unix");
+        let vars = vec![
+            (
+                "CC_SWITCH_TEST_LOGIN_ONLY_VAR".to_string(),
+                "/Users/me/.vite-plus".to_string(),
+            ),
+            ("HOME".to_string(), "/should/not/override".to_string()),
+        ];
+        let mut cmd = std::process::Command::new("/bin/sh");
+        cmd.args([
+            "-c",
+            "printf '%s|%s' \"$CC_SWITCH_TEST_LOGIN_ONLY_VAR\" \"$HOME\"",
+        ]);
+        apply_login_shell_vars(&mut cmd, &vars);
+        let out = cmd.output().expect("sh should run");
+        assert!(out.status.success());
+        assert_eq!(
+            String::from_utf8_lossy(&out.stdout),
+            format!("/Users/me/.vite-plus|{existing_home}")
+        );
     }
 
     #[test]

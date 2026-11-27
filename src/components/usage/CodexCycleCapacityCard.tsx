@@ -80,8 +80,8 @@ export interface CodexCycleCapacityCardProps {
   calculationMode?: CodexCycleCapacityCalculationMode;
   onCalculationModeChange?: (mode: CodexCycleCapacityCalculationMode) => void;
   /** 仅在官方接口模式显示的手动刷新操作。 */
-  onRefreshAnalytics?: () => void | Promise<void>;
-  isRefreshingAnalytics?: boolean;
+  onRefresh?: () => void | Promise<void>;
+  isRefreshing?: boolean;
   className?: string;
   /** 仅用于可重复测试；生产环境使用当前时间。 */
   nowMs?: number;
@@ -266,8 +266,8 @@ export function CodexCycleCapacityCard({
   quotaSamples = [],
   calculationMode,
   onCalculationModeChange,
-  onRefreshAnalytics,
-  isRefreshingAnalytics = false,
+  onRefresh,
+  isRefreshing = false,
   className,
   nowMs,
 }: CodexCycleCapacityCardProps) {
@@ -440,7 +440,7 @@ export function CodexCycleCapacityCard({
     waitingReason === "cycle"
       ? t(
           "usage.cycleCapacity.empty.cycleDescription",
-          "官方接口暂未返回有效长周期，可能刚完成重置；稍后会自动重试，也可以手动刷新。",
+          "官方接口暂未返回有效长周期，可能刚完成重置。",
         )
       : waitingReason === "utilization"
         ? t(
@@ -612,26 +612,26 @@ export function CodexCycleCapacityCard({
                   ))}
                 </div>
               ) : null}
-              {selectedMode === "analytics" && onRefreshAnalytics ? (
+              {onRefresh ? (
                 <Button
                   type="button"
                   variant="outline"
                   size="sm"
                   className="h-8 shrink-0 gap-1.5 px-2.5 text-badge"
-                  disabled={isRefreshingAnalytics}
+                  disabled={isRefreshing}
                   aria-label={t("common.refresh", "刷新")}
                   title={t("common.refresh", "刷新")}
-                  onClick={() => void onRefreshAnalytics()}
+                  onClick={() => void onRefresh()}
                 >
                   <RefreshCw
                     className={cn(
                       "h-3.5 w-3.5",
-                      isRefreshingAnalytics && "animate-spin",
+                      isRefreshing && "animate-spin",
                     )}
                     aria-hidden="true"
                   />
                   <span>
-                    {isRefreshingAnalytics
+                    {isRefreshing
                       ? t("common.refreshing", "刷新中...")
                       : t("common.refresh", "刷新")}
                   </span>

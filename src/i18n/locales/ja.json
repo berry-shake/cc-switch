@@ -2072,6 +2072,7 @@
     "deploymentGitHubCom": "GitHub.com",
     "deploymentEnterprise": "GitHub Enterprise Server",
     "enterpriseDomainPlaceholder": "例: company.ghe.com",
+    "autoModelName": "GitHub Copilot 自動選択",
     "form": {
       "officialTitle": "Copilot CLI 自身の GitHub ログインを使用",
       "officialHint": "「ターミナルを開く」はこのカードのモデルで copilot を起動します。認証センターのアカウントを紐付けると、そのアカウントで起動します。",
@@ -2263,7 +2264,8 @@
     "autoReviewModelMainDefault": "メインモデル自身が承認（既定）",
     "autoReviewModelNoList": "このカードにはモデル一覧がありません。Codex は公式の codex-auto-review で承認しますが、これを受け付けるのは ChatGPT アカウントへ転送する一部の中継だけで、それ以外では 404 になります。上のモデル一覧にモデルを追加すると選べます。",
     "officialSpeedTiersLabel": "公式の Fast ティアを残す",
-    "officialSpeedTiersHint": "モデル一覧の GPT モデルに公式の Fast 速度ティアを残します。Codex で Fast を選ぶと service_tier=priority が送られます。受け付けるのは公式 ChatGPT アカウントへ転送する中継（CPA など）だけで、利用枠の消費も速くなります。それ以外の上流ではエラーになったり、より高い料金で課金されたりすることがあります。オンにすると、公式カードで選んだ Fast がこのプロバイダーですぐに有効になります。集約モードでは使われません。変更後は Codex を再起動してください。",
+    "officialSpeedTiersHint": "モデル一覧の GPT モデルに公式の Fast 速度ティアを残します。Codex で Fast を選ぶと service_tier=priority が送られます。受け付けるのは公式 ChatGPT アカウントへ転送する中継（CPA など）だけで、利用枠の消費も速くなります。それ以外の上流ではエラーになったり、より高い料金で課金されたりすることがあります。Codex デスクトップ版は ChatGPT にサインインしているときだけ Fast を表示します。デスクトップ版でサインインし、設定の「直接切替時に公式ログインを保持」をオンにすれば（またはルーティングモードを使えば）使え、リクエストは引き続きこのカードに送られます。サインインしていない場合は CLI 版（/fast）でのみ使えます。オンにすると、公式カードで選んだ Fast がこのプロバイダーですぐに有効になります。集約モードでは使われません。変更後は Codex を再起動してください。",
+    "officialSpeedTiersNoList": "このカードにはモデル一覧がありません。Fast ティアはモデル一覧の GPT モデルにだけ付くため、今はオンにできません。上のモデル一覧に GPT モデルを追加するとオンにできます。",
     "modelListHint": "変更後は Codex を再起動してください。",
     "modelListDefaultHelp": "これらのモデルは Codex の /model に表示され、先頭の行がデフォルトモデルです。公式 GPT モデル名の行は公式エントリから生成されるため、表示名・ウィンドウ・思考レベルは反映されません。",
     "addCatalogModel": "手動で追加",
@@ -2640,7 +2642,7 @@
       "analyticsPartialStartDescription": "現在のサイクルは公式統計日 {{date}} の途中から始まり、API はその日のリセット前後の使用量を分割できません。その日の使用量から見て、Token/USD 容量は約 {{share}} 過大になる可能性があります。",
       "empty": {
         "cycleTitle": "サイクルデータを待機中",
-        "cycleDescription": "公式 API はまだ有効な長期サイクルを返していません。リセット直後の可能性があります。自動再試行を待つか、手動で更新できます。",
+        "cycleDescription": "公式 API はまだ有効な長期サイクルを返していません。リセット直後の可能性があります。",
         "utilizationTitle": "使用済み割合を待機中",
         "utilizationDescription": "サイクル範囲は取得できていますが、公式の使用済み割合はまだ同期されていません。欠損値を 0% として扱いません。",
         "firstUsageTitle": "新しいサイクルが開始しました",
@@ -2904,6 +2906,7 @@
       "duration": "所要時間",
       "durationEstimated": "所要時間（推定）",
       "speedTooFew": "出力が 100 トークン未満のため速度は出しません",
+      "speedBurst": "バッファ後の一括到着とみられるため速度は出しません",
       "speedEstimateTooFew": "出力が 200 トークン未満のため速度は推定しません",
       "noTimingSession": "セッションログには計測データがありません",
       "noFirstToken": "最初のトークンの計測がないため速度は出しません",
@@ -4826,6 +4829,7 @@
     },
     "updatedAt": "{{time}}に更新",
     "clickToRefresh": "クリックで再取得",
+    "manualIdle": "更新をクリックして残量を取得",
     "resetCredits": {
       "label": "リセット",
       "left": "リセット 残り {{count}} 回",
@@ -5105,9 +5109,9 @@
       "disableAria": "選択した {{count}} 件の Skill をこのアプリでオフ",
       "uninstall": "アンインストール"
     },
-    "piColumnTitle": "Pi は ~/.pi/agent/skills にそのフォルダーがあるかで判定します",
+    "piColumnTitle": "Pi は ~/.agents/skills も読み込むため、未選択でもそのパスにあるスキルはそのまま利用できます",
     "piHelpTitle": "Pi の有効の判定",
-    "piHelp": "~/.pi/agent/skills にそのフォルダーがあるかどうかです。",
+    "piHelp": "Pi は ~/.agents/skills も読み込むため、未選択でもそのパスにあるスキルはそのまま利用できます。",
     "pop": {
       "onlyApp": "{{app}} で有効なものだけ表示",
       "showAll": "すべての Skill を表示"
@@ -5481,6 +5485,10 @@
     "openBrowser": {
       "title": "ログイン時にブラウザを自動で開く",
       "description": "オフにするとログインリンクをコピーするだけになり、使うブラウザを自分で選べます。アカウントごとに独立したブラウザ環境を使う場合に便利です。"
+    },
+    "autoQuota": {
+      "title": "残量を自動で取得",
+      "description": "オフにすると、公式アカウントの残量は更新をクリックしたときだけ取得します。認証センターを開いたとき、カードの定期更新、トレイへのホバーでは取得しません。DeepSeek アカウントの残高はログイン状態と一緒に表示されるため、このスイッチの影響を受けません。"
     }
   },
   "kimi": {

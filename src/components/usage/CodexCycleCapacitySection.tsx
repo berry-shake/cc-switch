@@ -12,6 +12,7 @@ import {
   type CodexCycleCapacityCalculationMode,
 } from "@/lib/codexCycleCapacityMode";
 import { loadCodexQuotaSamples } from "@/lib/codexQuotaSamples";
+import { isManualIdle, useQuotaPolicy } from "@/lib/query/quotaPolicy";
 import { subscriptionKeys } from "@/lib/query/subscription";
 import { usageKeys } from "@/lib/query/usage";
 
@@ -45,32 +46,35 @@ export function CodexCycleCapacitySection({
 }: CodexCycleCapacitySectionProps) {
   const { t } = useTranslation();
   const autoRefresh = refreshIntervalMs > 0;
+  const quotaPolicy = useQuotaPolicy();
+  const { autoAllowed, manualOnly } = quotaPolicy;
   const [calculationMode, setCalculationMode] = useState(
     readCodexCycleCapacityMode,
   );
+  const isOfficial = calculationMode === "analytics";
   const localQuotaQuery = useQuery({
     queryKey: subscriptionKeys.codexQuotaSnapshot(),
     queryFn: subscriptionApi.getCodexQuotaSnapshot,
-    enabled: enabled && calculationMode === "local",
+    enabled: autoAllowed && enabled && !isOfficial,
     retry: 1,
     staleTime: QUOTA_REFRESH_INTERVAL_MS,
     refetchInterval:
-      autoRefresh && calculationMode === "local"
+      autoAllowed && autoRefresh && !isOfficial
         ? QUOTA_REFRESH_INTERVAL_MS
         : false,
     refetchIntervalInBackground: false,
-    refetchOnWindowFocus: autoRefresh,
+    refetchOnWindowFocus: autoAllowed && autoRefresh,
   });
 
   const officialQuery = useQuery({
     queryKey: subscriptionKeys.codexOfficialSnapshot(),
     queryFn: subscriptionApi.getCodexOfficialUsageSnapshot,
     // 本地模式也预取一次，用来判断官方模式是否可用；只在选中官方模式时轮询。
-    enabled,
+    enabled: autoAllowed && enabled,
     retry: 1,
     staleTime: QUOTA_REFRESH_INTERVAL_MS,
     refetchInterval:
-      autoRefresh && calculationMode === "analytics"
+      autoAllowed && autoRefresh && isOfficial
         ? QUOTA_REFRESH_INTERVAL_MS
         : false,
     refetchIntervalInBackground: false,
@@ -79,14 +83,8 @@ export function CodexCycleCapacitySection({
 
   // react-query 会在后台重取失败时保留旧 data；必须同时要求 isSuccess，
   // 才不会在接口已经失败后继续拿陈旧快照显示容量入口。
-  const activeSnapshot =
-    calculationMode === "analytics"
-      ? officialQuery.isSuccess
-        ? officialQuery.data
-        : null
-      : localQuotaQuery.isSuccess
-        ? localQuotaQuery.data
-        : null;
+  const activeQuery = isOfficial ? officialQuery : localQuotaQuery;
+  const activeSnapshot = activeQuery.isSuccess ? activeQuery.data : null;
   const quota = activeSnapshot?.quota ?? null;
   const cycle = useMemo(() => resolveCodexQuotaCycle(quota), [quota]);
   const startDate = cycle ? Math.floor(cycle.startMs / 1000) : undefined;
@@ -131,10 +129,16 @@ export function CodexCycleCapacitySection({
     await Promise.all([officialQuery.refetch(), pricingQuery.refetch()]);
   }, [officialQuery, pricingQuery]);
 
+  const refreshLocal = useCallback(async () => {
+    await localQuotaQuery.refetch();
+  }, [localQuotaQuery]);
+  const refreshActive = isOfficial ? refreshAnalytics : refreshLocal;
+
   const handleCalculationModeChange = useCallback(
     (mode: CodexCycleCapacityCalculationMode) => {
       setCalculationMode(mode);
       if (
+        autoAllowed &&
         mode === "analytics" &&
         // 同时覆盖一小时自然过期和账号切换触发的显式失效。
         officialQuery.isStale &&
@@ -143,12 +147,21 @@ export function CodexCycleCapacitySection({
         void refreshAnalytics();
       }
     },
-    [officialQuery.isFetching, officialQuery.isStale, refreshAnalytics],
+    [
+      autoAllowed,
+      officialQuery.isFetching,
+      officialQuery.isStale,
+      refreshAnalytics,
+    ],
   );
 
   const retryQuota = useCallback(() => {
-    void Promise.all([localQuotaQuery.refetch(), officialQuery.refetch()]);
-  }, [localQuotaQuery, officialQuery]);
+    if (autoAllowed) {
+      void Promise.all([localQuotaQuery.refetch(), officialQuery.refetch()]);
+    } else {
+      void refreshActive();
+    }
+  }, [autoAllowed, localQuotaQuery, officialQuery, refreshActive]);
 
   const switchCalculationMode = useCallback(
     (mode: CodexCycleCapacityCalculationMode) => {
@@ -165,9 +178,13 @@ export function CodexCycleCapacitySection({
       : null;
   if (!enabled) return null;
   if (!activeSnapshot || !quota?.success) {
-    // 失败时保留入口本身：只隐藏具体数字，避免整块消失后连模式开关都找不回。
-    const alternate: CodexCycleCapacityCalculationMode =
-      calculationMode === "analytics" ? "local" : "analytics";
+    const manualIdle =
+      !activeQuery.isError && isManualIdle(quotaPolicy, activeQuery);
+    const waiting = !activeQuery.isError && activeQuery.data === undefined;
+    const loading = waiting && !manualIdle;
+    const alternate: CodexCycleCapacityCalculationMode = isOfficial
+      ? "local"
+      : "analytics";
     return (
       <section
         className="rounded-xl border border-border/60 bg-card px-4 py-3"
@@ -179,7 +196,11 @@ export function CodexCycleCapacitySection({
               {t("usage.cycleCapacity.title", "Codex 周期等效容量（估算）")}
             </span>
             <span className="text-xs text-muted-foreground">
-              {t("usage.cycleCapacity.quotaUnavailable", "额度查询失败")}
+              {manualIdle
+                ? t("quota.manualIdle")
+                : loading
+                  ? t("common.loading", "加载中...")
+                  : t("usage.cycleCapacity.quotaUnavailable", "额度查询失败")}
             </span>
           </div>
           <div className="flex items-center gap-2">
@@ -197,18 +218,23 @@ export function CodexCycleCapacitySection({
               variant="outline"
               size="sm"
               data-testid="capacity-retry"
+              disabled={activeQuery.isFetching}
               onClick={retryQuota}
             >
-              {t("usage.cycleCapacity.retry", "重试")}
+              {waiting
+                ? t("common.refresh", "刷新")
+                : t("usage.cycleCapacity.retry", "重试")}
             </Button>
           </div>
         </div>
-        <p className="mt-2 text-xs leading-5 text-muted-foreground">
-          {t(
-            "usage.cycleCapacity.quotaUnavailableHint",
-            "Codex 登录可能已过期或网络不可用。请在终端运行 codex login 后重试。",
-          )}
-        </p>
+        {waiting ? null : (
+          <p className="mt-2 text-xs leading-5 text-muted-foreground">
+            {t(
+              "usage.cycleCapacity.quotaUnavailableHint",
+              "Codex 登录可能已过期或网络不可用。请在终端运行 codex login 后重试。",
+            )}
+          </p>
+        )}
       </section>
     );
   }
@@ -232,10 +258,10 @@ export function CodexCycleCapacitySection({
       quotaSamples={quotaSamples}
       calculationMode={calculationMode}
       onCalculationModeChange={handleCalculationModeChange}
-      onRefreshAnalytics={refreshAnalytics}
-      isRefreshingAnalytics={Boolean(
-        officialQuery.isFetching || pricingQuery.isFetching,
-      )}
+      onRefresh={isOfficial || manualOnly ? refreshActive : undefined}
+      isRefreshing={
+        activeQuery.isFetching || (isOfficial && pricingQuery.isFetching)
+      }
     />
   );
 }
